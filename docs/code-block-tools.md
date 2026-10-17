@@ -508,8 +508,9 @@ tool-version-definition = "uv.lock"
 on-tool-version-mismatch = "warn"
 ```
 
-This release supports exact resolved versions from `uv.lock` for Ruff, Black,
-djLint and SQLFluff. All built-in modes and custom definitions invoking those
+Select `"uv.lock"` for exact resolved versions or `"pyproject.toml"` for declared
+constraints. Both sources support Ruff, Black, djLint and SQLFluff.
+All built-in modes and custom definitions invoking those
 executables are supported, including explicit paths with the corresponding
 basename. Windows also accepts their `.exe` names, without case sensitivity.
 Other executables and wrappers such as `uv run` or `python -m` cannot be mapped
@@ -520,12 +521,59 @@ formatters still require verification.
 
 Discovery starts at the document directory and uses the same project boundaries
 as executable discovery above. Stdin processing does not execute code-block tools. The nearest
-`uv.lock` is authoritative: an absent package or invalid lockfile does not cause
-a search for an outer lockfile. Schema version 1 is supported, including additive
+selected metadata file is authoritative: an absent package or invalid file does
+not cause a search for an outer file or another metadata source.
+
+### Resolved versions: `uv.lock`
+
+Schema version 1 is supported, including additive
 fields and revisions. Multiple entries for a package must resolve to the same
 normalized Python version; different versions for different environments are
 ambiguous. Comparison preserves prerelease, development, post-release, epoch and
 local labels; equivalent release padding such as `1.0` and `1.0.0` is accepted.
+
+### Declared constraints: `pyproject.toml`
+
+```toml
+[code-block-tools]
+enabled = true
+tool-version-definition = "pyproject.toml"
+on-tool-version-mismatch = "fail"
+```
+
+rumdl combines constraints for each supported tool from:
+
+- `project.dependencies` and every `project.optional-dependencies` array;
+- every `dependency-groups` array;
+- `tool.uv.dev-dependencies` and `tool.uv.constraint-dependencies`;
+- `tool.ruff.required-version` and `tool.black.required-version` (also
+  `tool.black.required_version`).
+
+Every declaration for the tool must accept the installed version. Groups and
+extras are inspected together, regardless of which are installed or active.
+Incompatible declarations therefore reject every version. `include-group`
+directives need no expansion because all groups are already inspected; rumdl
+does not validate their references or infer UV group conflicts.
+
+Dependency names are case insensitive. Extras, parentheses, trailing commas and
+PEP 440 version ranges are supported. Matching follows PEP 440 for an already
+installed version, including prereleases and local labels. An unconstrained
+dependency alone is unresolved, but it can accompany another constraint.
+Ruff accepts a version or a PEP 440 range. Black accepts its native major-version
+or exact text match: `25` accepts `25.1.0`, while `25.1` does not. Integer Black
+settings are accepted; floats, booleans and conflicting key aliases are unresolved.
+
+URLs, environment markers (even unconditional expressions), arbitrary equality
+(`===`), malformed declarations for the tool, and UV overrides for the tool are
+unresolved. Dynamic `dependencies` or `optional-dependencies` make verification
+unresolved because their complete constraints are unknown. Malformed metadata
+structure is unresolved; unrelated dependency strings and unrelated tool settings
+are ignored. This reader does not resolve an environment or infer constraints
+from Poetry, PDM, Hatch, `build-system.requires`, separate Ruff configuration
+files or Ruff `extend` chains. Tools still perform their own configuration
+discovery, which can differ from rumdl's nearest-file discovery.
+
+### Verification policy and execution
 
 | Policy           | Behavior on mismatch or unresolved version                                   |
 | ---------------- | ---------------------------------------------------------------------------- |
@@ -548,16 +596,16 @@ rumdl probes the selected executable with `--version`, independently of its
 configured lint/format arguments. Supported output formats identify the tool and
 its full Python package version. A probe has a limit of 4096 bytes per output
 stream and the smaller of the configured timeout and 10 seconds; `timeout = 0`
-still gives probes a 10-second limit. Lockfiles larger than 64 MiB are unresolved.
-Raw lockfile contents and unrecognized process output are not quoted in errors.
+still gives probes a 10-second limit. Metadata files larger than 64 MiB are unresolved.
+Raw metadata contents and unrecognized process output are not quoted in errors.
 
 Metadata and version-verification probes are shared within one invocation. Each selected executable
 and probe timeout is checked once, with fresh verification on the next
 invocation, even when document checks are cached. Probes do not count as code
 checks for `on-no-tools-run`. Some built-in modes also perform their existing
 capability probes. Verification never installs tools, selects a runner,
-changes the configured command, or modifies metadata. Other metadata sources,
-including `auto` and `pyproject.toml`, are not supported yet.
+changes the configured command, or modifies metadata. Automatic source selection
+and pre-commit/prek configuration sources are not supported yet.
 
 ## Missing Language/Tool Handling
 

@@ -432,6 +432,11 @@
           "description": "Exact resolved Python package versions in the nearest project lockfile.",
           "type": "string",
           "const": "uv.lock"
+        },
+        {
+          "description": "Declared Python dependency and tool version constraints.",
+          "type": "string",
+          "const": "pyproject.toml"
         }
       ]
     },

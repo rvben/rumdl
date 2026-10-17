@@ -12,24 +12,47 @@ use std::time::{Duration, Instant};
 use pep440_rs::Version;
 use serde::Deserialize;
 
-use super::config::ToolDefinition;
+use super::config::{ToolDefinition, ToolVersionDefinition};
 use super::executor::ToolExecutor;
 
+mod pyproject;
+
 type Cache<K, V> = Mutex<HashMap<K, Arc<OnceLock<V>>>>;
-type LockedVersions = BTreeMap<String, Option<Version>>;
+type ExpectedVersions = BTreeMap<String, Option<ExpectedVersion>>;
+
+#[derive(Debug, PartialEq)]
+enum ExpectedVersion {
+    Exact(Version),
+    Constraints(pyproject::Constraints),
+}
+
+impl ExpectedVersion {
+    fn is_resolved(&self) -> bool {
+        match self {
+            Self::Exact(_) => true,
+            Self::Constraints(constraints) => constraints.is_resolved(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ProbedVersion {
+    version: Version,
+    raw: String,
+}
 
 /// Snapshots live only for one invocation (or one direct processor).
 #[derive(Debug, Default)]
 pub(super) struct VersionState {
-    discovery: Cache<PathBuf, Result<PathBuf, DiscoveryFailure>>,
-    locks: Cache<PathBuf, Result<LockedVersions, String>>,
-    probes: Cache<(PathBuf, String, u64), Result<Version, String>>,
+    discovery: Cache<(ToolVersionDefinition, PathBuf), Result<PathBuf, DiscoveryFailure>>,
+    metadata: Cache<(ToolVersionDefinition, PathBuf), Result<ExpectedVersions, String>>,
+    probes: Cache<(PathBuf, String, u64), Result<ProbedVersion, String>>,
 }
 
 #[derive(Debug)]
 struct DiscoveryFailure {
     source: PathBuf,
-    message: &'static str,
+    message: String,
 }
 
 pub(super) struct VersionFailure {
@@ -65,13 +88,14 @@ impl VersionState {
         &self,
         executor: &ToolExecutor,
         tool: &ToolDefinition,
+        source: ToolVersionDefinition,
         timeout: u64,
     ) -> Result<(), VersionFailure> {
         let binary = tool.command.first().map_or("", String::as_str);
         let root = executor.project_root();
         let failure = |message: String| VersionFailure {
             // Tuple boundaries keep distinct warning facts distinct across directories.
-            key: format!("tool-version:{:?}", (binary, &message)),
+            key: format!("tool-version:{:?}", (source, binary, &message)),
             message,
         };
         let name = Path::new(binary)
@@ -89,31 +113,40 @@ impl VersionState {
                 "Cannot resolve a Python package version for tool '{name}'"
             )));
         }
-        let discovered = slot(&self.discovery, root.to_path_buf());
+        let discovered = slot(&self.discovery, (source, root.to_path_buf()));
         let lockfile = discovered
-            .get_or_init(|| find_lockfile(root))
+            .get_or_init(|| find_metadata(root, source))
             .as_ref()
             .map_err(|problem| VersionFailure {
-                key: format!("tool-version:{:?}", (&problem.source, binary, problem.message)),
-                message: problem.message.into(),
+                key: format!("tool-version:{:?}", (source, &problem.source, binary, &problem.message)),
+                message: problem.message.clone(),
             })?;
         let resolved = executor
             .resolve_binary(binary)
             .ok_or_else(|| failure(format!("Cannot resolve executable for '{name}' version verification")))?;
         let failure = |message: String| VersionFailure {
-            key: format!("tool-version:{:?}", (lockfile, &resolved, &message)),
+            key: format!("tool-version:{:?}", (source, lockfile, &resolved, &message)),
             message,
         };
-        let parsed = slot(&self.locks, lockfile.clone());
+        let parsed = slot(&self.metadata, (source, lockfile.clone()));
         let versions = parsed
-            .get_or_init(|| read_lockfile(lockfile))
+            .get_or_init(|| read_metadata(lockfile, source))
             .as_ref()
             .map_err(|message| failure(message.clone()))?;
-        let expected = versions.get(&name).and_then(Option::as_ref).ok_or_else(|| {
-            failure(format!(
-                "Cannot resolve one unambiguous version for '{name}' in uv.lock"
-            ))
-        })?;
+        let expected = versions
+            .get(&name)
+            .and_then(Option::as_ref)
+            .filter(|expected| expected.is_resolved())
+            .ok_or_else(|| {
+                failure(match source {
+                    ToolVersionDefinition::UvLock => {
+                        format!("Cannot resolve one unambiguous version for '{name}' in uv.lock")
+                    }
+                    ToolVersionDefinition::Pyproject => {
+                        format!("Cannot resolve declared version constraints for '{name}' in pyproject.toml")
+                    }
+                })
+            })?;
         // The mutex only protects slot lookup. Slow probes initialize their own
         // OnceLock after it is released, leaving unrelated tools independent.
         let timeout = if timeout == 0 { 10_000 } else { timeout.min(10_000) };
@@ -122,22 +155,36 @@ impl VersionState {
             .get_or_init(|| probe_version(&resolved, &name, timeout))
             .as_ref()
             .map_err(|message| failure(message.clone()))?;
-        if actual != expected {
-            return Err(failure(format!(
-                "Tool '{name}' version mismatch: expected {expected} from uv.lock, found {actual}"
-            )));
+        match expected {
+            ExpectedVersion::Exact(expected) if expected != &actual.version => {
+                return Err(failure(format!(
+                    "Tool '{name}' version mismatch: expected {expected} from {}, found {}",
+                    source.filename(),
+                    actual.version
+                )));
+            }
+            ExpectedVersion::Constraints(constraints) => {
+                if let Some(reason) = constraints.mismatch(actual) {
+                    return Err(failure(format!(
+                        "Tool '{name}' version mismatch: found {}; {reason} from {}",
+                        actual.version,
+                        source.filename()
+                    )));
+                }
+            }
+            ExpectedVersion::Exact(_) => {}
         }
         Ok(())
     }
 }
 
-fn find_lockfile(root: &Path) -> Result<PathBuf, DiscoveryFailure> {
+fn find_metadata(root: &Path, source: ToolVersionDefinition) -> Result<PathBuf, DiscoveryFailure> {
     let directories = super::binary::project_directories(root);
     for directory in &directories {
-        let candidate = directory.join("uv.lock");
+        let candidate = directory.join(source.filename());
         let failure = || DiscoveryFailure {
             source: candidate.clone(),
-            message: "Cannot read uv.lock for tool version verification",
+            message: format!("Cannot read {} for tool version verification", source.filename()),
         };
         match candidate.symlink_metadata() {
             Ok(_) => return Ok(candidate.canonicalize().unwrap_or(candidate)),
@@ -147,22 +194,36 @@ fn find_lockfile(root: &Path) -> Result<PathBuf, DiscoveryFailure> {
     }
     Err(DiscoveryFailure {
         source: directories.last().copied().unwrap_or(root).to_path_buf(),
-        message: "Cannot resolve tool versions: uv.lock not found within the project",
+        message: format!(
+            "Cannot resolve tool versions: {} not found within the project",
+            source.filename()
+        ),
     })
 }
 
-fn read_lockfile(path: &Path) -> Result<LockedVersions, String> {
-    const MAX_LOCK_BYTES: u64 = 64 * 1024 * 1024;
-    let file = std::fs::File::open(path).map_err(|_| "Cannot read uv.lock for tool version verification")?;
+fn read_metadata(path: &Path, source: ToolVersionDefinition) -> Result<ExpectedVersions, String> {
+    const MAX_METADATA_BYTES: u64 = 64 * 1024 * 1024;
+    let read_error = || format!("Cannot read {} for tool version verification", source.filename());
+    let file = std::fs::File::open(path).map_err(|_| read_error())?;
     let mut text = String::new();
-    file.take(MAX_LOCK_BYTES + 1)
+    file.take(MAX_METADATA_BYTES + 1)
         .read_to_string(&mut text)
-        .map_err(|_| "Cannot read uv.lock for tool version verification")?;
-    if text.len() as u64 > MAX_LOCK_BYTES {
-        return Err("Cannot resolve tool versions: uv.lock exceeds 64 MiB".into());
+        .map_err(|_| read_error())?;
+    if text.len() as u64 > MAX_METADATA_BYTES {
+        return Err(format!(
+            "Cannot resolve tool versions: {} exceeds 64 MiB",
+            source.filename()
+        ));
     }
+    match source {
+        ToolVersionDefinition::UvLock => parse_lockfile(&text),
+        ToolVersionDefinition::Pyproject => pyproject::parse(&text),
+    }
+}
+
+fn parse_lockfile(text: &str) -> Result<ExpectedVersions, String> {
     // Parse errors can contain arbitrary lockfile values. Do not quote them.
-    let lock: UvLock = toml::from_str(&text).map_err(|_| "Cannot parse uv.lock for tool version verification")?;
+    let lock: UvLock = toml::from_str(text).map_err(|_| "Cannot parse uv.lock for tool version verification")?;
     if lock.version != 1 {
         return Err("Cannot resolve tool versions: unsupported uv.lock schema version".into());
     }
@@ -173,7 +234,8 @@ fn read_lockfile(path: &Path) -> Result<LockedVersions, String> {
             .version
             .as_ref()
             .and_then(toml::Value::as_str)
-            .and_then(|version| version.parse::<Version>().ok());
+            .and_then(|version| version.parse::<Version>().ok())
+            .map(ExpectedVersion::Exact);
         versions
             .entry(name)
             .and_modify(|previous| {
@@ -189,7 +251,7 @@ fn read_lockfile(path: &Path) -> Result<LockedVersions, String> {
 /// Probes have a finite deadline and bounded pipes independent of normal tools.
 /// Pipe EOF is also bounded by the deadline. Reader threads are abandoned on
 /// failure so descendants retaining a pipe cannot delay the caller further.
-fn probe_version(resolved: &Path, name: &str, timeout: u64) -> Result<Version, String> {
+fn probe_version(resolved: &Path, name: &str, timeout: u64) -> Result<ProbedVersion, String> {
     let mut child = Command::new(resolved)
         .arg("--version")
         .stdin(Stdio::null())
@@ -249,7 +311,7 @@ fn read_probe_pipe(pipe: impl Read) -> Result<Vec<u8>, &'static str> {
     Ok(bytes)
 }
 
-fn parse_version_output(name: &str, output: &str) -> Option<Version> {
+fn parse_version_output(name: &str, output: &str) -> Option<ProbedVersion> {
     let mut lines = output.trim().lines();
     let first = lines.next()?.trim();
     let version = if name == "ruff" {
@@ -279,5 +341,8 @@ fn parse_version_output(name: &str, output: &str) -> Option<Version> {
     } else if lines.next().is_some() {
         return None;
     }
-    version.parse().ok()
+    Some(ProbedVersion {
+        version: version.parse().ok()?,
+        raw: version.into(),
+    })
 }

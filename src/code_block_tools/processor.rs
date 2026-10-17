@@ -525,13 +525,16 @@ impl<'a> CodeBlockToolProcessor<'a> {
         tool: &super::config::ToolDefinition,
         line: usize,
     ) -> Result<Option<CodeBlockDiagnostic>, ProcessorError> {
-        if self.config.tool_version_definition.is_none() || self.config.on_tool_version_mismatch == OnMissing::Ignore {
+        let Some(source) = self.config.tool_version_definition else {
+            return Ok(None);
+        };
+        if self.config.on_tool_version_mismatch == OnMissing::Ignore {
             return Ok(None);
         }
         if let Err(failure) = self
             .run_state
             .versions
-            .verify(&self.executor, tool, self.config.timeout)
+            .verify(&self.executor, tool, source, self.config.timeout)
         {
             let message = if self.config.values_withheld {
                 "Configured tool version verification failed (details withheld)".into()

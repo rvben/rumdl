@@ -1,0 +1,297 @@
+[
+  {
+    "specifier": ">=0.11,<0.12",
+    "version": "0.11.2",
+    "matches": true
+  },
+  {
+    "specifier": ">=0.11,<0.12",
+    "version": "0.12",
+    "matches": false
+  },
+  {
+    "specifier": "==1.0",
+    "version": "1.0.0",
+    "matches": true
+  },
+  {
+    "specifier": "==1.0",
+    "version": "1.0+vendor.1",
+    "matches": true
+  },
+  {
+    "specifier": "==1.0+vendor.1",
+    "version": "1.0+vendor.2",
+    "matches": false
+  },
+  {
+    "specifier": "==1.0+vendor.1",
+    "version": "1.0+vendor.1",
+    "matches": true
+  },
+  {
+    "specifier": "!=1.0",
+    "version": "1.0+vendor.1",
+    "matches": false
+  },
+  {
+    "specifier": "!=1.0",
+    "version": "1.1",
+    "matches": true
+  },
+  {
+    "specifier": "==1.2.*",
+    "version": "1.2rc1",
+    "matches": true
+  },
+  {
+    "specifier": "==1.2.*",
+    "version": "1.3",
+    "matches": false
+  },
+  {
+    "specifier": "!=1.2.*",
+    "version": "1.2.9",
+    "matches": false
+  },
+  {
+    "specifier": "!=1.2.*",
+    "version": "1.3",
+    "matches": true
+  },
+  {
+    "specifier": "~=1.4",
+    "version": "1.9",
+    "matches": true
+  },
+  {
+    "specifier": "~=1.4",
+    "version": "2",
+    "matches": false
+  },
+  {
+    "specifier": "~=1.4.5",
+    "version": "1.4.9",
+    "matches": true
+  },
+  {
+    "specifier": "~=1.4.5",
+    "version": "1.5",
+    "matches": false
+  },
+  {
+    "specifier": ">=1!1.0,<2!0",
+    "version": "1!2.0",
+    "matches": true
+  },
+  {
+    "specifier": ">=1!1.0,<2!0",
+    "version": "2.0",
+    "matches": false
+  },
+  {
+    "specifier": ">=1.0",
+    "version": "1.1rc1",
+    "matches": true
+  },
+  {
+    "specifier": ">=1.0",
+    "version": "1.0rc1",
+    "matches": false
+  },
+  {
+    "specifier": "<1.0",
+    "version": "1.0rc1",
+    "matches": false
+  },
+  {
+    "specifier": "<1.0",
+    "version": "0.9rc1",
+    "matches": true
+  },
+  {
+    "specifier": ">1.0",
+    "version": "1.0.post1",
+    "matches": false
+  },
+  {
+    "specifier": ">1.0",
+    "version": "1.0+local",
+    "matches": false
+  },
+  {
+    "specifier": ">1.0",
+    "version": "1.1.dev1",
+    "matches": true
+  },
+  {
+    "specifier": "<=1.0",
+    "version": "1.0+local",
+    "matches": true
+  },
+  {
+    "specifier": "<=1.0",
+    "version": "1.0.post1",
+    "matches": false
+  },
+  {
+    "specifier": ">=1.0",
+    "version": "1.0+local",
+    "matches": true
+  },
+  {
+    "specifier": "==1.0.post1",
+    "version": "1.0.post1",
+    "matches": true
+  },
+  {
+    "specifier": "==1.0.post1",
+    "version": "1.0",
+    "matches": false
+  },
+  {
+    "specifier": "==1.0.dev1",
+    "version": "1.0.dev1",
+    "matches": true
+  },
+  {
+    "specifier": "==1.0.dev1",
+    "version": "1.0.dev2",
+    "matches": false
+  },
+  {
+    "specifier": ">=1.0rc1,<1.1",
+    "version": "1.0rc2",
+    "matches": true
+  },
+  {
+    "specifier": ">=1.0rc1,<1.0",
+    "version": "1.0rc2",
+    "matches": false
+  },
+  {
+    "specifier": ">=1.0,!=1.2,<2",
+    "version": "1.2",
+    "matches": false
+  },
+  {
+    "specifier": ">=1.0,!=1.2,<2",
+    "version": "1.3",
+    "matches": true
+  },
+  {
+    "specifier": "<1.0",
+    "version": "1.0.0rc1",
+    "matches": false
+  },
+  {
+    "specifier": "<1.0",
+    "version": "1.0.0.dev1",
+    "matches": false
+  },
+  {
+    "specifier": ">1.0",
+    "version": "1.0.0.post1",
+    "matches": false
+  },
+  {
+    "specifier": "<1.0",
+    "version": "1.0.dev1",
+    "matches": false
+  },
+  {
+    "specifier": "<1.0rc1",
+    "version": "1.0a1",
+    "matches": true
+  },
+  {
+    "specifier": ">1.0.post1",
+    "version": "1.0.post2",
+    "matches": true
+  },
+  {
+    "specifier": "==1.2.*",
+    "version": "1",
+    "matches": false
+  },
+  {
+    "specifier": "!=1.2.*",
+    "version": "1",
+    "matches": true
+  },
+  {
+    "specifier": "==1.0.*",
+    "version": "1",
+    "matches": true
+  },
+  {
+    "specifier": "!=1.0.*",
+    "version": "1",
+    "matches": false
+  },
+  {
+    "specifier": "==1.0.1.*",
+    "version": "1",
+    "matches": false
+  },
+  {
+    "specifier": "<1!1.0",
+    "version": "1.0rc1",
+    "matches": true
+  },
+  {
+    "specifier": "<1.0.post1",
+    "version": "1.0rc1",
+    "matches": true
+  },
+  {
+    "specifier": "<1.0.post1",
+    "version": "1.0.post1.dev1",
+    "matches": false
+  },
+  {
+    "specifier": "<1.0rc1",
+    "version": "1.0a1+local",
+    "matches": true
+  },
+  {
+    "specifier": ">1.0a1",
+    "version": "1.0a2.post1",
+    "matches": true
+  },
+  {
+    "specifier": ">1.0a1",
+    "version": "1.0a1.post1",
+    "matches": false
+  },
+  {
+    "specifier": ">1.0.dev1",
+    "version": "1.0.post1",
+    "matches": true
+  },
+  {
+    "specifier": ">1.0.post1",
+    "version": "1.0.post2.dev0",
+    "matches": true
+  },
+  {
+    "specifier": ">1.0a1",
+    "version": "1.0a1+local",
+    "matches": false
+  },
+  {
+    "specifier": "<1.0.dev5",
+    "version": "1.0.dev3",
+    "matches": true
+  },
+  {
+    "specifier": "<1.0.post1.dev5",
+    "version": "1.0.post1.dev3",
+    "matches": true
+  },
+  {
+    "specifier": ">1.0rc1",
+    "version": "1.0rc1.post1",
+    "matches": false
+  }
+]

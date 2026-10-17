@@ -172,11 +172,23 @@ impl Default for CodeBlockToolsConfig {
 }
 
 /// Supported authoritative sources for external tool versions.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, schemars::JsonSchema)]
 pub enum ToolVersionDefinition {
     /// Exact resolved Python package versions in the nearest project lockfile.
     #[serde(rename = "uv.lock")]
     UvLock,
+    /// Declared Python dependency and tool version constraints.
+    #[serde(rename = "pyproject.toml")]
+    Pyproject,
+}
+
+impl ToolVersionDefinition {
+    pub(super) fn filename(self) -> &'static str {
+        match self {
+            Self::UvLock => "uv.lock",
+            Self::Pyproject => "pyproject.toml",
+        }
+    }
 }
 
 /// Preference for resolving an external executable. Explicit paths bypass this.
