@@ -1,12 +1,7 @@
 name: CodSpeed
 
-# Runs the criterion benches under CodSpeed's CPU simulation, which counts
-# instructions instead of timing wall clock, so results are stable enough to
-# compare every pull request against main. Pushes to main record the baseline.
+# Run the Criterion benchmarks on demand with CodSpeed's CPU simulation.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 concurrency:
