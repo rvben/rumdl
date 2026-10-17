@@ -11,6 +11,8 @@ pub enum HeadingCapStyle {
     SentenceCase,
     /// ALL CAPS - all letters uppercase
     AllCaps,
+    /// Infer a supported style independently for each document.
+    Consistent,
 }
 
 impl Serialize for HeadingCapStyle {
@@ -22,6 +24,7 @@ impl Serialize for HeadingCapStyle {
             HeadingCapStyle::TitleCase => serializer.serialize_str("title-case"),
             HeadingCapStyle::SentenceCase => serializer.serialize_str("sentence-case"),
             HeadingCapStyle::AllCaps => serializer.serialize_str("all-caps"),
+            HeadingCapStyle::Consistent => serializer.serialize_str("consistent"),
         }
     }
 }
@@ -37,8 +40,9 @@ impl<'de> Deserialize<'de> for HeadingCapStyle {
             "title_case" => Ok(HeadingCapStyle::TitleCase),
             "sentence_case" => Ok(HeadingCapStyle::SentenceCase),
             "all_caps" => Ok(HeadingCapStyle::AllCaps),
+            "consistent" => Ok(HeadingCapStyle::Consistent),
             _ => Err(serde::de::Error::custom(format!(
-                "Invalid heading capitalization style: {s}. Valid options: title-case, sentence-case, all-caps"
+                "Invalid heading capitalization style: {s}. Valid options: title-case, sentence-case, all-caps, consistent"
             ))),
         }
     }

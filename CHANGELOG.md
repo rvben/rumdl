@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- MD063 `style = "consistent"` infers heading capitalization per document while
+  respecting ignored words, proper names, level filters, and inline disables.
 - Independent code blocks can share the existing worker pool when error policies
   permit parallel execution, preserving tool order and applying formatted
   replacements together from their original source ranges.
