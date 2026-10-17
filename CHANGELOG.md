@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- MD013 semantic reflow joins wrapped list and blockquote prose consistently
+  with paragraphs, including items containing only one semantic sentence.
+
+### Fixed
+
+- MD013 semantic reflow keeps balanced parenthetical asides together during
+  sentence detection and counts them as single units in paragraph diagnostics.
+  Overlong asides prefer inner sentence boundaries before further width wrapping;
+  explicit hard breaks remain separate reflow segments.
+
 ## [0.3.0](https://github.com/rvben/rumdl/compare/v0.2.79...v0.3.0) - 2026-10-17
 
 ### Changed

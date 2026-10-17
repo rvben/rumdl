@@ -104,6 +104,8 @@ fn code_span_wraps_losslessly(content: &str) -> bool {
 /// How the inline structure nested inside a span's content constrains where a
 /// line break may land.
 struct NestedStructure {
+    /// Balanced prose asides, held together only by semantic sentence detection.
+    parentheticals: Vec<(usize, usize)>,
     /// Ranges a break may never land inside, merged into outermost,
     /// non-overlapping ranges. The whitespace in a code span is literal, and
     /// the whitespace in a link destination or an HTML tag is structural, so
@@ -309,6 +311,7 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
     // by the sort above, and the code spans by the parse, since code spans do
     // not nest. A window onto a paragraph bisects them on that.
     NestedStructure {
+        parentheticals: Vec::new(),
         atomic: merge_ranges(atomic),
         markers: merge_ranges(markers),
         marker_closers: merge_ranges(marker_closers),
@@ -850,6 +853,7 @@ impl ParagraphStructure<'_> {
                 .collect()
         };
         NestedStructure {
+            parentheticals: inside(&self.structure.parentheticals),
             atomic: inside(&self.structure.atomic),
             markers: inside(&self.structure.markers),
             marker_closers: inside(&self.structure.marker_closers),
@@ -1353,6 +1357,31 @@ pub fn split_into_sentences(
     )
 }
 
+/// Count units in the supplied text, with balanced asides held together. This
+/// count does not model subsequent width wrapping or hard-break segmentation.
+pub(crate) fn semantic_sentence_count(
+    text: &str,
+    defined_references: Option<&HashSet<String>>,
+    require_sentence_capital: bool,
+    cjk_soft_break: CjkSoftBreak,
+    abbreviations: &Option<Vec<String>>,
+) -> usize {
+    let structure = semantic_sentence_structure(text, defined_references);
+    split_into_sentence_ranges(
+        text,
+        &get_abbreviations(abbreviations),
+        require_sentence_capital,
+        cjk_soft_break,
+        defined_references,
+        Some(ParagraphStructure {
+            text,
+            structure: &structure,
+            base: 0,
+        }),
+    )
+    .len()
+}
+
 /// Internal function to split text into sentences with a pre-computed abbreviations set
 /// Use this when calling multiple times in a loop to avoid repeatedly computing the set
 ///
@@ -1412,6 +1441,7 @@ fn split_into_sentence_ranges(
     // and the link-like ones a sentence may open with. A part of a paragraph
     // takes them from the paragraph's parse; only a whole text is parsed here.
     let NestedStructure {
+        parentheticals,
         atomic,
         links,
         code_spans,
@@ -1461,7 +1491,10 @@ fn split_into_sentence_ranges(
             .peek()
             .is_some_and(|&&(start, end)| byte_idx >= start && byte_idx < end);
 
-        if !in_atomic && let Some(cut) = sentence_boundary(&st, pos, abbreviations, require_sentence_capital) {
+        if !in_atomic
+            && let Some(cut) = sentence_boundary(&st, pos, abbreviations, require_sentence_capital)
+            && !inside_parenthetical(char_offsets[cut], &parentheticals)
+        {
             // Everything from the ender to the cut is glued to the sentence,
             // and none of it ends one, so the walk resumes past the cut.
             pos = next_sentence_start(cut);
@@ -1518,6 +1551,7 @@ fn sentence_structure(text: &str, defined_references: Option<&HashSet<String>>) 
     let holds_emphasis = text.contains(['*', '_', '~']);
     if !holds_construct && !holds_emphasis {
         return NestedStructure {
+            parentheticals: Vec::new(),
             atomic: Vec::new(),
             markers: Vec::new(),
             marker_closers: Vec::new(),
@@ -1526,6 +1560,59 @@ fn sentence_structure(text: &str, defined_references: Option<&HashSet<String>>) 
         };
     }
     nested_structure(text, defined_references, false)
+}
+
+/// Semantic reflow treats a balanced prose aside as one unit during sentence
+/// detection. The width cascade can still wrap it if the aside itself is long.
+/// Read the whole paragraph so a group spanning inline elements is recognised.
+fn semantic_sentence_structure(text: &str, defined_references: Option<&HashSet<String>>) -> NestedStructure {
+    let mut structure = sentence_structure(text, defined_references);
+    let (Some(open), Some(close)) = (text.find('('), text.rfind(')')) else {
+        return structure;
+    };
+    // Without a terminator between any pair of parentheses there is no
+    // sentence cut to protect, so ordinary asides need no stack or ranges.
+    if open >= close || !text[open..close].contains(['.', '!', '?', '。', '！', '？']) {
+        return structure;
+    }
+    let mut atomic = structure.atomic.iter().peekable();
+    let mut opens = Vec::new();
+    let mut groups = Vec::new();
+    let mut escaped = false;
+    for (offset, character) in text.char_indices() {
+        while atomic.peek().is_some_and(|&&(_, end)| end <= offset) {
+            atomic.next();
+        }
+        if atomic
+            .peek()
+            .is_some_and(|&&(start, end)| start <= offset && offset < end)
+        {
+            escaped = false;
+            continue;
+        }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match character {
+            '\\' => escaped = true,
+            '(' => opens.push(offset),
+            ')' => {
+                if let Some(start) = opens.pop() {
+                    groups.push((start, offset + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+    structure.parentheticals = merge_ranges(groups);
+    structure
+}
+
+/// A cut at a group's closing edge leaves the group intact and is allowed.
+fn inside_parenthetical(offset: usize, groups: &[(usize, usize)]) -> bool {
+    let past = groups.partition_point(|&(start, _)| start < offset);
+    past > 0 && offset < groups[past - 1].1
 }
 
 /// Check if a line is a horizontal rule (---, ___, ***)
@@ -3531,7 +3618,11 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
     // after them, so the sentence breaks on the wrong side of a run or inside
     // a link.
     let (paragraph_text, piece_ranges) = elements_source_text(elements);
-    let paragraph = sentence_structure(&paragraph_text, options.defined_references.as_ref());
+    let paragraph = if options.semantic_line_breaks {
+        semantic_sentence_structure(&paragraph_text, options.defined_references.as_ref())
+    } else {
+        sentence_structure(&paragraph_text, options.defined_references.as_ref())
+    };
     let structure_from = |base: usize| ParagraphStructure {
         text: &paragraph_text,
         structure: &paragraph,
@@ -3567,6 +3658,23 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
 
     for (idx, element) in elements.iter().enumerate() {
         let (line_start, line_end, structure) = absorb(line.unwrap_or(piece_ranges[idx].0), piece_ranges[idx]);
+        // Once a held line has entered a protected aside, intervening pieces
+        // cannot contain a sentence cut. Read the held bytes again only when
+        // the group closes, rather than re-scanning a growing paragraph for
+        // every inline code/emphasis element inside the group.
+        if !paragraph.parentheticals.is_empty() && line.is_some() && idx > 0 {
+            let previous_end = piece_ranges[idx - 1].1;
+            let past = paragraph
+                .parentheticals
+                .partition_point(|&(start, _)| start < previous_end);
+            if past > 0 {
+                let group_end = paragraph.parentheticals[past - 1].1;
+                if previous_end < group_end && line_end < group_end {
+                    line = Some(line_start);
+                    continue;
+                }
+            }
+        }
         let combined = &paragraph_text[line_start..line_end];
 
         // Text and emphasis are absorbed the same way. An emphasis span is
@@ -3610,32 +3718,27 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
             let next_bracketed = elements
                 .get(idx + 1)
                 .filter(|next| next.opens_with_bracket())
-                .map(|next| {
-                    let trailing = &combined[combined.trim_end_matches(is_breakable_whitespace).len()..];
-                    let gap = if trailing.contains('\n') {
-                        "\n"
-                    } else {
-                        source_gap_before(elements, idx + 1)
-                    };
-                    (gap, next.to_string())
-                });
+                .map(|_| piece_ranges[idx + 1]);
             let closes_before_next = |sentence: &str| -> bool {
-                if glued_to_next {
+                let sentence_end = line_start + combined.trim_end_matches(is_breakable_whitespace).len();
+                if glued_to_next || inside_parenthetical(sentence_end, &paragraph.parentheticals) {
                     return false;
                 }
-                let Some((gap, next_str)) = &next_bracketed else {
+                let Some((next_start, next_end)) = next_bracketed else {
                     return true;
                 };
-                let mut probe = sentence.to_string();
-                push_source_gap(&mut probe, gap);
-                probe.push_str(next_str);
+                // Probe the paragraph's own bytes and structure, including an
+                // aside or emphasis span that opened before this sentence.
+                let probe_start = sentence_end - sentence.len();
+                let probe = &paragraph_text[probe_start..next_end];
+                let next_str = &paragraph_text[next_start..next_end];
                 let probe_sentences = split_into_sentences_with_set(
-                    &probe,
+                    probe,
                     &abbreviations,
                     require_sentence_capital,
                     options.cjk_soft_break,
                     options.defined_references.as_ref(),
-                    None,
+                    Some(structure_from(probe_start)),
                 );
                 probe_sentences.last().is_some_and(|last| last == next_str)
             };
@@ -3664,7 +3767,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
                 line = pending_start.map(|held| line_start + held);
             } else {
                 // Single sentence - check if it's complete
-                let trimmed = combined.trim();
+                let trimmed = combined.trim_matches(is_breakable_whitespace);
 
                 // If the combined result is only whitespace, don't accumulate it.
                 // This prevents leading spaces on subsequent elements when lines
@@ -4240,8 +4343,13 @@ fn line_fits(line: &str, options: &ReflowOptions) -> bool {
 }
 
 /// The non-Text element span that strictly contains `pos`, if any.
+/// Flat element spans are sorted and non-overlapping; searching every span for
+/// each character would make long parenthetical scans quadratic.
 fn element_containing(pos: usize, spans: &[ElementSpan]) -> Option<ElementSpan> {
-    spans.iter().copied().find(|span| span.contains(pos))
+    let past = spans.partition_point(|span| span.start < pos);
+    past.checked_sub(1)
+        .map(|index| spans[index])
+        .filter(|span| span.contains(pos))
 }
 
 /// Check if a byte position falls inside any non-Text element span
@@ -4618,6 +4726,42 @@ fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
     result
 }
 
+/// A fitting aside stays intact. For an oversized aside, restore its inner
+/// sentence boundaries before the width cascade. Besides preferring natural
+/// breaks, this avoids repeatedly cascading a whole paragraph as one sentence.
+fn cascade_semantic_sentence(text: &str, options: &ReflowOptions) -> Vec<String> {
+    let (Some(open), Some(close)) = (text.find('('), text.rfind(')')) else {
+        return cascade_split_line(text, options);
+    };
+    if open >= close || !text[open..close].contains(['.', '!', '?', '。', '！', '？']) {
+        return cascade_split_line(text, options);
+    }
+    let mut structure = semantic_sentence_structure(text, options.defined_references.as_ref());
+    let protected = structure.parentheticals.len();
+    structure
+        .parentheticals
+        .retain(|&(start, end)| line_fits(&text[start..end], options));
+    if structure.parentheticals.len() == protected {
+        return cascade_split_line(text, options);
+    }
+
+    split_into_sentence_ranges(
+        text,
+        &get_abbreviations(&options.abbreviations),
+        options.require_sentence_capital,
+        options.cjk_soft_break,
+        options.defined_references.as_ref(),
+        Some(ParagraphStructure {
+            text,
+            structure: &structure,
+            base: 0,
+        }),
+    )
+    .into_iter()
+    .flat_map(|(start, end)| cascade_split_line(&text[start..end], options))
+    .collect()
+}
+
 /// Reflow elements using semantic line breaks strategy:
 /// 1. Split at sentence boundaries (always)
 /// 2. For lines exceeding line_length, cascade through clause punct → break-words → word wrap
@@ -4636,7 +4780,7 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
         if line_fits(&line, options) {
             result.push(line);
         } else {
-            result.extend(cascade_split_line(&line, options));
+            result.extend(cascade_semantic_sentence(&line, options));
         }
     }
 

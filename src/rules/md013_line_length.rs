@@ -13,7 +13,7 @@ use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::{
     BlockquoteLineData, blockquote_continuation_style, code_span_crosses_last_break, code_span_runs_into_indentation,
     dominant_blockquote_prefix, is_self_contained_display_math_line, join_sentence_lines, join_soft_break_lines,
-    reflow_blockquote_content, split_into_sentences, trim_breakable_whitespace,
+    reflow_blockquote_content, semantic_sentence_count, split_into_sentences, trim_breakable_whitespace,
 };
 use pulldown_cmark::LinkType;
 use toml;
@@ -472,6 +472,32 @@ impl MD013LineLength {
 
         // Skip if no line exceeds the smallest applicable limit.
         !ctx.lines.iter().any(|line| line.byte_len > min_limit_bytes)
+    }
+
+    /// Count units in the joined text or prose segment supplied by the caller,
+    /// before width wrapping, including abbreviations and parenthetical asides.
+    fn reflow_sentence_count(
+        text: &str,
+        config: &MD013Config,
+        defined_references: &std::collections::HashSet<String>,
+    ) -> usize {
+        if config.reflow_mode == ReflowMode::SemanticLineBreaks {
+            semantic_sentence_count(
+                text,
+                Some(defined_references),
+                config.require_sentence_capital,
+                config.cjk_soft_break,
+                &config.abbreviations_for_reflow(),
+            )
+        } else {
+            split_into_sentences(
+                text,
+                Some(defined_references),
+                config.require_sentence_capital,
+                config.cjk_soft_break,
+            )
+            .len()
+        }
     }
 
     fn join_paragraph_lines<S: AsRef<str>>(lines: &[S], config: &MD013Config) -> String {
@@ -1404,13 +1430,8 @@ impl MD013LineLength {
                 sentences.len() > 1 || line_data.len() > 1
             }
             ReflowMode::SemanticLineBreaks => {
-                let sentences = split_into_sentences(
-                    &paragraph_text,
-                    Some(&defined_references),
-                    config.require_sentence_capital,
-                    config.cjk_soft_break,
-                );
-                sentences.len() > 1
+                let sentences = Self::reflow_sentence_count(&paragraph_text, config, &defined_references);
+                sentences > 1
                     || line_data.len() > 1
                     || collected
                         .iter()
@@ -1524,13 +1545,7 @@ impl MD013LineLength {
                     }
                 }
                 ReflowMode::SemanticLineBreaks => {
-                    let num_sentences = split_into_sentences(
-                        &paragraph_text,
-                        Some(&defined_references),
-                        config.require_sentence_capital,
-                        config.cjk_soft_break,
-                    )
-                    .len();
+                    let num_sentences = Self::reflow_sentence_count(&paragraph_text, config, &defined_references);
                     format!("Paragraph should use semantic line breaks ({num_sentences} sentences)")
                 }
                 ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length.get()),
@@ -1771,14 +1786,8 @@ impl MD013LineLength {
                     || body_pieces.len() > 1
             }
             ReflowMode::SemanticLineBreaks => {
-                split_into_sentences(
-                    body_text,
-                    Some(&defined_references),
-                    config.require_sentence_capital,
-                    config.cjk_soft_break,
-                )
-                .len()
-                    > 1
+                Self::reflow_sentence_count(body_text, config, &defined_references) > 1
+                    || body_pieces.len() > 1
                     || exceeds_limit()
             }
         };
@@ -1891,13 +1900,7 @@ impl MD013LineLength {
                 ReflowMode::SentencePerLine | ReflowMode::SemanticLineBreaks
             ) && segment_reflowed.iter().map(String::as_str).ne(segment.iter().copied())
             {
-                rewritten_sentence_count += split_into_sentences(
-                    segment_text,
-                    Some(&defined_references),
-                    config.require_sentence_capital,
-                    config.cjk_soft_break,
-                )
-                .len();
+                rewritten_sentence_count += Self::reflow_sentence_count(segment_text, config, &defined_references);
             }
             reflowed.extend(segment_reflowed);
         }
@@ -2759,13 +2762,8 @@ impl MD013LineLength {
                         sentences.len() > 1 || container_lines.len() > 1
                     }
                     ReflowMode::SemanticLineBreaks => {
-                        let sentences = split_into_sentences(
-                            &paragraph_text,
-                            Some(&defined_references),
-                            config.require_sentence_capital,
-                            config.cjk_soft_break,
-                        );
-                        sentences.len() > 1
+                        let sentences = Self::reflow_sentence_count(&paragraph_text, config, &defined_references);
+                        sentences > 1
                             || container_lines.len() > 1
                             || container_lines
                                 .iter()
@@ -3789,13 +3787,9 @@ impl MD013LineLength {
                             sentences.len() > 1 || has_wrapped_prose_run()
                         }
                         ReflowMode::SemanticLineBreaks => {
-                            let sentences = split_into_sentences(
-                                &combined_content,
-                                Some(&defined_references),
-                                config.require_sentence_capital,
-                                config.cjk_soft_break,
-                            );
-                            sentences.len() > 1
+                            let sentences = Self::reflow_sentence_count(&combined_content, config, &defined_references);
+                            sentences > 1
+                                || has_wrapped_prose_run()
                                 || (list_start..i).any(|line_idx| {
                                     let line = lines[line_idx];
                                     let trimmed = line.trim();
@@ -4402,13 +4396,8 @@ impl MD013LineLength {
                                 }
                             }
                             ReflowMode::SemanticLineBreaks => {
-                                let num_sentences = split_into_sentences(
-                                    &combined_content,
-                                    Some(&defined_references),
-                                    config.require_sentence_capital,
-                                    config.cjk_soft_break,
-                                )
-                                .len();
+                                let num_sentences =
+                                    Self::reflow_sentence_count(&combined_content, config, &defined_references);
                                 format!("Paragraph should use semantic line breaks ({num_sentences} sentences)")
                             }
                             ReflowMode::Normalize => {
@@ -4809,14 +4798,9 @@ impl MD013LineLength {
                     }
                 }
                 ReflowMode::SemanticLineBreaks => {
-                    let sentences = split_into_sentences(
-                        &paragraph_text,
-                        Some(&defined_references),
-                        config.require_sentence_capital,
-                        config.cjk_soft_break,
-                    );
+                    let sentences = Self::reflow_sentence_count(&paragraph_text, config, &defined_references);
                     // Reflow if multiple sentences, multiple lines, or any line exceeds limit
-                    sentences.len() > 1
+                    sentences > 1
                         || paragraph_lines.len() > 1
                         || paragraph_lines
                             .iter()
@@ -4973,13 +4957,8 @@ impl MD013LineLength {
                         }
                         ReflowMode::SemanticLineBreaks => {
                             // In semantic-line-breaks mode, highlight the entire paragraph.
-                            let num_sentences = split_into_sentences(
-                                &paragraph_text,
-                                Some(&defined_references),
-                                config.require_sentence_capital,
-                                config.cjk_soft_break,
-                            )
-                            .len();
+                            let num_sentences =
+                                Self::reflow_sentence_count(&paragraph_text, config, &defined_references);
                             vec![(
                                 paragraph_start + 1,
                                 paragraph_start + paragraph_lines.len(),
