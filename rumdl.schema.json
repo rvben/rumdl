@@ -437,6 +437,16 @@
           "description": "Declared Python dependency and tool version constraints.",
           "type": "string",
           "const": "pyproject.toml"
+        },
+        {
+          "description": "Version-like revisions of supported official pre-commit hook repositories.",
+          "type": "string",
+          "const": ".pre-commit-config.yaml"
+        },
+        {
+          "description": "Version-like revisions of supported official prek hook repositories.",
+          "type": "string",
+          "const": "prek.toml"
         }
       ]
     },

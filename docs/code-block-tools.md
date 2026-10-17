@@ -509,7 +509,8 @@ on-tool-version-mismatch = "warn"
 ```
 
 Select `"uv.lock"` for exact resolved versions or `"pyproject.toml"` for declared
-constraints. Both sources support Ruff, Black, djLint and SQLFluff.
+constraints. Select `".pre-commit-config.yaml"` or `"prek.toml"` for supported
+hook repository revisions. All four sources support Ruff, Black, djLint and SQLFluff.
 All built-in modes and custom definitions invoking those
 executables are supported, including explicit paths with the corresponding
 basename. Windows also accepts their `.exe` names, without case sensitivity.
@@ -573,6 +574,45 @@ from Poetry, PDM, Hatch, `build-system.requires`, separate Ruff configuration
 files or Ruff `extend` chains. Tools still perform their own configuration
 discovery, which can differ from rumdl's nearest-file discovery.
 
+### Hook revisions: pre-commit and prek
+
+The YAML and TOML sources use the same `repos` and `hooks` model. Only the exact
+`.pre-commit-config.yaml` filename is discovered in this mode; the `.yml`
+spelling is not supported yet. rumdl recognizes
+these GitHub repositories and their published hook IDs:
+
+| Repository                                                         | Hooks                                                                                                                        | Revision spelling |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `astral-sh/ruff-pre-commit` (also `charliermarsh/ruff-pre-commit`) | `ruff`, `ruff-check`, `ruff-format`                                                                                          | `v0.11.2`         |
+| `psf/black`, `psf/black-pre-commit-mirror`                         | `black`, `black-jupyter`                                                                                                     | `25.1.0`          |
+| `djlint/djLint`                                                    | `djlint`, `djlint-reformat`, and their Django, Jinja, Nunjucks, Handlebars, Liquid, Golang, Tera and Askama profile variants | `v1.36.4`         |
+| `sqlfluff/sqlfluff`                                                | `sqlfluff-lint`, `sqlfluff-fix`                                                                                              | `3.3.1`           |
+
+These are examples of version-like revisions, not recommended installation versions.
+The revision must be a string in canonical Python version spelling with the
+repository's prefix. Epochs, development and local versions, branches, commit
+SHAs (including `autoupdate --freeze` output) and noncanonical spellings are
+unresolved. Release padding uses the same version equality as `uv.lock`.
+Multiple selected hooks for a package must agree; an unresolved declaration or
+unknown hook ID in its recognized repository makes that package unresolved.
+
+Repository URLs must use `https://github.com/`, `git@github.com:` or
+`ssh://git@github.com/`, with the exact repository path (case insensitive), an
+optional `.git` suffix and optional single trailing slash. Other repositories,
+including local, meta and builtin hooks, are ignored and never supply a version
+based on their hook ID. Git URL rewrites and hook manifests are not inspected.
+rumdl reads the revision as metadata; it does not fetch the repository or verify
+that the Git reference exists.
+
+Hook `entry` overrides, environment overrides, unknown hook options, and nonempty
+`additional_dependencies` are unresolved. Top-level `default_env` makes all
+hook-derived versions unresolved. `language: python` / `language = "python"`, an
+empty `additional_dependencies` list and ordinary hook filters, arguments and
+names are accepted; other `language` values are unresolved. Plugins and hook environments are not installed or reproduced.
+Malformed repository/hook structure makes the file unresolved. YAML anchors and
+merge keys are supported; duplicate keys, excessive nesting and excessive alias
+expansion are unresolved. Parser diagnostics do not expose metadata values.
+
 ### Verification policy and execution
 
 | Policy           | Behavior on mismatch or unresolved version                                   |
@@ -605,7 +645,7 @@ invocation, even when document checks are cached. Probes do not count as code
 checks for `on-no-tools-run`. Some built-in modes also perform their existing
 capability probes. Verification never installs tools, selects a runner,
 changes the configured command, or modifies metadata. Automatic source selection
-and pre-commit/prek configuration sources are not supported yet.
+is not supported yet.
 
 ## Missing Language/Tool Handling
 

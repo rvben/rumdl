@@ -180,6 +180,12 @@ pub enum ToolVersionDefinition {
     /// Declared Python dependency and tool version constraints.
     #[serde(rename = "pyproject.toml")]
     Pyproject,
+    /// Version-like revisions of supported official pre-commit hook repositories.
+    #[serde(rename = ".pre-commit-config.yaml")]
+    PreCommit,
+    /// Version-like revisions of supported official prek hook repositories.
+    #[serde(rename = "prek.toml")]
+    Prek,
 }
 
 impl ToolVersionDefinition {
@@ -187,6 +193,8 @@ impl ToolVersionDefinition {
         match self {
             Self::UvLock => "uv.lock",
             Self::Pyproject => "pyproject.toml",
+            Self::PreCommit => ".pre-commit-config.yaml",
+            Self::Prek => "prek.toml",
         }
     }
 }

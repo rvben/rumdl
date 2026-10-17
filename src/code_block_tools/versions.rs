@@ -15,6 +15,7 @@ use serde::Deserialize;
 use super::config::{ToolDefinition, ToolVersionDefinition};
 use super::executor::ToolExecutor;
 
+mod hooks;
 mod pyproject;
 
 type Cache<K, V> = Mutex<HashMap<K, Arc<OnceLock<V>>>>;
@@ -145,6 +146,12 @@ impl VersionState {
                     ToolVersionDefinition::Pyproject => {
                         format!("Cannot resolve declared version constraints for '{name}' in pyproject.toml")
                     }
+                    ToolVersionDefinition::PreCommit | ToolVersionDefinition::Prek => {
+                        format!(
+                            "Cannot resolve one unambiguous hook version for '{name}' in {}",
+                            source.filename()
+                        )
+                    }
                 })
             })?;
         // The mutex only protects slot lookup. Slow probes initialize their own
@@ -218,6 +225,7 @@ fn read_metadata(path: &Path, source: ToolVersionDefinition) -> Result<ExpectedV
     match source {
         ToolVersionDefinition::UvLock => parse_lockfile(&text),
         ToolVersionDefinition::Pyproject => pyproject::parse(&text),
+        ToolVersionDefinition::PreCommit | ToolVersionDefinition::Prek => hooks::parse(&text, source),
     }
 }
 
