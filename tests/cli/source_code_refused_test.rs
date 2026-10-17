@@ -575,6 +575,7 @@ fn an_include_naming_a_file_with_an_exclamation_mark_is_refused() {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn an_escaped_include_naming_a_file_with_glob_characters_is_refused() {
     let temp = project(&[("[x].py", "x = 1\n"), ("a.md", CLEAN)]);
     let output = run(
@@ -583,6 +584,35 @@ fn an_escaped_include_naming_a_file_with_glob_characters_is_refused() {
         b"",
     );
     assert_refused(&output, "[x].py");
+}
+
+#[test]
+fn a_named_source_file_with_glob_characters_is_refused() {
+    let temp = project(&[("[x].py", "x = 1\n"), ("a.md", CLEAN)]);
+    let output = run(temp.path(), &["check", "--no-config", "--no-cache", "[x].py"], b"");
+    assert_refused(&output, "[x].py");
+}
+
+#[test]
+#[cfg(windows)]
+fn native_separator_include_patterns_distinguish_wildcards_from_named_files() {
+    let temp = project(&[("sub/a.py", "x = 1\n"), ("a.md", CLEAN)]);
+    for pattern in [r"sub\*.py", r"sub\?.py"] {
+        let output = run(
+            temp.path(),
+            &["check", "--no-config", "--no-cache", "--include", pattern, "."],
+            b"",
+        );
+        assert_eq!(output.status.code(), Some(0), "{pattern}: {}", describe(&output));
+        assert_skipped_once(&output, &["a.py"]);
+        assert_eq!(read(temp.path(), "sub/a.py"), "x = 1\n");
+    }
+    let output = run(
+        temp.path(),
+        &["check", "--no-config", "--no-cache", "--include", r"sub\a.py", "."],
+        b"",
+    );
+    assert_refused(&output, "a.py");
 }
 
 #[cfg(unix)]

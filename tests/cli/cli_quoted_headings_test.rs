@@ -72,12 +72,16 @@ fn fixed(rule: &str, content: &str) -> String {
 
 /// The 1-indexed lines `rumdl check --enable <rule>` reports `rule` on.
 fn warned_lines(rule: &str, content: &str) -> Vec<usize> {
-    let tag = format!("[{rule}]");
-    run(content, &["--enable", rule])
-        .1
-        .lines()
-        .filter(|line| line.contains(&tag))
-        .filter_map(|line| line.split(':').nth(1)?.parse().ok())
+    reported_lines(rule, &run(content, &["--enable", rule, "--output-format=json"]).1)
+}
+
+/// Read structured locations without interpreting separators in file names.
+fn reported_lines(rule: &str, output: &str) -> Vec<usize> {
+    let warnings: Vec<serde_json::Value> = serde_json::from_str(output).expect("valid JSON findings");
+    warnings
+        .iter()
+        .filter(|warning| warning["rule"] == rule)
+        .map(|warning| warning["line"].as_u64().expect("finding line number") as usize)
         .collect()
 }
 
@@ -654,12 +658,8 @@ mod md013 {
                 .output()
                 .expect("run rumdl check")
         };
-        let checked = String::from_utf8_lossy(&rumdl(&[]).stdout).into_owned();
-        let lines = checked
-            .lines()
-            .filter(|line| line.contains("[MD013]"))
-            .filter_map(|line| line.split(':').nth(1)?.parse().ok())
-            .collect();
+        let checked = rumdl(&["--output-format=json"]);
+        let lines = reported_lines("MD013", &String::from_utf8_lossy(&checked.stdout));
         rumdl(&["--fix"]);
         (lines, fs::read_to_string(&path).unwrap())
     }
