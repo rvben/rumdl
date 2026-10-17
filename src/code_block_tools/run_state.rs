@@ -10,6 +10,7 @@ pub struct RunState {
     aborted: AtomicBool,
     cached_checks: AtomicUsize,
     warnings: Mutex<BTreeMap<String, String>>,
+    pub(super) versions: super::versions::VersionState,
 }
 
 // Operational state is excluded from configuration serialization and identity.

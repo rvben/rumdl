@@ -72,11 +72,12 @@ pub mod lookup;
 pub mod processor;
 pub mod registry;
 pub mod run_state;
+mod versions;
 mod wait;
 
 pub use config::{
     BinaryPreference, CodeBlockToolsConfig, FormatMode, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing,
-    ToolDefinition,
+    ToolDefinition, ToolVersionDefinition,
 };
 pub use executor::{ExecutorError, ToolExecutor, ToolOutput};
 pub use fingerprint::{lint_tools_fingerprint, lint_tools_fingerprint_for_path};

@@ -277,6 +277,10 @@ impl ToolExecutor {
         )
     }
 
+    pub(crate) fn project_root(&self) -> &std::path::Path {
+        &self.project_root
+    }
+
     /// Timeouts recorded for a tool since it last exited on its own.
     fn timeout_key(&self, tool_name: &str) -> String {
         self.resolve_binary(tool_name).map_or_else(

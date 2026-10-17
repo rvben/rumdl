@@ -81,6 +81,33 @@ fn concurrent_tool(root: &std::path::Path, mode: &str, input: &str) {
 
 fn main() {
     let executable = std::env::current_exe().unwrap();
+    if std::env::args().nth(1).as_deref() == Some("--version") && executable.with_extension("version").exists() {
+        use std::io::Write;
+        writeln!(
+            fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(executable.with_extension("version-calls"))
+                .unwrap(),
+            "probe"
+        )
+        .unwrap();
+        if let Ok(delay) = fs::read_to_string(executable.with_extension("version-delay-ms")) {
+            std::thread::sleep(std::time::Duration::from_millis(delay.trim().parse().unwrap()));
+        }
+        if let Ok(stderr) = fs::read(executable.with_extension("version-stderr")) {
+            std::io::stderr().write_all(&stderr).unwrap();
+        }
+        if executable.with_extension("version-invalid-utf8").exists() {
+            std::io::stdout().write_all(&[0xff]).unwrap();
+            return;
+        }
+        print!("{}", fs::read_to_string(executable.with_extension("version")).unwrap());
+        if let Ok(code) = fs::read_to_string(executable.with_extension("version-exit")) {
+            std::process::exit(code.trim().parse().unwrap());
+        }
+        return;
+    }
     // Record entry before arguments or stdin can hide an unintended invocation.
     if executable.with_extension("record").exists() {
         use std::io::Write;
@@ -91,6 +118,11 @@ fn main() {
                 .open(executable.with_extension("calls"))
                 .unwrap(),
             "ran"
+        )
+        .unwrap();
+        fs::write(
+            executable.with_extension("arguments"),
+            std::env::args().skip(1).collect::<Vec<_>>().join("\n"),
         )
         .unwrap();
     }

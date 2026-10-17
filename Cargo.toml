@@ -92,6 +92,7 @@ unicode-normalization = "0.1"
 schemars = "1.2"
 unicode-width = "0.2"
 percent-encoding = "2.3"
+pep440_rs = { version = "0.7.3", default-features = false }
 
 # LSP dependencies (native only)
 tower-lsp = { version = "0.20", optional = true }

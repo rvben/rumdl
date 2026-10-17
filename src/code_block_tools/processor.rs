@@ -520,6 +520,38 @@ impl<'a> CodeBlockToolProcessor<'a> {
         }
     }
 
+    fn version_diagnostic(
+        &self,
+        tool: &super::config::ToolDefinition,
+        line: usize,
+    ) -> Result<Option<CodeBlockDiagnostic>, ProcessorError> {
+        if self.config.tool_version_definition.is_none() || self.config.on_tool_version_mismatch == OnMissing::Ignore {
+            return Ok(None);
+        }
+        if let Err(failure) = self
+            .run_state
+            .versions
+            .verify(&self.executor, tool, self.config.timeout)
+        {
+            let message = if self.config.values_withheld {
+                "Configured tool version verification failed (details withheld)".into()
+            } else {
+                failure.message
+            };
+            return self.policy_diagnostic(
+                self.config.on_tool_version_mismatch,
+                if self.config.values_withheld {
+                    "tool-version:withheld".into()
+                } else {
+                    failure.key
+                },
+                message,
+                line,
+            );
+        }
+        Ok(None)
+    }
+
     /// Replay coverage warnings without re-executing tools on a cache hit.
     pub fn replay_cached_warnings(&self, content: &str) {
         for block in self.extract_code_blocks(content) {
@@ -615,6 +647,18 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// Configuration for a canonical (lowercase) language name.
     fn language_config(&self, canonical_lang: &str) -> Option<&'a LanguageToolConfig> {
         self.languages.get(canonical_lang).copied()
+    }
+
+    /// The same external formatter candidates are checked before execution and
+    /// at runtime, including fallback stages that become necessary after failure.
+    fn format_candidate(&self, id: &str, language: &str) -> Option<&super::config::ToolDefinition> {
+        if is_rumdl_builtin(id) && is_markdown_language(language)
+            || self.registry.definition_problem(id, ToolSlot::Format).is_some()
+            || self.registry.fills_format_slot(id) == Some(false)
+        {
+            return None;
+        }
+        self.registry.resolve(id, ToolSlot::Format)
     }
 
     /// Report a tool id no registry entry answers to.
@@ -1060,6 +1104,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     }
                 }
 
+                if let Some(diagnostic) = self.version_diagnostic(tool_def, block.start_line + 1)? {
+                    all_diagnostics.push(diagnostic);
+                    continue;
+                }
+
                 let tool_input = ensure_trailing_newline(code_content);
                 let run = match self.registry.lint_mode(&resolved_id) {
                     // Explicit djLint and Shuck modes prefer verified native checks;
@@ -1267,29 +1316,33 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 }
                 continue;
             };
-            if self.config.on_missing_tool_binary != OnMissing::FailFast {
+            // Runtime never executes empty or invalid block ranges.
+            if block.content_start >= block.content_end || block.content_end > content.len() {
+                continue;
+            }
+            if self.config.on_missing_tool_binary != OnMissing::FailFast && !self.config.version_fail_fast() {
                 continue;
             }
             for id in &language.format {
-                if is_rumdl_builtin(id) && is_markdown_language(&canonical) {
-                    continue;
-                }
-                if self.registry.definition_problem(id, ToolSlot::Format).is_some() {
-                    continue;
-                }
-                let Some(tool) = self.registry.resolve(id, ToolSlot::Format) else {
+                let Some(tool) = self.format_candidate(id, &canonical) else {
                     continue;
                 };
                 let Some(binary) = tool.command.first() else {
                     continue;
                 };
                 if !self.executor.is_tool_available(binary) {
-                    self.run_state.abort();
-                    return Err(ProcessorError::ToolBinaryNotFound {
-                        tool: binary.clone(),
-                        language: canonical.clone(),
-                        line: block.start_line + 1,
-                    });
+                    if self.config.on_missing_tool_binary == OnMissing::FailFast {
+                        self.run_state.abort();
+                        return Err(ProcessorError::ToolBinaryNotFound {
+                            tool: binary.clone(),
+                            language: canonical.clone(),
+                            line: block.start_line + 1,
+                        });
+                    }
+                    continue;
+                }
+                if self.config.version_fail_fast() {
+                    self.version_diagnostic(tool, block.start_line + 1)?;
                 }
                 // Fallback stages after an available formatter are only known
                 // to be needed if it fails; runtime retains that check.
@@ -1471,27 +1524,19 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 if self.registry.definition_problem(tool_id, ToolSlot::Format).is_some() {
                     continue;
                 }
-                let Some(tool_def) = self.registry.resolve(tool_id, ToolSlot::Format) else {
-                    warn(block.start_line, self.unknown_tool_warning(tool_id, &canonical_lang));
+                let Some(tool_def) = self.format_candidate(tool_id, &canonical_lang) else {
+                    if self.registry.fills_format_slot(tool_id) == Some(false) {
+                        warn(
+                            block.start_line,
+                            format!(
+                                "Tool '{tool_id}' is a linter and cannot format '{canonical_lang}' code blocks; move it to the lint slot"
+                            ),
+                        );
+                    } else {
+                        warn(block.start_line, self.unknown_tool_warning(tool_id, &canonical_lang));
+                    }
                     continue;
                 };
-
-                // A linter writes its report to stdout, so running one here replaces the
-                // block with that report: `ruff:check` in a format slot turns a clean
-                // Python block into the literal text `All checks passed!`. The
-                // empty-output guard below does not catch it, because a linter with
-                // nothing to say still exits 0 and can still print a summary line.
-                // Config validation reports this too, but a warning cannot undo an
-                // overwritten block, so the run declines the tool as well.
-                if self.registry.fills_format_slot(tool_id) == Some(false) {
-                    warn(
-                        block.start_line,
-                        format!(
-                            "Tool '{tool_id}' is a linter and cannot format '{canonical_lang}' code blocks; move it to the lint slot"
-                        ),
-                    );
-                    continue;
-                }
 
                 // Check if tool binary exists before running
                 let tool_name = tool_def.command.first().map_or("", String::as_str);
@@ -1526,6 +1571,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             });
                         }
                     }
+                }
+
+                if let Some(diagnostic) = self.version_diagnostic(tool_def, block.start_line + 1)? {
+                    error_messages.push((block.start_line, diagnostic.message.clone()));
+                    failures.push(diagnostic);
+                    continue;
                 }
 
                 let tool_input = ensure_trailing_newline(&formatted);

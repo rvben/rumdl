@@ -25,7 +25,7 @@ pub fn project_root(path: &Path) -> PathBuf {
     std::fs::canonicalize(&directory).unwrap_or(directory)
 }
 
-fn project_directories(start: &Path) -> Vec<&Path> {
+pub(crate) fn project_directories(start: &Path) -> Vec<&Path> {
     use crate::config::file_source::{ConfigFileSource, FsConfigFiles};
 
     let home = FsConfigFiles

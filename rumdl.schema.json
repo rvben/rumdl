@@ -60,6 +60,7 @@
         "on-missing-language-definition": "ignore",
         "on-missing-tool-binary": "warn",
         "binary-preferences": {},
+        "on-tool-version-mismatch": "warn",
         "on-missing-language-tag": "ignore",
         "on-missing-mode-definition": "ignore",
         "on-no-tools-run": "ignore",
@@ -265,6 +266,22 @@
           },
           "default": {}
         },
+        "tool-version-definition": {
+          "description": "Optional project metadata source for external tool version verification.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolVersionDefinition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "on-tool-version-mismatch": {
+          "description": "Policy for mismatched or unresolved external tool versions.\nDefaults to `warn` and runs the tool; `fail` skips only that tool.\nInactive unless a tool-version-definition is configured.",
+          "$ref": "#/$defs/OnMissing",
+          "default": "warn"
+        },
         "on-missing-language-tag": {
           "description": "Policy for unlabeled fenced code blocks.",
           "$ref": "#/$defs/OnMissing",
@@ -405,6 +422,16 @@
           "description": "Preserve PATH-only lookup.",
           "type": "string",
           "const": "only-system"
+        }
+      ]
+    },
+    "ToolVersionDefinition": {
+      "description": "Supported authoritative sources for external tool versions.",
+      "oneOf": [
+        {
+          "description": "Exact resolved Python package versions in the nearest project lockfile.",
+          "type": "string",
+          "const": "uv.lock"
         }
       ]
     },

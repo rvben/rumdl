@@ -497,6 +497,68 @@ child process working directory: tools inherit rumdl's working directory and use
 their own configuration discovery rules. Configured commands execute with the
 user's permissions; they are not sandboxed by rumdl.
 
+## Tool Version Verification
+
+Version verification is optional and disabled unless a metadata source is selected:
+
+```toml
+[code-block-tools]
+enabled = true
+tool-version-definition = "uv.lock"
+on-tool-version-mismatch = "warn"
+```
+
+This release supports exact resolved versions from `uv.lock` for Ruff, Black,
+djLint and SQLFluff. All built-in modes and custom definitions invoking those
+executables are supported, including explicit paths with the corresponding
+basename. Windows also accepts their `.exe` names, without case sensitivity.
+Other executables and wrappers such as `uv run` or `python -m` cannot be mapped
+and are treated as unresolved. Strict mismatch policies therefore require every
+external tool that runs to have a supported mapping. The embedded `rumdl` tool is
+exempt and runs in its existing separate Markdown pass; additional external
+formatters still require verification.
+
+Discovery starts at the document directory and uses the same project boundaries
+as executable discovery above. Stdin processing does not execute code-block tools. The nearest
+`uv.lock` is authoritative: an absent package or invalid lockfile does not cause
+a search for an outer lockfile. Schema version 1 is supported, including additive
+fields and revisions. Multiple entries for a package must resolve to the same
+normalized Python version; different versions for different environments are
+ambiguous. Comparison preserves prerelease, development, post-release, epoch and
+local labels; equivalent release padding such as `1.0` and `1.0.0` is accepted.
+
+| Policy           | Behavior on mismatch or unresolved version                                   |
+| ---------------- | ---------------------------------------------------------------------------- |
+| `warn` (default) | Warn once per distinct tool/source/result and run the tool                   |
+| `ignore`         | Skip version verification entirely                                           |
+| `fail`           | Report an error, skip that tool, continue other work, and exit nonzero       |
+| `fail-fast`      | Stop before running the mismatched tool and leave the failing file unwritten |
+
+Missing, unreadable, malformed or ambiguous metadata and unsuccessful or
+unrecognized version output all use this policy. Non-whitespace stderr, including
+Python startup warnings, makes a probe unresolved. `on-error` does not override
+it. Warnings become fatal with `--deny-config-warnings`. Under `fail`, later
+fallback or pipeline formatters can still succeed and write their output, while
+the invocation exits nonzero. Fail-fast processes files sequentially; files
+completed earlier may already have been written. Conditional fallback stages are
+verified only when needed; pipeline stages are checked before formatting begins
+under fail-fast.
+
+rumdl probes the selected executable with `--version`, independently of its
+configured lint/format arguments. Supported output formats identify the tool and
+its full Python package version. A probe has a limit of 4096 bytes per output
+stream and the smaller of the configured timeout and 10 seconds; `timeout = 0`
+still gives probes a 10-second limit. Lockfiles larger than 64 MiB are unresolved.
+Raw lockfile contents and unrecognized process output are not quoted in errors.
+
+Metadata and version-verification probes are shared within one invocation. Each selected executable
+and probe timeout is checked once, with fresh verification on the next
+invocation, even when document checks are cached. Probes do not count as code
+checks for `on-no-tools-run`. Some built-in modes also perform their existing
+capability probes. Verification never installs tools, selects a runner,
+changes the configured command, or modifies metadata. Other metadata sources,
+including `auto` and `pyproject.toml`, are not supported yet.
+
 ## Missing Language/Tool Handling
 
 Coverage policies are independent settings. They accept `ignore`, `warn`, `fail`,
