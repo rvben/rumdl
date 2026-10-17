@@ -5,27 +5,23 @@ use std::{
 };
 // Real child-process concurrency accounting, shared by every fixture copy in a project.
 fn update_processes(root: &std::path::Path, entering: bool) -> usize {
-    use std::{
-        thread,
-        time::{Duration, Instant},
-    };
-    let lock = root.join("process-lock");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        match fs::create_dir(&lock) {
-            Ok(()) => break,
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && Instant::now() < deadline => {
-                thread::sleep(Duration::from_millis(1))
-            }
-            Err(e) => panic!("fixture lock: {e}"),
-        }
-    }
+    // Keep the lock file in place: deleting a directory lock on Windows can
+    // leave it pending deletion and make the next acquisition fail with access denied.
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(root.join("process-lock"))
+        .expect("open fixture lock");
+    lock.lock().expect("acquire fixture lock");
     let path = root.join("process-state");
-    let mut state: Vec<usize> = fs::read_to_string(&path)
-        .unwrap_or_else(|_| "0 0 0".into())
-        .split_whitespace()
-        .map(|n| n.parse().unwrap())
-        .collect();
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => "0 0 0".into(),
+        Err(e) => panic!("read fixture process state: {e}"),
+    };
+    let mut state: Vec<usize> = contents.split_whitespace().map(|n| n.parse().unwrap()).collect();
     if entering {
         state[0] += 1;
         state[1] = state[1].max(state[0]);
@@ -37,7 +33,6 @@ fn update_processes(root: &std::path::Path, entering: bool) -> usize {
         state[0] -= 1;
     }
     fs::write(path, format!("{} {} {}", state[0], state[1], state[2])).unwrap();
-    fs::remove_dir(lock).unwrap();
     state[1]
 }
 

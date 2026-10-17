@@ -79,7 +79,7 @@ fn independent_blocks_overlap_but_diagnostics_stay_in_source_order() {
     assert_eq!(findings[0]["message"], "finding-first");
     assert_eq!(findings[1]["line"], 6);
     assert_eq!(findings[1]["message"], "finding-second");
-    assert_eq!(state(dir.path()), vec![0, 2, 2]);
+    assert_eq!(state(dir.path()), vec![0, 2, 2], "{output:?}");
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn format_blocks_overlap_and_keep_original_offsets_and_container_prefixes() {
     fs::write(dir.path().join("doc.md"), input).unwrap();
     let output = run(dir.path(), 2, "fmt", &["doc.md"]);
     assert!(output.status.success(), "{output:?}");
-    assert_eq!(state(dir.path()), vec![0, 2, 2]);
+    assert_eq!(state(dir.path()), vec![0, 2, 2], "{output:?}");
     let expected = "Intro π.\n\n> ```python\n> first good and longer\n> ```\n\n```shell\nsecond good and longer\n```\n";
     assert_eq!(fs::read_to_string(dir.path().join("doc.md")).unwrap(), expected);
     let again = run(dir.path(), 2, "fmt", &["doc.md"]);
@@ -122,13 +122,13 @@ fn uneven_files_share_the_worker_budget_and_match_one_worker_output() {
     }
     let sequential = run(dir.path(), 1, "check", &["a.md", "b.md", "c.md"]);
     assert_eq!(sequential.status.code(), Some(1), "{sequential:?}");
-    assert_eq!(state(dir.path()), vec![0, 1, 12]);
+    assert_eq!(state(dir.path()), vec![0, 1, 12], "{sequential:?}");
     fs::remove_file(dir.path().join("process-state")).unwrap();
     let parallel = run(dir.path(), 2, "check", &["a.md", "b.md", "c.md"]);
     assert_eq!(parallel.status.code(), sequential.status.code(), "{parallel:?}");
     assert_eq!(parallel.stdout, sequential.stdout);
     assert_eq!(parallel.stderr, sequential.stderr);
-    assert_eq!(state(dir.path()), vec![0, 2, 12]);
+    assert_eq!(state(dir.path()), vec![0, 2, 12], "{parallel:?}");
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn effective_language_error_policy_controls_the_active_phase() {
     .unwrap();
     let output = run(dir.path(), 2, "check", &["doc.md"]);
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert_eq!(state(dir.path()), vec![0, 2, 2]);
+    assert_eq!(state(dir.path()), vec![0, 2, 2], "{output:?}");
     let findings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(findings.as_array().unwrap().len(), 2, "{output:?}");
 }
@@ -266,7 +266,7 @@ fn parallel_blocks_preserve_formatter_fallback_and_pipeline_order() {
             fs::read_to_string(dir.path().join("doc.md")).unwrap(),
             format!("```python\n{first} {expected}\n```\n\n```python\n{second} {expected}\n```\n")
         );
-        assert_eq!(state(dir.path()), vec![0, 2, 2]);
+        assert_eq!(state(dir.path()), vec![0, 2, 2], "{mode}: {output:?}");
         let warnings = String::from_utf8_lossy(&output.stderr);
         let first = warnings.find("doc.md:1:").unwrap_or_else(|| panic!("{output:?}"));
         let second = warnings.find("doc.md:5:").unwrap_or_else(|| panic!("{output:?}"));
@@ -339,7 +339,7 @@ fn parallel_tools_drain_both_pipes_without_starving_workers() {
     fs::write(dir.path().join("doc.md"), &input).unwrap();
     let output = run(dir.path(), 2, "fmt", &["doc.md"]);
     assert!(output.status.success(), "{output:?}");
-    assert_eq!(state(dir.path()), vec![0, 2, 2]);
+    assert_eq!(state(dir.path()), vec![0, 2, 2], "{output:?}");
     assert_eq!(fs::read_to_string(dir.path().join("doc.md")).unwrap(), input);
 }
 
@@ -369,7 +369,7 @@ fn lint_after_parallel_format_uses_updated_line_positions() {
     assert_eq!(findings.as_array().unwrap().len(), 2, "{output:?}");
     assert_eq!(findings[0]["line"], 2);
     assert_eq!(findings[1]["line"], 7);
-    assert_eq!(state(dir.path()), vec![0, 2, 2]);
+    assert_eq!(state(dir.path()), vec![0, 2, 2], "{output:?}");
 }
 
 #[test]
