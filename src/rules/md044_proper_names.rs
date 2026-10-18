@@ -341,6 +341,10 @@ impl MD044ProperNames {
                     continue; // Not at word boundary
                 }
 
+                if Self::is_file_extension_suffix(line, start_pos, found_name) {
+                    continue;
+                }
+
                 if self.config.whole_words
                     && ((Self::is_joined_identifier_boundary(line, start_pos, true)
                         && !Self::is_underscore_emphasis_boundary(ctx, byte_pos, true))
@@ -830,6 +834,25 @@ impl MD044ProperNames {
         }
     }
 
+    /// Preserve a name immediately after a single dot, as in `favorite.toml`
+    /// or `.toml`. Check only the match and its immediate prefix: scanning for
+    /// a whole filename would collide with Markdown punctuation. The stem
+    /// stays checkable, and `node.js` still matches the whole name `Node.js`.
+    fn is_file_extension_suffix(line: &str, start: usize, name: &str) -> bool {
+        let Some(prefix) = line[..start].strip_suffix('.') else {
+            return false;
+        };
+
+        // An ellipsis can introduce prose without a space. Multiword names
+        // and names with other punctuation (such as `.NET`) are not suffixes.
+        !prefix.ends_with('.')
+            && name.starts_with(char::is_alphanumeric)
+            && name.ends_with(char::is_alphanumeric)
+            && name
+                .chars()
+                .all(|character| character.is_alphanumeric() || matches!(character, '.' | '-' | '_'))
+    }
+
     /// Whether `pos` is separated from another Unicode-alphanumeric
     /// identifier component by a run of `-` and/or `_`.
     ///
@@ -896,8 +919,9 @@ impl MD044ProperNames {
     /// case, so `fm_value` is required rather than optional: a caller cannot
     /// accidentally invoke this for a line that has no known value span.
     ///
-    /// A slash is mandatory: without it a bare extension rule would swallow
-    /// dotted proper names such as `Node.js`.
+    /// A slash is mandatory for exempting a whole path token: a blanket
+    /// dotted-token exemption would swallow proper names such as `Node.js`.
+    /// Extension suffixes are protected separately without exempting the stem.
     ///
     /// The 3+ segment sole-value signal only fires for a genuinely
     /// single-token value. A quoted value that collapsed from several
@@ -1099,6 +1123,129 @@ mod tests {
             whole_words: true,
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn file_extension_suffixes_preserve_case_but_prose_is_checked() {
+        let content = "I like toml in my favorite.toml file.\n\
+                       Extensions: .toml (.toml) [.toml] \".toml\" '.toml' “.toml” ‘.toml’.\n\
+                       Files: config.toml.example v2.toml café.toml my_conf.toml foo-.toml file(1).toml.\n\
+                       Patterns: *.toml **.toml** _.toml_ /.toml \\.toml.\n\
+                       Next.js uses js, and toml is a format.\n";
+        let expected = content
+            .replacen("I like toml", "I like TOML", 1)
+            .replace("uses js, and toml", "uses JS, and TOML");
+
+        for whole_words in [false, true] {
+            let rule = MD044ProperNames::from_config_struct(MD044Config {
+                names: vec!["TOML".to_string(), "JS".to_string()],
+                whole_words,
+                ..Default::default()
+            });
+            let ctx = create_context(content);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 3);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            assert!(rule.check(&create_context(&expected)).unwrap().is_empty());
+            assert_eq!(rule.fix(&create_context(&expected)).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn file_extensions_keep_dotted_names_stems_and_function_calls_checkable() {
+        let rule = MD044ProperNames::new(
+            ["TOML", "Oklch", "Node.js", "MyApp", ".NET", "GitHub"]
+                .map(str::to_string)
+                .to_vec(),
+            false,
+        );
+        let content = "Use node.js and .net for myapp.\n\
+                       See docs/myapp.md and docs/myapp(1).md.\n\
+                       Oklch syntax is oklch(.5 .5 255); github(tm) is a reference.\n\
+                       I like TOML in my favorite.toml file.\n\
+                       Use `favorite.toml` and `oklch(.5 .5 255)`.\n";
+        let expected = "Use Node.js and .NET for MyApp.\n\
+                        See docs/MyApp.md and docs/MyApp(1).md.\n\
+                        Oklch syntax is Oklch(.5 .5 255); GitHub(tm) is a reference.\n\
+                        I like TOML in my favorite.toml file.\n\
+                        Use `favorite.toml` and `oklch(.5 .5 255)`.\n";
+        let ctx = create_context(content);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 7);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        assert!(rule.check(&create_context(expected)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn file_extensions_do_not_exempt_ellipsis_or_multiword_prose() {
+        let rule = MD044ProperNames::new(vec!["TOML".to_string(), "My App".to_string()], false);
+        let content = "Wait...toml or …toml; e.g. toml and file. toml.\n\
+                       Sentence.my app is still prose.\n";
+        let expected = "Wait...TOML or …TOML; e.g. TOML and file. TOML.\n\
+                        Sentence.My App is still prose.\n";
+        let ctx = create_context(content);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 5);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn file_extension_syntax_applies_to_dotted_tokens_and_html_prose() {
+        let rule = MD044ProperNames::new(["TOML", "Node.js", "GitHub"].map(str::to_string).to_vec(), false);
+        // A single dot is a syntax cue, not proof of a filename. In particular,
+        // missing a space after a sentence period can hide a capitalization error.
+        let content = ".github api.node.js api.github.com i.e.toml\n\
+                       node.js github and toml\n\
+                       <!-- favorite.toml toml -->\n\
+                       <div>favorite.toml toml</div>\n";
+        let expected = ".github api.node.js api.github.com i.e.toml\n\
+                        Node.js GitHub and TOML\n\
+                        <!-- favorite.toml TOML -->\n\
+                        <div>favorite.toml TOML</div>\n";
+        let ctx = create_context(content);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 5);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        assert!(rule.check(&create_context(expected)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn file_extensions_in_markdown_preserve_suffixes_and_check_prose() {
+        let content = "**favorite.toml** *favorite.toml* _favorite.toml_\n\
+                       [favorite.toml](other.md) [toml](favorite.toml)\n\
+                       ![favorite.toml](img.png) ![toml](img.toml)\n\
+                       [[favorite.toml]] [[Page|favorite.toml]] [[Page|toml]]\n\
+                       `favorite.toml toml`\n\
+                       ```text\n\
+                       favorite.toml toml\n\
+                       ```\n";
+        for code_blocks in [false, true] {
+            let rule = MD044ProperNames::new(vec!["TOML".to_string()], code_blocks);
+            let mut expected = content.replace("[toml]", "[TOML]").replace("|toml]]", "|TOML]]");
+            if code_blocks {
+                expected = expected.replace("favorite.toml toml", "favorite.toml TOML");
+            }
+            for flavor in [
+                crate::config::MarkdownFlavor::Standard,
+                crate::config::MarkdownFlavor::Obsidian,
+            ] {
+                let ctx = LintContext::new(content, flavor, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), if code_blocks { 5 } else { 3 });
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn file_extensions_in_frontmatter_preserve_suffixes_and_check_prose() {
+        let rule = MD044ProperNames::new(["TOML", "Node.js", "MyApp"].map(str::to_string).to_vec(), false);
+        for content in [
+            "---\ntoml: favorite.toml\ntitle: node.js guide to toml\nimage: myapp.png\npath: docs/myapp.md\n---\n",
+            "+++\ntoml = \"favorite.toml\"\ntitle = \"node.js guide to toml\"\nimage = \"myapp.png\"\npath = \"docs/myapp.md\"\n+++\n",
+        ] {
+            let expected = content
+                .replace("node.js guide to toml", "Node.js guide to TOML")
+                .replace("myapp.png", "MyApp.png");
+            let ctx = create_context(content);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 3);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
     }
 
     #[test]
