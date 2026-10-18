@@ -1855,7 +1855,8 @@ fn parser_html_block_is_text(opener: &LineInfo) -> bool {
 /// [`parser_html_block_is_text`] reads. Comments, processing instructions and
 /// declarations are tracked as comments elsewhere, MDX reads a tag alone on a
 /// line as JSX, and a block opened after a container marker would hide that
-/// marker's line from the rules, so none of those is marked.
+/// marker's line from the rules, so none of those is marked. A block opened inside
+/// a quote is marked below its opening line.
 pub(super) fn mark_parser_html_blocks(
     content: &str,
     lines: &mut [LineInfo],
@@ -1873,11 +1874,25 @@ pub(super) fn mark_parser_html_blocks(
         let before_tag = &content[opener.byte_offset..start];
         if opener.in_html_block
             || parser_html_block_is_text(opener)
-            || !before_tag.trim().is_empty()
             || content[start..].starts_with("<!")
             || content[start..].starts_with("<?")
         {
             continue;
+        }
+        let mut spanned = spanned;
+        if !before_tag.trim().is_empty() {
+            // A block opened inside a quote (which may itself sit in list items) keeps
+            // its opening line visible to the rules, which read the quote marker there;
+            // the lines below it are raw HTML. Any other container marker leaves the
+            // whole block unmarked.
+            if !before_tag.contains('>')
+                || !before_tag
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, '>' | ' ' | '\t' | '-' | '+' | '*' | '.' | ')'))
+            {
+                continue;
+            }
+            spanned.start += 1;
         }
         for line in &mut lines[spanned] {
             line.in_html_block = true;

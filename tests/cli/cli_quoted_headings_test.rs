@@ -807,3 +807,90 @@ mod md022 {
         assert_untouched("MD022", "> text\n> ```\n> ## H\n> ```\n");
     }
 }
+
+mod quoted_html {
+    use super::*;
+
+    /// The document after the full `rumdl fmt` pass.
+    fn formatted(content: &str) -> String {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("doc.md");
+        fs::write(&path, content).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .args(["fmt", "--isolated", "--no-cache"])
+            .arg(&path)
+            .output()
+            .expect("run rumdl fmt");
+        fs::read_to_string(&path).unwrap()
+    }
+
+    /// The heading rules leave the lines of a raw HTML block alone, however the block
+    /// is quoted, and `fmt` keeps the document byte for byte.
+    fn assert_raw_html_untouched(input: &str) {
+        for rule in ["MD022", "MD023", "MD027"] {
+            assert_eq!(
+                warned_lines(rule, input),
+                Vec::<usize>::new(),
+                "{rule} on raw HTML in {input:?}"
+            );
+        }
+        assert_eq!(formatted(input), input, "fmt of {input:?}");
+    }
+
+    #[test]
+    fn heading_lookalikes_in_a_quoted_pre_block_are_raw_html() {
+        // pandoc: one RawBlock html holding `## H` as text
+        assert_raw_html_untouched("# T\n\n> <pre>\n> a\n>\n>    ## H\n> </pre>\n");
+    }
+
+    #[test]
+    fn heading_lookalikes_in_a_quoted_div_block_are_raw_html() {
+        assert_raw_html_untouched("# T\n\n> <div>\n> a\n>    ## H\n>\n> text\n");
+    }
+
+    #[test]
+    fn heading_lookalikes_in_a_quoted_script_block_are_raw_html() {
+        assert_raw_html_untouched("# T\n\n> <script>\n> a\n>\n>   ## H\n> </script>\n");
+    }
+
+    #[test]
+    fn heading_lookalikes_in_a_quoted_comment_are_raw_html() {
+        assert_raw_html_untouched("# T\n\n> <!--\n> a\n>   ## H\n> -->\n");
+    }
+
+    #[test]
+    fn heading_lookalikes_in_a_nested_quoted_block_are_raw_html() {
+        assert_raw_html_untouched("# T\n\n> > <pre>\n> > a\n> >\n> >    ## H\n> > </pre>\n");
+    }
+
+    #[test]
+    fn heading_lookalikes_in_a_quoted_block_inside_a_list_item_are_raw_html() {
+        assert_raw_html_untouched("# T\n\n- > <pre>\n  > a\n  >\n  >    ## H\n  > </pre>\n");
+    }
+
+    #[test]
+    fn a_lazy_line_ends_the_quoted_block_and_the_heading_after_it_is_one() {
+        // pandoc: the unquoted line closes the block, and `## H` is a heading in a new quote
+        let input = "# T\n\n> <div>\n> a\nlazy\n>    ## H\n";
+        assert_eq!(warned_lines("MD023", input), vec![6]);
+    }
+
+    #[test]
+    fn a_heading_after_a_closed_quoted_block_is_still_a_heading() {
+        // pandoc: the quote ends at the blank line, `## Z` is a top-level heading
+        let input = "# T\n\n> <pre>\n> a\n>\n>    ## H\n\n   ## Z\n";
+        assert_eq!(warned_lines("MD023", input), vec![8]);
+    }
+
+    #[test]
+    fn the_opening_line_of_a_quoted_block_stays_visible_to_the_rules() {
+        // The quote marker on the opening line is still a quote marker.
+        assert_eq!(warned_lines("MD027", "# T\n\n>  <div>\n> a\n"), vec![3]);
+    }
+
+    #[test]
+    fn a_quoted_block_still_reports_its_html_tag() {
+        // The opening line of a quoted block stays visible to the rules.
+        assert_eq!(warned_lines("MD033", "> <div>\n> text\n"), vec![1]);
+    }
+}
