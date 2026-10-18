@@ -12,7 +12,7 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rayon::prelude::*;
 use rumdl_lib::config::MarkdownFlavor;
-use rumdl_lib::lint_context::LintContext;
+use rumdl_lib::lint_context::{LinkTargetPolicy, LintContext};
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::heading_utils::{HeadingUtils, get_heading_level, is_heading, is_setext_heading_marker};
 use rumdl_lib::rules::md013_line_length::md013_config::ReflowMode;
@@ -25,7 +25,7 @@ use rumdl_lib::rules::{MD014CommandsShowOutput, MD024NoDuplicateHeading, MD039No
 use rumdl_lib::utils::regex_cache::{RegexCache, get_cached_regex};
 use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin, WorkspaceIndex};
 use std::hint::black_box;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // Input generators
@@ -683,8 +683,45 @@ fn bench_input_preparation(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_link_target_policy(c: &mut Criterion) {
+    let mut group = c.benchmark_group("link_target_policy");
+    for (label, document_count, target_count, depth, directories, absolute) in [
+        ("small_batch_no_targets", 3, 0, 2, 100, false),
+        ("large_batch_no_targets", 1191, 0, 2, 100, false),
+        ("large_batch_with_targets", 1191, 8142, 2, 100, false),
+        ("shared_directories", 3, 8142, 2, 100, false),
+        ("deep_directories", 3, 8142, 6, 100, false),
+        ("distinct_directories", 3, 8142, 2, 8142, false),
+        ("absolute_targets", 3, 512, 2, 100, true),
+    ] {
+        let documents: Vec<PathBuf> = (0..document_count)
+            .map(|i| PathBuf::from(format!("docs/page{i}.md")))
+            .collect();
+        let prefix: String = (0..depth).map(|i| format!("level{i}/")).collect();
+        let cwd = std::env::current_dir().unwrap();
+        let targets: Vec<PathBuf> = (0..target_count)
+            .map(|i| {
+                let path = PathBuf::from(format!("{prefix}group{}/file{i}.pdf", i % directories));
+                if absolute { cwd.join(path) } else { path }
+            })
+            .collect();
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                LinkTargetPolicy::with_declared_targets(
+                    black_box(&documents),
+                    black_box(&targets).iter().cloned(),
+                    std::iter::empty(),
+                    false,
+                )
+            });
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
+    bench_link_target_policy,
     bench_link_analysis,
     bench_input_preparation,
     bench_lint_context_new,

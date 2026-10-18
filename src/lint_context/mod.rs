@@ -87,32 +87,7 @@ impl LinkTargetPolicy {
         F: IntoIterator<Item = PathBuf>,
         D: IntoIterator<Item = PathBuf>,
     {
-        let files: Vec<PathBuf> = files.into_iter().collect();
-        let directories: Vec<PathBuf> = directories.into_iter().collect();
-        let roots = Self::working_roots();
-        let declared = Self::build(
-            Vec::<PathBuf>::new(),
-            files.clone(),
-            directories.clone(),
-            allow_disk_fallback,
-            &roots,
-        );
-        let paths: Vec<PathBuf> = paths.into_iter().map(|path| path.as_ref().to_path_buf()).collect();
-        let documents = Self::build(&paths, Vec::new(), Vec::new(), allow_disk_fallback, &roots);
-        let policy = Self::build(paths, files, directories, allow_disk_fallback, &roots);
-        // A file that is both supplied and declared is a document: its content
-        // is known, so it is not a declared-only target.
-        let declared_paths = declared
-            .supplied_paths
-            .iter()
-            .filter(|path| !documents.supplied_paths.contains(*path))
-            .cloned()
-            .collect();
-        Self {
-            declared_paths: Arc::new(declared_paths),
-            declared_dirs: declared.supplied_dirs,
-            ..policy
-        }
+        Self::build(paths, files, directories, allow_disk_fallback, Self::working_roots())
     }
 
     fn working_roots() -> Vec<PathBuf> {
@@ -191,13 +166,33 @@ impl LinkTargetPolicy {
         for path in paths {
             add_spellings(&mut supplied_paths, path.as_ref());
         }
+        let mut declared_paths = std::collections::HashSet::new();
         for path in files {
-            add_spellings(&mut supplied_paths, &path);
+            add_spellings(&mut declared_paths, &path);
         }
         let mut declared_dirs = std::collections::HashSet::new();
         for path in directories {
             add_spellings(&mut declared_dirs, &path);
         }
+        // Supplied documents have known content, even when also declared.
+        let declared_only = declared_paths.difference(&supplied_paths).cloned().collect();
+        let content_unknown_dirs = Self::implied_dirs(&declared_paths, &declared_dirs, &roots);
+        supplied_paths.extend(declared_paths);
+        let supplied_dirs = Self::implied_dirs(&supplied_paths, &declared_dirs, &roots);
+        Self {
+            supplied_paths: Arc::new(supplied_paths),
+            supplied_dirs: Arc::new(supplied_dirs),
+            declared_paths: Arc::new(declared_only),
+            declared_dirs: Arc::new(content_unknown_dirs),
+            allow_disk_fallback,
+        }
+    }
+
+    fn implied_dirs(
+        supplied_paths: &std::collections::HashSet<PathBuf>,
+        declared_dirs: &std::collections::HashSet<PathBuf>,
+        roots: &[PathBuf],
+    ) -> std::collections::HashSet<PathBuf> {
         // Collected from the normalized paths, so directories are compared
         // component by component: `doc` never matches a supplied `docs/b.md`.
         // A relative path's last ancestor is the empty path, which is how the
@@ -233,26 +228,24 @@ impl LinkTargetPolicy {
             })
         };
         let outside_roots = [outside_root(true), outside_root(false)];
-        let supplied_dirs = supplied_paths
+        let mut supplied_dirs = std::collections::HashSet::new();
+        for seed in supplied_paths
             .iter()
-            .flat_map(|path| path.ancestors().skip(1))
-            .chain(declared_dirs.iter().flat_map(|dir| dir.ancestors()))
-            .filter(|dir| {
-                !escapes_roots(dir)
-                    || outside_roots
-                        .iter()
-                        .flatten()
-                        .any(|outside_root| dir.starts_with(outside_root))
-            })
-            .map(Path::to_path_buf)
-            .collect();
-        Self {
-            supplied_paths: Arc::new(supplied_paths),
-            supplied_dirs: Arc::new(supplied_dirs),
-            declared_paths: Arc::default(),
-            declared_dirs: Arc::default(),
-            allow_disk_fallback,
+            .filter_map(|path| path.parent())
+            .chain(declared_dirs.iter().map(PathBuf::as_path))
+        {
+            for dir in seed.ancestors() {
+                if !escapes_roots(dir) || outside_roots.iter().flatten().any(|root| dir.starts_with(root)) {
+                    // A previously visited directory already contributed every
+                    // eligible ancestor under these same bounds.
+                    if supplied_dirs.contains(dir) {
+                        break;
+                    }
+                    supplied_dirs.insert(dir.to_path_buf());
+                }
+            }
         }
+        supplied_dirs
     }
 
     /// The path the set resolves `path` to, when that answer is a declared

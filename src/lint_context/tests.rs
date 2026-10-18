@@ -5173,6 +5173,96 @@ fn link_target_policy_declared_targets_join_files_and_directories_separately() {
     assert_eq!(policy.resolve_supplied(Path::new("nope")), None);
 }
 
+#[test]
+fn link_target_policy_keeps_declared_directory_bounds_separate_from_documents() {
+    let base = std::env::current_dir().unwrap();
+    let root = base.join("workspace");
+    for absolute in [false, true] {
+        let path = |relative: &str| {
+            if absolute {
+                crate::workspace_index::normalize_relative_path(&root.join(relative))
+            } else {
+                PathBuf::from(relative)
+            }
+        };
+        let policy = LinkTargetPolicy::build(
+            [path("../outside/docs/a.md")],
+            [path("../outside/assets/report.pdf")],
+            [path("../outside/assets/empty")],
+            false,
+            [&root],
+        );
+
+        for relative in ["../outside", "../outside/docs"] {
+            let target = path(relative);
+            assert_eq!(policy.resolve_supplied(&target), Some(target.clone()));
+            assert_eq!(
+                policy.declared_target_for(&target),
+                None,
+                "documents may widen the combined root without widening the declared-only root"
+            );
+        }
+        for relative in ["../outside/assets", "../outside/assets/empty"] {
+            let target = path(relative);
+            assert_eq!(policy.declared_target_for(&target), Some(target));
+        }
+        assert_eq!(policy.resolve_supplied(&path("..")), None);
+    }
+}
+
+#[test]
+fn link_target_policy_documents_override_declared_aliases() {
+    let base = std::env::current_dir().unwrap();
+    let roots = [base.join("workspace"), base.join("canonical-workspace")];
+    let policy = LinkTargetPolicy::build(
+        ["docs/known.md", "guide.md"],
+        [roots[0].join("docs/known.md"), roots[1].join("docs/unknown.markdown")],
+        [PathBuf::from("guide")],
+        false,
+        &roots,
+    );
+
+    for prefix in [PathBuf::new(), roots[0].clone(), roots[1].clone()] {
+        assert!(policy.contains(&prefix.join("docs/known.md")));
+        assert_eq!(policy.declared_target_for(&prefix.join("docs/known.md")), None);
+        assert_eq!(policy.declared_target_for(&prefix.join("docs/known")), None);
+        assert_eq!(
+            policy.resolve_supplied(&prefix.join("guide")),
+            Some(prefix.join("guide.md")),
+            "the supplied document takes precedence over a declared directory"
+        );
+        assert_eq!(policy.declared_target_for(&prefix.join("guide")), None);
+        assert_eq!(
+            policy.declared_target_for(&prefix.join("docs/unknown")),
+            Some(prefix.join("docs/unknown.markdown"))
+        );
+    }
+}
+
+#[test]
+fn link_target_policy_collects_all_ancestors_of_shared_directory_branches() {
+    let root = std::env::current_dir().unwrap().join("workspace");
+    let policy = LinkTargetPolicy::build(
+        ["docs/a/x.md", "docs/a/b/y.md"],
+        [PathBuf::from("docs/c/z.pdf"), PathBuf::from("docs/c/d/w.pdf")],
+        [PathBuf::from("docs/c/d/empty")],
+        false,
+        [&root],
+    );
+    let expected: std::collections::HashSet<PathBuf> =
+        ["", "docs", "docs/a", "docs/a/b", "docs/c", "docs/c/d", "docs/c/d/empty"]
+            .into_iter()
+            .flat_map(|dir| [PathBuf::from(dir), root.join(dir)])
+            .collect();
+
+    assert_eq!(*policy.supplied_dirs, expected);
+    assert_eq!(policy.declared_target_for(Path::new("docs/a")), None);
+    assert_eq!(
+        policy.declared_target_for(Path::new("docs/c/d/empty")),
+        Some(PathBuf::from("docs/c/d/empty"))
+    );
+}
+
 /// A marker with nothing after it, not even a space, opens an empty list item
 /// just like `- ` does, so the next line cannot underline it. Each row's
 /// expectation is pulldown-cmark's: an empty item and no heading.
