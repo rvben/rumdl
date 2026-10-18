@@ -281,6 +281,13 @@ impl<'a> FormatProof<'a> {
         if flavor != MarkdownFlavor::Standard || source.contains(['\r', '\0', '\t']) {
             return Self::default();
         }
+        // Native display-math scanning can close at a delimiter inside a code
+        // span, across blocks the primary parser keeps separate. Its line map
+        // can then hide list markers and change which earlier item owns later
+        // prose. Parser events alone cannot certify that source reading.
+        if source.contains("$$") {
+            return Self::default();
+        }
         let first = source.lines().next().unwrap_or("");
         let front_matter_candidate = ["---", "+++", "{", "- --", "-- -"].iter().any(|marker| {
             first
@@ -1237,6 +1244,21 @@ mod tests {
             }
         }
         failures
+    }
+
+    #[test]
+    fn source_display_math_keeps_native_list_ownership() {
+        use crate::rule::Rule;
+
+        let source = "1. a\n\n$$x\n- root\n  see `$$`\n  more\n";
+        let expected = "1. a\n\n$$x\n- root\n   see `$$`\n   more\n";
+        let context = LintContext::new(source, MarkdownFlavor::Standard, None);
+        let rule = crate::rules::MD077ListContinuationIndent::default();
+        let warnings = rule.check(&context).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(rule.fix(&context).unwrap(), expected);
+        assert!(!FormatProof::analyze(source, MarkdownFlavor::Standard).eligible());
+        assert_proofs(source);
     }
 
     #[test]

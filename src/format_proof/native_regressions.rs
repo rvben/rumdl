@@ -2,6 +2,9 @@
 //! Includes nested tables, Markdown HTML elements, admonitions and front matter.
 
 pub(crate) const SOURCES: &[&str] = &[
+    "1. a\n\n$$x\n- root\n  see `$$`\n  more\n",
+    "- a\n\n$$x\n- root\n  - child\n    see `$$`\n    more\n",
+    "1. a\n\n> $$x\n- root\n  see `$$`\n  more\n",
     "    <div markdown=\"span\">\n\n|a|b|\n|-|-|\n|1|\n",
     "  !!! note\n      | a | b |\n      |---|---|\n      | 1 | 2 |\n\nafter\n",
     "!!! note\n\n    text\n    | a | b |\n    |---|---|\n    | 1 | 2 |\n",
