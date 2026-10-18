@@ -110,6 +110,9 @@ jobs:
       - name: Run tests
         run: make test-ci
 
+      - name: Test experimental custom-rule example
+        run: RUMDL=target/debug/rumdl python3 -m unittest discover -s examples/custom-rules
+
       - name: Check every non-ignored test belongs to a CI profile
         run: make check-test-selection
 

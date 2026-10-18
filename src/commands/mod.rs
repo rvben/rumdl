@@ -9,6 +9,8 @@ pub mod clean;
 pub mod code_block_tools_docs;
 pub mod completions;
 pub mod config;
+#[cfg(any(feature = "native", feature = "wasi"))]
+pub mod experimental;
 pub mod explain;
 pub mod import;
 pub mod init;

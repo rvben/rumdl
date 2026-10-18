@@ -51,6 +51,9 @@ extern crate alloc;
 
 pub mod code_block_tools;
 pub mod config;
+#[cfg(any(feature = "native", feature = "wasi"))]
+#[doc(hidden)]
+pub mod custom_rules;
 pub mod discovery;
 pub mod doc_comment_lint;
 pub mod document_run;
