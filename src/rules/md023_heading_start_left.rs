@@ -177,52 +177,341 @@ impl MD023HeadingStartLeft {
     }
 }
 
-/// For each line, whether a list item is open in the run of quoted lines above
-/// it: the nearest earlier line deciding it opens an item, or is text written
-/// flush with the quote after a blank line, or a flush heading, either of which
-/// ends any list before it. Flush text without a blank line above may be lazy continuation of an item, so it
-/// decides nothing, and an unprefixed line under quoted text is such a
-/// continuation of the quote.
+/// For each line, whether a list item may be open in the run of quoted lines above
+/// it at the line's own quote depth or deeper: the nearest earlier line deciding it
+/// opens an item, or is text written flush with the quote after a blank line, or a
+/// flush heading, either of which ends any list before it. Flush text without a blank
+/// line above may be lazy continuation of an item, so it decides nothing, and an
+/// unprefixed line under quoted text is such a continuation of the quote.
+///
+/// An item at a shallower depth than the line cannot change where the line's quote
+/// holds its content, so it does not count; a line that cannot continue a paragraph
+/// ends the quotes deeper than its own, and the items in them.
 fn quote_list_flags(ctx: &crate::lint_context::LintContext) -> Vec<bool> {
     let mut flags = Vec::with_capacity(ctx.lines.len());
-    let mut open = false;
+    // The quote depths holding an item that may still be open, ascending and distinct.
+    let mut item_depths: Vec<usize> = Vec::new();
     // The shallowest quote depth a line of the open list was seen at: text in a
     // quote nested deeper says nothing about the list around that quote.
     let mut open_depth = usize::MAX;
     let mut blank_above = true;
+    let mut in_list_quote = false;
+    let mut previous_depth = 0;
+    let mut previous_nested = false;
+    let mut previous_paragraph = false;
+    // The quote depth of an HTML block a tag alone on a quoted line may have opened.
+    let mut tag_block: Option<usize> = None;
+    // The end marker of a comment, instruction or declaration block opened in a quote;
+    // it lasts through blank lines until the marker or an unquoted line.
+    let mut raw_block: Option<(&'static str, usize)> = None;
     for line in &ctx.lines {
-        let Some((depth, content)) = quoted_content(line.content(ctx.content)) else {
+        let text = line.content(ctx.content);
+        // Four columns of indentation before the first marker make it text, not a quote,
+        // unless a list holding the quote supplies that indentation.
+        let quoted =
+            if !in_list_quote && visual_width(&text[..text.len() - text.trim_start_matches([' ', '\t']).len()]) >= 4 {
+                None
+            } else {
+                quoted_content(text)
+            };
+        let Some((depth, content)) = quoted else {
             // Unprefixed text straight under quoted text continues its paragraph,
             // so the quote and its open item go on; anything else ends the quote.
-            if blank_above || line.content(ctx.content).trim().is_empty() {
-                open = false;
+            if blank_above || text.trim().is_empty() {
+                item_depths.clear();
                 open_depth = usize::MAX;
                 blank_above = true;
+                in_list_quote = false;
             }
+            // An unquoted line ends the quote's HTML block, which has no lazy lines.
+            tag_block = None;
+            raw_block = None;
             flags.push(false);
             continue;
         };
-        flags.push(open);
-        // List-shaped text inside a fenced block decides nothing.
-        if line.in_code_block {
+        // The quote markers of a line written flush with the margin are not held by a list,
+        // so a later line indented four columns is text again.
+        in_list_quote = quote_start(text).is_some_and(|at| at > 0);
+        // List-shaped text inside a code block decides nothing, but an item whose
+        // content is indented code (`- ` and five spaces) is still an item.
+        if line.in_code_block && line.list_item.is_none() {
+            flags.push(item_depths.last().is_some_and(|&deepest| deepest >= depth));
             continue;
         }
         let blank = content.trim().is_empty();
-        if !blank {
-            if opens_list_item(content.trim_start()) {
-                open = true;
-                open_depth = open_depth.min(depth);
-            } else if depth <= open_depth
-                && !content.starts_with([' ', '\t'])
-                && (blank_above || starts_atx_heading(content))
-            {
-                open = false;
-                open_depth = usize::MAX;
+        // Where a quoted block that runs to its end marker begins or ends is read by the
+        // parser and by other readers alike only up to the marker, so the lines between
+        // are never taken for headings or items.
+        let mut was_raw = false;
+        if let Some((end, open)) = raw_block {
+            if depth < open {
+                // The line leaves the quote that held the block.
+                raw_block = None;
+            } else {
+                was_raw = true;
+                if content.contains(end) {
+                    raw_block = None;
+                }
             }
+        } else if let Some(end) = raw_block_end(content)
+            && !content.trim_start()[1..].contains(end)
+        {
+            raw_block = Some((end, depth));
+        }
+        // The block lasts until a blank line at the quote depth it opened at; deeper
+        // quote markers are text of the block, and a shallower line leaves its quote.
+        if tag_block.is_some_and(|open| depth < open || (blank && depth == open)) {
+            tag_block = None;
+        }
+        if tag_block.is_none() && !blank {
+            // A tag alone on a line cannot interrupt a paragraph, but it can start a block
+            // after a paragraph that is held by an item or a deeper quote, which the parser
+            // reads as a lazy line; the parser reads the other kinds of block itself.
+            if ctx.flavor != crate::config::MarkdownFlavor::MDX
+                && is_lone_tag(content)
+                && !line.in_html_block
+                && !(previous_paragraph && depth == previous_depth && item_depths.is_empty())
+            {
+                tag_block = Some(depth);
+            }
+        }
+        // The line itself ends the quotes deeper than its own, and the items in them.
+        if blank || blank_above || ends_deeper_quotes(text, content) {
+            while item_depths.last().is_some_and(|&deepest| deepest > depth) {
+                item_depths.pop();
+            }
+        }
+        // An opener line sits inside the item it opens at its own quote depth (a setext
+        // heading's text line is such a line), so it is flagged once that item is
+        // recorded. A marker opens an item there when nothing is above it to continue,
+        // when it starts a quote, or when it can interrupt the paragraph above it.
+        let opens_item = !blank && opens_list_item(content.trim_start());
+        // A line written flush after a line of a quote inside an item leaves that quote
+        // and may leave the item. What the lines above held is then unknown, so an item
+        // marker is taken to open an item whether or not it could interrupt a paragraph.
+        let nested = quote_nested_in_item(text);
+        let replaces_quote = previous_nested && !nested;
+        let opens_here = opens_item
+            && (blank_above
+                || depth != previous_depth
+                || replaces_quote
+                || !previous_paragraph
+                || ends_deeper_quotes(text, content));
+        let mut deepest_item = None;
+        let mut innermost = depth;
+        let before = item_depths.last().is_some_and(|&deepest| deepest >= depth);
+        if opens_item {
+            innermost = for_each_item_depth(text, |item_depth| {
+                deepest_item = deepest_item.max(Some(item_depth));
+                if let Err(at) = item_depths.binary_search(&item_depth) {
+                    item_depths.insert(at, item_depth);
+                }
+            });
+            open_depth = open_depth.min(depth);
+        }
+        flags.push(
+            before
+                || tag_block.is_some()
+                || raw_block.is_some()
+                || was_raw
+                || (opens_here && (replaces_quote || deepest_item == Some(innermost))),
+        );
+        previous_depth = depth;
+        previous_nested = nested;
+        previous_paragraph = is_paragraph_text(content);
+        if !blank
+            && !opens_item
+            && depth <= open_depth
+            && !content.starts_with([' ', '\t'])
+            && !tab_marker_indents(text, content)
+            && (blank_above || starts_atx_heading(content))
+        {
+            item_depths.clear();
+            open_depth = usize::MAX;
         }
         blank_above = blank;
     }
     flags
+}
+
+/// Whether the optional space after the last quote marker of `line` is a tab that is wider
+/// than that one column, so that the text after `content` is indented by what is left.
+fn tab_marker_indents(line: &str, content: &str) -> bool {
+    let marker_end = line.len() - content.len();
+    line[..marker_end].ends_with('\t') && visual_width(&line[..marker_end - 1]) % 4 != 3
+}
+
+/// Whether `content` is a tag alone on its line, indented less than four columns: the start
+/// of an HTML block that no paragraph above needs to allow, which other parsers read
+/// where a paragraph's lazy continuation is not possible.
+/// The marker that ends an HTML block of start conditions 2 to 5 opened by `content`.
+fn raw_block_end(content: &str) -> Option<&'static str> {
+    let trimmed = content.trim_start_matches([' ', '\t']);
+    if visual_width(&content[..content.len() - trimmed.len()]) >= 4 {
+        return None;
+    }
+    if trimmed.starts_with("<!--") {
+        Some("-->")
+    } else if trimmed.starts_with("<?") {
+        Some("?>")
+    } else if trimmed.starts_with("<![CDATA[") {
+        Some("]]>")
+    } else if trimmed.starts_with("<!") && trimmed[2..].starts_with(|c: char| c.is_ascii_alphabetic()) {
+        Some(">")
+    } else {
+        None
+    }
+}
+
+/// Whether `content` is a line of text that a following line continues as a paragraph,
+/// rather than a marker, a fence, a heading, a tag or a line of an indented block.
+fn is_paragraph_text(content: &str) -> bool {
+    let trimmed = content.trim_start_matches([' ', '\t']);
+    if trimmed.is_empty() || visual_width(&content[..content.len() - trimmed.len()]) >= 4 {
+        return false;
+    }
+    let first = trimmed.chars().next().unwrap_or(' ');
+    let run = trimmed.chars().take_while(|&c| c == first).count();
+    let marker_like = match first {
+        '#' | '>' | '<' | '=' | '|' => true,
+        '`' | '~' | '_' => run >= 3,
+        '-' | '+' | '*' => {
+            let after = &trimmed[1..];
+            after.is_empty()
+                || after.starts_with([' ', '\t'])
+                || trimmed.chars().filter(|c| !c.is_whitespace()).all(|c| c == first)
+        }
+        c if c.is_ascii_digit() => {
+            let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
+            let after = &trimmed[digits..];
+            after.starts_with(['.', ')']) && (after.len() == 1 || after[1..].starts_with([' ', '\t']))
+        }
+        _ => false,
+    };
+    !marker_like
+}
+
+fn is_lone_tag(content: &str) -> bool {
+    let trimmed = content.trim_start_matches([' ', '\t']);
+    if visual_width(&content[..content.len() - trimmed.len()]) >= 4 || !trimmed.trim_end().ends_with('>') {
+        return false;
+    }
+    let Some(tag) = trimmed.strip_prefix('<') else {
+        return false;
+    };
+    let closing = tag.starts_with('/');
+    let name = tag
+        .trim_start_matches('/')
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    // Start conditions 1 and 6 interrupt a paragraph, so the parser reads them itself; a
+    // closing type-1 tag and the names outside the spec are start condition 7.
+    let read_by_parser = crate::utils::html_block::BLOCK_ELEMENTS.contains(&name.as_str())
+        && !crate::utils::html_block::NON_SPEC_BLOCK_ELEMENTS.contains(&name.as_str())
+        && !(closing && crate::utils::html_block::TYPE_1_BLOCK_ELEMENTS.contains(&name.as_str()));
+    name.starts_with(|c: char| c.is_ascii_alphabetic()) && !read_by_parser && is_complete_tag(tag, closing)
+}
+
+/// Whether `tag` (the text after the `<`) is one whole open or closing tag with nothing but
+/// whitespace after it, which is what start condition 7 asks of the line.
+fn is_complete_tag(tag: &str, closing: bool) -> bool {
+    let rest = tag
+        .trim_start_matches('/')
+        .trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '-');
+    if !rest.starts_with([' ', '\t', '/', '>']) {
+        return false;
+    }
+    let mut quote = None;
+    for (at, c) in rest.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') if !closing => quote = Some(c),
+            (None, '<') => return false,
+            (None, '>') => {
+                let head = rest[..at].trim();
+                let head_ok = if closing { head.is_empty() } else { true };
+                return head_ok && rest[at + 1..].trim().is_empty();
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Whether a quote marker of `line` is written far enough past the marker before it to be
+/// inside an item that an earlier line opened (`>   > x`).
+fn quote_nested_in_item(line: &str) -> bool {
+    let mut rest = line;
+    let mut markers = 0;
+    loop {
+        let trimmed = rest.trim_start_matches([' ', '\t']);
+        if let Some(after) = trimmed.strip_prefix('>') {
+            if markers > 0 && visual_width(&rest[..rest.len() - trimmed.len()]) >= 3 {
+                return true;
+            }
+            markers += 1;
+            rest = after;
+            continue;
+        }
+        let token = trimmed.split([' ', '\t']).next().unwrap_or("");
+        if !opens_list_item(token) {
+            return false;
+        }
+        rest = &trimmed[token.len()..];
+    }
+}
+
+/// Calls `visit` with each quote depth `line` may open or sit inside an item at: the depth
+/// of every list marker opening it (`> - > - x` visits 1, then 2), and the depth around a
+/// quote marker written far enough past the marker before it to be inside an item that
+/// an earlier line opened (`>   > - x` visits 1 for the outer quote's item, then 2).
+/// Returns the quote depth the line's text sits at.
+fn for_each_item_depth(line: &str, mut visit: impl FnMut(usize)) -> usize {
+    let mut rest = line;
+    let mut markers = 0;
+    loop {
+        let trimmed = rest.trim_start_matches([' ', '\t']);
+        if let Some(after) = trimmed.strip_prefix('>') {
+            let gap = visual_width(&rest[..rest.len() - trimmed.len()]);
+            // The optional space after the marker before it, then the two columns of the
+            // narrowest item marker.
+            if markers > 0 && gap >= 3 {
+                visit(markers);
+            }
+            markers += 1;
+            rest = after;
+            continue;
+        }
+        let token = trimmed.split([' ', '\t']).next().unwrap_or("");
+        if !opens_list_item(token) {
+            return markers;
+        }
+        visit(markers);
+        rest = &trimmed[token.len()..];
+    }
+}
+
+/// Whether `content`, the text of a quoted line after its quote markers, starts a block
+/// that cannot be a lazy continuation of a paragraph in a deeper quote: an ATX heading
+/// or a list item with text, indented less than four columns.
+fn ends_deeper_quotes(line: &str, content: &str) -> bool {
+    let trimmed = content.trim_start_matches([' ', '\t']);
+    // The columns of indentation after the quote marker and the one optional column
+    // it takes, counting what is left of a tab.
+    let before = &line[..line.len() - trimmed.len()];
+    let marker_end = before.rfind('>').map_or(0, |at| visual_width(&before[..=at]));
+    if visual_width(before).saturating_sub(marker_end + 1) >= 4 {
+        return false;
+    }
+    if starts_atx_heading(trimmed) {
+        return true;
+    }
+    let token = trimmed.split([' ', '\t']).next().unwrap_or("");
+    let has_text = !trimmed[token.len()..].trim().is_empty();
+    has_text && (matches!(token, "-" | "+" | "*") || matches!(token, "1." | "1)"))
 }
 
 /// The width of `text` in columns, with tabs advancing to multiples of four.
@@ -893,22 +1182,113 @@ mod list_item_tests {
         }
     }
 
+    /// The lines `content` warns on, and the document after fixing it.
+    fn fixed_quoted(content: &str) -> (Vec<usize>, String) {
+        let rule = MD023HeadingStartLeft;
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let lines = rule.check(&ctx).unwrap().iter().map(|w| w.line).collect();
+        (lines, rule.fix(&ctx).unwrap())
+    }
+
     #[test]
     fn test_heading_after_the_quote_of_a_list_item_ends_is_measured_from_its_own_quote() {
-        let rule = MD023HeadingStartLeft;
-        let content = "# T\n\n> > - item\n>\n>    ## H\n";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        // The heading is in the outer quote, outside the item: it is not moved to the item's column.
-        assert_ne!(rule.fix(&ctx).unwrap(), "# T\n\n> > - item\n>\n>   ## H\n");
+        // The heading is in the outer quote, outside the item: it is measured from the
+        // outer quote's content edge, not moved to the item's column.
+        for (bad, fixed) in [
+            ("# T\n\n> > - item\n>\n>    ## H\n", "# T\n\n> > - item\n>\n> ## H\n"),
+            (
+                "# T\n\n> > 10. item\n>\n>    ## H\n",
+                "# T\n\n> > 10. item\n>\n> ## H\n",
+            ),
+            ("# T\n\n> > - item\n>    ## H\n", "# T\n\n> > - item\n> ## H\n"),
+            (
+                "# T\n\n> > - item\n> lazy\n>    ## H\n",
+                "# T\n\n> > - item\n> lazy\n> ## H\n",
+            ),
+            (
+                "# T\n\n> > - item\n> >\n>    ## H\n",
+                "# T\n\n> > - item\n> >\n> ## H\n",
+            ),
+            (
+                "# T\n\n> > - a\n> - b\n>    ## H\n",
+                "# T\n\n> > - a\n> - b\n>   ## H\n",
+            ),
+            (
+                "# T\n\n> > - a\n> >   - b\n>\n>  ## H\n",
+                "# T\n\n> > - a\n> >   - b\n>\n> ## H\n",
+            ),
+        ] {
+            let (lines, fixed_text) = fixed_quoted(bad);
+            assert_eq!(fixed_text, fixed, "{bad:?}");
+            assert_eq!(lines.len(), 1, "{bad:?}");
+        }
+        // At the outer quote's edge: nothing to report.
+        assert!(fixed_quoted("# T\n\n> > - item\n>\n> ## H\n").0.is_empty());
     }
 
     #[test]
     fn test_quote_nested_inside_a_quoted_list_item_is_not_measured_against_the_item() {
-        let rule = MD023HeadingStartLeft;
-        let content = "> - item\n>\n>   >    ## H\n";
+        // The heading's quote is inside the item; its own content edge is the reference.
+        for (bad, fixed) in [
+            ("> - item\n>\n>   >    ## H\n", "> - item\n>\n>   > ## H\n"),
+            ("> 10. item\n>\n>     >    ## H\n", "> 10. item\n>\n>     > ## H\n"),
+            ("> - item\n>   >\n>   >    ## H\n", "> - item\n>   >\n>   > ## H\n"),
+            (
+                "> > - old\n> - new\n>   >    ## H\n",
+                "> > - old\n> - new\n>   > ## H\n",
+            ),
+            ("> - > text\n>   >\n>   >    ## H\n", "> - > text\n>   >\n>   > ## H\n"),
+        ] {
+            let (lines, fixed_text) = fixed_quoted(bad);
+            assert_eq!(fixed_text, fixed, "{bad:?}");
+            assert_eq!(lines.len(), 1, "{bad:?}");
+        }
+        // At the inner quote's edge: nothing to report.
+        assert!(fixed_quoted("> - item\n>\n>   > ## H\n").0.is_empty());
+        // An item held by the heading's own quote still owns its content column.
+        assert!(fixed_quoted("> - item\n>   > - x\n>   >\n>   >   ## H\n").0.is_empty());
+    }
+
+    fn flags(content: &str) -> Vec<bool> {
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        // Not rewritten as if the heading sat in the item's own quote.
-        assert_ne!(rule.fix(&ctx).unwrap(), "> - item\n>\n>   >   ## H\n");
+        quote_list_flags(&ctx)
+    }
+
+    #[test]
+    fn test_list_flags_cover_the_items_at_the_lines_depth_or_deeper() {
+        // An item in the line's own quote, or in one inside it that the line may continue.
+        assert_eq!(flags("> - a\n>   b\n"), [true, true]);
+        assert_eq!(flags("> > - a\n> b\n"), [true, true]);
+        // An item in an enclosing quote is not in the line's quote.
+        assert_eq!(flags("> - a\n>   > b\n"), [true, false]);
+        // A forgotten outer item stays possible around an indented inner quote.
+        assert_eq!(flags("> text\n>   > - x\n>    ## H\n"), [false, true, true]);
+    }
+
+    #[test]
+    fn test_list_flags_end_deeper_quotes_at_a_line_that_cannot_continue_a_paragraph() {
+        // A blank line at a shallower depth.
+        assert_eq!(flags("> > - a\n>\n>    b\n"), [true, false, false]);
+        // The blank line ends the inner quote; a quote opened after it holds no item.
+        assert_eq!(flags("> > - a\n>\n> > b\n"), [true, false, false]);
+        // A line after a blank line at the deeper depth.
+        assert_eq!(flags("> > - a\n> >\n>    b\n"), [true, true, false]);
+        // An ATX heading, a bullet item with text and `1.` item interrupt a paragraph.
+        assert_eq!(flags("> > - a\n>    ## b\n"), [true, false]);
+        assert_eq!(flags("> > - a\n> - b\n"), [true, true]);
+        assert_eq!(flags("> > - a\n> 1. b\n"), [true, true]);
+        // Plain text, a `2.` item and an empty marker may be lazy continuation.
+        assert_eq!(flags("> > - a\n> b\n"), [true, true]);
+        assert_eq!(flags("> > - a\n> 2. b\n"), [true, true]);
+        assert_eq!(flags("> > - a\n> -\n"), [true, true]);
+        // An item that opens with indented code is still an item.
+        assert_eq!(flags("> > - a\n> -     code\n>    ## b\n"), [true, true, true]);
+        // Four columns of indentation make it continuation text, not a block.
+        assert_eq!(flags("> > - a\n>     ## b\n"), [true, true]);
+        assert_eq!(flags("> > - a\n>     - b\n"), [true, true]);
+        // Items on one line close together: `> - > - x` keeps the outer one.
+        assert_eq!(flags("> - > - a\n>\n>   > b\n"), [true, true, false]);
+        assert_eq!(flags("> - > - a\n>\n>   b\n"), [true, true, true]);
     }
 
     #[test]

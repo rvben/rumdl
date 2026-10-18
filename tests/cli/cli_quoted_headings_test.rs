@@ -552,6 +552,289 @@ mod md023 {
     }
 
     #[test]
+    fn a_heading_in_the_outer_quote_after_an_item_of_a_deeper_quote_is_measured_from_the_outer_edge() {
+        // pandoc: BlockQuote [BlockQuote [BulletList ..], Header 2]
+        assert_fix(
+            "MD023",
+            "# T\n\n> > - item\n>\n>    ## H\n",
+            "# T\n\n> > - item\n>\n> ## H\n",
+        );
+        assert_fix(
+            "MD023",
+            "# T\n\n> > 10. item\n>\n>    ## H\n",
+            "# T\n\n> > 10. item\n>\n> ## H\n",
+        );
+        assert_fix(
+            "MD023",
+            "# T\n\n> > - item\n> lazy\n>    ## H\n",
+            "# T\n\n> > - item\n> lazy\n> ## H\n",
+        );
+        assert_untouched("MD023", "# T\n\n> > - item\n>\n> ## H\n");
+        // Four columns past the edge the line is indented code.
+        assert_untouched("MD023", "# T\n\n> > - item\n>\n>     ## H\n");
+    }
+
+    #[test]
+    fn a_heading_in_a_quote_inside_a_quoted_item_is_measured_from_the_inner_edge() {
+        // pandoc: BlockQuote [BulletList [[Para, BlockQuote [Header 2]]]]
+        assert_fix(
+            "MD023",
+            "# T\n\n> - item\n>\n>   >    ## H\n",
+            "# T\n\n> - item\n>\n>   > ## H\n",
+        );
+        assert_fix(
+            "MD023",
+            "# T\n\n> 10. item\n>\n>     >    ## H\n",
+            "# T\n\n> 10. item\n>\n>     > ## H\n",
+        );
+        assert_untouched("MD023", "# T\n\n> - item\n>\n>   > ## H\n");
+        assert_untouched("MD023", "# T\n\n> - item\n>\n>   >     ## H\n");
+    }
+
+    #[test]
+    fn a_quote_indented_into_an_item_an_earlier_line_opened_keeps_that_item_possible() {
+        // The tab heading hides the item's opener from the list tracking. The indented
+        // inner quote may sit in that item, so the heading below it is not pulled out.
+        let input = "# T\n\n> - item\n>\t## H\n>   > - x\n>    ## H\n";
+        assert_eq!(skeleton(input)[1..], skeleton(&fixed("MD023", input))[1..]);
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn an_item_opening_with_indented_code_keeps_a_heading_below_it_in_the_item() {
+        // pandoc: the heading is in the item, three columns past the quote's edge
+        let input = "# T\n\n> > - item\n> -     code\n>    ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_setext_text_line_opening_an_item_in_a_deeper_quote_keeps_its_marker_indent() {
+        // pandoc: the setext heading is the item's content, so dedenting its marker
+        // would move the item's content edge and pull the next heading into it
+        let input = "> - x\n> >  - x\n> >    ---\n> >   ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn an_indented_quote_lookalike_does_not_close_the_item_around_it() {
+        // pandoc: the four-space line is text of the item's paragraph, and the heading
+        // stays in the item
+        let input = "> > - x\n    > - x\n> >   ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_heading_lookalike_indented_by_a_tab_does_not_close_the_item_around_it() {
+        // pandoc: the tab leaves two columns past the quote's content, so `# H` is
+        // paragraph text of the item and the heading stays in the item
+        let input = "> > - x\n>\t   # H\n> >   ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_quote_indented_by_its_enclosing_list_keeps_its_item() {
+        // pandoc: the four columns are the list's indentation, and the heading stays
+        // in the inner item
+        let input = "- > - x\nlazy\n    >   ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_marker_that_cannot_interrupt_setext_text_stays_reported() {
+        // pandoc: `2. More` is text of the setext heading, not a list item
+        let input = "> Text\n>  2. More\n> ---\n";
+        assert_eq!(warned_lines("MD023", input), vec![2]);
+        assert_eq!(fixed("MD023", input), "> Text\n> 2. More\n> ---\n");
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+    }
+
+    #[test]
+    fn a_quote_replacing_the_quote_of_an_item_keeps_its_own_item() {
+        // pandoc: the second `> >` starts a new quote, whose list item holds only `x`;
+        // `## H` is a heading beside the list, so no line can be dedented
+        let input = "# T\n\n> - x\n>   > text\n> >  2. x\n> >     ---\n> >    ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_marker_that_cannot_interrupt_text_in_a_quote_inside_an_item_stays_reported() {
+        // pandoc: `2. x` continues the setext text inside the item's quote
+        let input = "# T\n\n> - x\n>   > text\n>   >  2. x\n>   > ---\n";
+        assert_fix("MD023", input, "# T\n\n> - x\n>   > text\n>   > 2. x\n>   > ---\n");
+    }
+
+    #[test]
+    fn a_lone_tag_after_a_nested_quote_starts_raw_html_that_is_left_alone() {
+        // pandoc: `</pre>` opens an HTML block holding every line below it
+        let input = "# T\n\n>   >  2. x\n> </pre>\n>    - z\n>   >   ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_marker_after_a_heading_in_the_same_quote_opens_an_item() {
+        // pandoc: `2. x` starts a list item after the heading, and `## Heading` is not in it
+        let input = "> - x\n> > # Heading\n> >  2. x\n> >     ---\n> >    ## Heading\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn an_indented_line_after_a_quote_that_left_its_list_is_text() {
+        // pandoc: the second line ends the list, so the third line is lazy text of its quote
+        let input = "- > - x\n> > - x\n    > - x\n> >    ## Heading\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_closed_quoted_html_block_does_not_hold_the_heading_after_it() {
+        assert_fix(
+            "MD023",
+            "> <pre>\n> </pre>\n>    ## Heading\n",
+            "> <pre>\n> </pre>\n> ## Heading\n",
+        );
+    }
+
+    #[test]
+    fn a_tag_inside_a_paragraph_is_not_an_html_block() {
+        assert_fix(
+            "MD023",
+            "> text\n> <span>\n>    ## Heading\n",
+            "> text\n> <span>\n> ## Heading\n",
+        );
+    }
+
+    #[test]
+    fn a_tab_after_the_marker_keeps_the_item_open_for_the_headings_below() {
+        // pandoc: all three headings stay in their containers, and the last one is in the item
+        assert_fix(
+            "MD023",
+            "> - item\n>   >    ## H\n>\t## H\n>     ## H\n",
+            "> - item\n>   > ## H\n>\t## H\n>   ## H\n",
+        );
+    }
+
+    #[test]
+    fn deeper_quote_lines_do_not_end_a_quoted_html_block() {
+        // pandoc: `<span>` opens an HTML block, and the line holding only `>` is part of it
+        let input = "> - item\n> <span>\n>   >\n> >   ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_lone_tag_after_a_nested_list_item_starts_raw_html() {
+        let input = "> > 2. x\n> </pre>\n> >\n>    ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn a_blank_quote_line_ends_a_quoted_tag_block() {
+        assert_fix(
+            "MD023",
+            "> a\n>\n> <span>\n>\n>    ## H\n",
+            "> a\n>\n> <span>\n>\n> ## H\n",
+        );
+    }
+
+    #[test]
+    fn an_unclosed_quoted_comment_holds_the_lines_below_it() {
+        // pandoc: the second comment runs to the end and holds `>   >    ## H` as raw HTML
+        let input = "> <!--\nlazy\n> <!--\n>   - y\n>   >    ## H\n";
+        assert_untouched("MD023", input);
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+    }
+
+    #[test]
+    fn a_closed_quoted_comment_does_not_hold_the_heading_after_it() {
+        assert_fix(
+            "MD023",
+            "> <!--\n> x\n> -->\n>\n>    ## H\n",
+            "> <!--\n> x\n> -->\n>\n> ## H\n",
+        );
+    }
+
+    #[test]
+    fn a_comment_in_a_nested_quote_ends_with_that_quote() {
+        // pandoc: `## H` is a heading in the outer quote
+        assert_fix("MD023", "> > <!--\n>    ## H\n", "> > <!--\n> ## H\n");
+    }
+
+    #[test]
+    fn an_autolink_line_is_text_not_a_tag_block() {
+        assert_fix(
+            "MD023",
+            "> <https://example.com>\n>    ## H\n",
+            "> <https://example.com>\n> ## H\n",
+        );
+    }
+
+    #[test]
+    fn inline_html_with_text_is_not_a_tag_block() {
+        assert_fix(
+            "MD023",
+            "> <span>text</span>\n>    ## H\n",
+            "> <span>text</span>\n> ## H\n",
+        );
+    }
+
+    #[test]
+    fn a_paragraph_starting_with_emphasis_is_continued_by_a_numbered_line() {
+        // pandoc: both lines are the text of one setext heading
+        assert_fix("MD023", "> *Text*\n>  2. More\n> ---\n", "> *Text*\n> 2. More\n> ---\n");
+    }
+
+    #[test]
+    fn a_quoted_component_in_mdx_holds_markdown_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("c.mdx");
+        std::fs::write(&file, "> <Component>\n>    ## Heading\n> </Component>\n").unwrap();
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .args(["check", "--no-cache", "--enable", "MD023", "--flavor", "mdx"])
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&out.stdout).contains("MD023"), "{out:?}");
+    }
+
+    #[test]
+    fn a_line_of_the_outer_quote_ends_a_tag_block_in_the_inner_quote() {
+        assert_fix("MD023", "> > <span>\n>    ## H\n", "> > <span>\n> ## H\n");
+    }
+
+    #[test]
+    fn a_heading_lookalike_in_quoted_html_after_a_deeper_item_is_left_alone() {
+        // pandoc: `<pre>` ends the deeper quote and holds `## H` as raw HTML
+        let input = "# T\n\n> > - x\n> <pre>\n>    ## H\n> </pre>\n";
+        assert_untouched("MD023", input);
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+    }
+
+    #[test]
+    fn a_greater_than_sign_in_item_text_is_not_a_quote() {
+        // pandoc: `x > y` is the setext heading's text and the heading stays in the item
+        let input = "> > - x\n>  - x > y\n>    ---\n>   ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
+    fn an_ordered_item_opening_inside_a_new_quote_keeps_its_marker_indent() {
+        // pandoc: `2.` starts a list because the quote around it is new
+        let input = "> - x\n> >  2. x\n> >     ---\n> >    ## H\n";
+        assert_eq!(skeleton(input), skeleton(&fixed("MD023", input)));
+        assert_eq!(fixed("MD023", input), input);
+    }
+
+    #[test]
     fn deep_continuation_of_quoted_setext_text_is_reported_but_not_rewritten() {
         // Unindented, the fence line would open a code fence and end the heading.
         let input = "> text\n>      ```\n> ---\n";

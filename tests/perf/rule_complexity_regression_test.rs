@@ -452,6 +452,25 @@ fn test_md027_list_continuation_lookup_linear_complexity() {
     }
 }
 
+/// MD023 asks per quoted heading whether an item may be open at its quote depth; the
+/// answer must come from the running state of the quotes above it, not a scan back.
+#[test]
+fn test_md023_quoted_list_flags_linear_complexity() {
+    let rule = MD023HeadingStartLeft;
+    for unit in [
+        "> > - item\n>\n>    ## H\n>\n",
+        "> - item\n>\n>   >    ## H\n>\n",
+        "> > - a\n> - b\n>   >    ## H\n>\n",
+        "> - > - item\n>\n>   >    ## H\n>\n",
+    ] {
+        let durations: Vec<_> = [500, 1000, 2000]
+            .iter()
+            .map(|&size| measure_rule_time(&rule, &unit.repeat(size), 3))
+            .collect();
+        assert_linear_complexity(&format!("MD023 {unit:?}"), &durations, 3.0);
+    }
+}
+
 // =============================================================================
 // LintContext Construction Tests
 // =============================================================================
