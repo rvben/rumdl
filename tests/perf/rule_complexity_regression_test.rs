@@ -1312,6 +1312,28 @@ fn test_md034_interleaved_code_links_and_bare_urls_linear_complexity() {
 }
 
 #[test]
+fn test_md034_long_line_linear_complexity() {
+    let rule = MD034NoBareUrls;
+    for (name, unit, warnings_per_unit) in [
+        ("formatted", "[link](https://example.com) <hello@example.com> ", 0),
+        ("bare Unicode", "é🦀 https://example.com hello@example.com ", 2),
+    ] {
+        let durations: Vec<_> = [4096, 8192, 16384]
+            .into_iter()
+            .map(|size| {
+                let content = format!("{}\n", unit.repeat(size));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), size * warnings_per_unit);
+                measure_rule_time(&rule, &content, 5)
+            })
+            .collect();
+        // Doubling a paragraph must not quadruple construct lookup or column
+        // counting work. Cover the two costs separately to catch either one.
+        assert_linear_complexity(&format!("MD034 long line ({name})"), &durations, 3.0);
+    }
+}
+
+#[test]
 fn test_md039_linear_complexity() {
     let sizes = [500, 1000, 2000];
     let iterations = 5;

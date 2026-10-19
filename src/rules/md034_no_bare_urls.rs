@@ -6,7 +6,6 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::calculate_url_range;
 use crate::utils::regex_cache::{EMAIL_PATTERN, URL_IPV6_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, XMPP_URI_REGEX};
 
 use crate::filtered_lines::FilteredLinesExt;
@@ -400,11 +399,70 @@ fn uri_content_end(uri: &str) -> usize {
     uri.len()
 }
 
+/// Starts in ascending order, with each end replaced by the largest end seen
+/// so far. A predecessor lookup then answers whether *one* original range
+/// contains a point or span, even when ranges overlap or nest. Merging ranges
+/// would incorrectly accept spans crossing from one construct into another.
+#[derive(Default)]
+struct ConstructRanges(Vec<(usize, usize)>);
+
+impl ConstructRanges {
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    fn push(&mut self, range: (usize, usize)) {
+        self.0.push(range);
+    }
+
+    fn index(&mut self) {
+        self.0.sort_unstable_by_key(|&(start, _)| start);
+        let mut max_end = 0;
+        for (_, end) in &mut self.0 {
+            max_end = max_end.max(*end);
+            *end = max_end;
+        }
+    }
+
+    fn end_at(&self, start: usize) -> Option<usize> {
+        let count = self.0.partition_point(|&(range_start, _)| range_start <= start);
+        count.checked_sub(1).map(|index| self.0[index].1)
+    }
+
+    fn contains_start(&self, start: usize) -> bool {
+        self.end_at(start).is_some_and(|end| start < end)
+    }
+
+    fn contains_span(&self, start: usize, end: usize) -> bool {
+        self.end_at(start).is_some_and(|range_end| end <= range_end)
+    }
+}
+
+/// Both match streams run forwards. Count each intervening character once,
+/// rather than recounting the line prefix for every diagnostic. URLs and emails
+/// use separate cursors because email scanning restarts at the beginning.
+#[derive(Default)]
+struct ColumnCursor {
+    byte: usize,
+    chars: usize,
+}
+
+impl ColumnCursor {
+    fn range(&mut self, line: usize, text: &str, start: usize, len: usize) -> (usize, usize, usize, usize) {
+        debug_assert!(start >= self.byte);
+        self.chars += text[self.byte..start].chars().count();
+        let column = self.chars + 1;
+        self.byte = start + len;
+        self.chars += text[start..self.byte].chars().count();
+        (line, column, line, self.chars + 1)
+    }
+}
+
 /// Reusable buffers for check_line to reduce allocations
 #[derive(Default)]
 struct LineCheckBuffers {
-    markdown_link_ranges: Vec<(usize, usize)>,
-    image_ranges: Vec<(usize, usize)>,
+    markdown_link_ranges: ConstructRanges,
+    image_ranges: ConstructRanges,
     urls_found: Vec<(usize, usize)>,
     schemed_uri_ranges: Vec<(usize, usize)>,
 }
@@ -553,24 +611,24 @@ impl MD034NoBareUrls {
             }
         }
 
+        buffers.markdown_link_ranges.index();
+        buffers.image_ranges.index();
+
         // Find bare URLs
         buffers.urls_found.clear();
 
         collect_urls(line, &mut buffers.urls_found);
 
         // Process found URLs
+        let mut url_columns = ColumnCursor::default();
         for &(start, end) in &buffers.urls_found {
             let url_str = &line[start..end];
             // Check if this URL is inside a markdown link, angle bracket, or image
             // We check if the URL starts within a construct, not if it's entirely contained.
             // This handles cases where URL detection may include trailing characters
             // that extend past the construct boundary (e.g., parentheses).
-            // Linear scan is correct here because ranges can overlap/nest (e.g., [[1]](url))
-            let is_inside_construct = buffers
-                .markdown_link_ranges
-                .iter()
-                .any(|&(s, e)| start >= s && start < e)
-                || buffers.image_ranges.iter().any(|&(s, e)| start >= s && start < e);
+            let is_inside_construct =
+                buffers.markdown_link_ranges.contains_start(start) || buffers.image_ranges.contains_start(start);
 
             if is_inside_construct {
                 continue;
@@ -640,7 +698,7 @@ impl MD034NoBareUrls {
             if !trimmed_url.is_empty() && !is_scheme_without_host(trimmed_url) {
                 let trimmed_len = trimmed_url.len();
                 let (start_line, start_col, end_line, end_col) =
-                    calculate_url_range(line_number, line, start, trimmed_len);
+                    url_columns.range(line_number, line, start, trimmed_len);
 
                 // For www URLs without protocol, add https:// prefix in the fix
                 let destination = if trimmed_url.starts_with("www.") {
@@ -680,6 +738,7 @@ impl MD034NoBareUrls {
         }
 
         // Check for bare email addresses
+        let mut email_columns = ColumnCursor::default();
         for cap in EMAIL_PATTERN.captures_iter(line) {
             if let Some(mat) = cap.get(0) {
                 let email = mat.as_str();
@@ -707,13 +766,7 @@ impl MD034NoBareUrls {
                 }
 
                 // Check if email is inside angle brackets or markdown link
-                let mut is_inside_construct = false;
-                for &(link_start, link_end) in &buffers.markdown_link_ranges {
-                    if start >= link_start && end <= link_end {
-                        is_inside_construct = true;
-                        break;
-                    }
-                }
+                let is_inside_construct = buffers.markdown_link_ranges.contains_span(start, end);
 
                 if !is_inside_construct {
                     // Calculate absolute byte position for context-aware checks
@@ -771,7 +824,7 @@ impl MD034NoBareUrls {
                     if !is_in_code_span {
                         let email_len = end - start;
                         let (start_line, start_col, end_line, end_col) =
-                            calculate_url_range(line_number, line, start, email_len);
+                            email_columns.range(line_number, line, start, email_len);
 
                         let fix = if ctx.flavor.supports_jsx() {
                             jsx_fix(line, start, email, &format!("mailto:{email}")).map(|(fix_start, replacement)| {
@@ -1009,6 +1062,116 @@ fn is_scheme_without_host(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn construct_lookup_preserves_nested_ranges_and_span_boundaries() {
+        let ranges = [(5, 12), (0, 10), (2, 4), (5, 7), (12, 15), (20, 20)];
+        let mut indexed = ConstructRanges(ranges.to_vec());
+        indexed.index();
+        for start in 0..=21 {
+            assert_eq!(
+                indexed.contains_start(start),
+                ranges.iter().any(|&(s, e)| s <= start && start < e),
+                "point {start}"
+            );
+            for end in start..=21 {
+                assert_eq!(
+                    indexed.contains_span(start, end),
+                    ranges.iter().any(|&(s, e)| s <= start && end <= e),
+                    "span {start}..{end}"
+                );
+            }
+        }
+        indexed.clear();
+        indexed.push((30, 40));
+        indexed.index();
+        assert!(!indexed.contains_start(5));
+        assert!(indexed.contains_span(30, 40));
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn construct_lookup_matches_linear_scan(
+            raw in proptest::collection::vec((0usize..256, 0usize..256), 0..64),
+            start in 0usize..256,
+            len in 0usize..256,
+        ) {
+            let ranges: Vec<_> = raw.into_iter().map(|(a, b)| (a.min(b), a.max(b))).collect();
+            let mut indexed = ConstructRanges(ranges.clone());
+            indexed.index();
+            proptest::prop_assert_eq!(
+                indexed.contains_start(start),
+                ranges.iter().any(|&(s, e)| s <= start && start < e)
+            );
+            proptest::prop_assert_eq!(
+                indexed.contains_span(start, start + len),
+                ranges.iter().any(|&(s, e)| s <= start && start + len <= e)
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_cursors_handle_trimmed_urls_and_skipped_matches() {
+        use crate::config::MarkdownFlavor;
+        use crate::utils::range_utils::calculate_url_range;
+
+        for (content, count) in [
+            (
+                "é https://one.example/path., https://two.example/ 🦀 www.three.example!",
+                3,
+            ),
+            (
+                "é first@example.com [middle@example.com](https://hidden.example) last@example.com",
+                2,
+            ),
+            ("é www.one.example café https://two.example/path, third@example.com", 3),
+        ] {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            let warnings = MD034NoBareUrls.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), count, "{content}");
+            for warning in warnings {
+                let fix = warning.fix.unwrap();
+                assert_eq!(
+                    (warning.line, warning.column, warning.end_line, warning.end_column),
+                    calculate_url_range(1, content, fix.range.start, fix.range.len()),
+                    "{content}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn long_unicode_lines_preserve_url_and_email_columns_and_fixes() {
+        use crate::config::MarkdownFlavor;
+        use crate::utils::range_utils::calculate_url_range;
+
+        let unit = "é🦀 [label](https://hidden.example) https://bare.example/path café hello@example.com ";
+        // Emails are scanned after URLs, so their cursor must restart. The
+        // second line also exercises clearing ranges and resetting columns.
+        for ending in ["\n", "\r\n"] {
+            let content = format!(
+                "{}{ending}尾 hello@example.com https://bare.example/path{ending}",
+                unit.repeat(128)
+            );
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let rule = MD034NoBareUrls;
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 258);
+            for warning in &warnings {
+                let fix = warning.fix.as_ref().unwrap();
+                let line_start = ctx.line_start_byte(warning.line).unwrap();
+                let line = content.lines().nth(warning.line - 1).unwrap();
+                assert_eq!(
+                    (warning.line, warning.column, warning.end_line, warning.end_column),
+                    calculate_url_range(warning.line, line, fix.range.start - line_start, fix.range.len())
+                );
+            }
+            let expected = content
+                .replace("https://bare.example/path", "<https://bare.example/path>")
+                .replace("hello@example.com", "<hello@example.com>");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn test_shortcut_ref_at_end_of_line_no_trailing_chars() {

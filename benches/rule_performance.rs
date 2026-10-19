@@ -3,13 +3,39 @@ use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{
-    MD013LineLength, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
+    MD013LineLength, MD033NoInlineHtml, MD034NoBareUrls, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
     MD053LinkImageReferenceDefinitions,
 };
 use std::hint::black_box;
 
 fn make_ctx(content: &str) -> LintContext<'_> {
     LintContext::new(content, MarkdownFlavor::Standard, None)
+}
+
+/// Long generated paragraphs exercise construct lookups and diagnostic columns.
+/// Keep the context warm to measure the rule; CLI comparisons include parsing.
+fn bench_md034_scaling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md034_scaling");
+    let rule = MD034NoBareUrls;
+    for count in [16, 256, 4096, 16384] {
+        for (name, unit, warnings_per_unit) in [
+            ("formatted", "[link](https://example.com) <hello@example.com> ", 0),
+            ("bare", "https://example.com hello@example.com ", 2),
+            (
+                "mixed_unicode",
+                "é🦀 [link](https://example.com) https://bare.example hello@example.com ",
+                2,
+            ),
+        ] {
+            let content = format!("{}\n", unit.repeat(count));
+            let ctx = make_ctx(&content);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count * warnings_per_unit);
+            group.bench_function(format!("{name}/{count}"), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
 }
 
 /// Benchmark MD013 rule on a large content with long lines
@@ -182,6 +208,7 @@ fn bench_md053(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    bench_md034_scaling,
     bench_md013,
     bench_md033,
     bench_md037,
