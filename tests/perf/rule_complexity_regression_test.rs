@@ -514,6 +514,23 @@ fn test_lint_context_link_dense_prose_linear_complexity() {
 }
 
 #[test]
+fn test_lint_context_long_link_line_linear_complexity() {
+    for (name, unit) in [
+        ("ascii", "[link](https://example.com) <hello@example.com> "),
+        (
+            "unicode",
+            "é日本🙂 [![图](image.png)](https://example.com) [未解決][missing] ",
+        ),
+    ] {
+        let durations: Vec<_> = [4096, 8192, 16384]
+            .into_iter()
+            .map(|size| measure_context_time(&unit.repeat(size), 3))
+            .collect();
+        assert_linear_complexity(&format!("LintContext::new (long {name} link line)"), &durations, 3.0);
+    }
+}
+
+#[test]
 fn test_lint_context_colon_definitions_linear_complexity() {
     let durations: Vec<_> = [4096, 8192, 16384]
         .into_iter()

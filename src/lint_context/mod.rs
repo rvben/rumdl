@@ -3185,19 +3185,7 @@ impl<'a> LintContext<'a> {
     /// characters the two differ; reporting bytes would mis-position highlights.
     #[inline]
     fn find_line_for_offset(lines: &[LineInfo], content: &str, byte_offset: usize) -> (usize, usize, usize) {
-        // Binary search to find the line containing this byte offset
-        let idx = match lines.binary_search_by(|line| {
-            if byte_offset < line.byte_offset {
-                std::cmp::Ordering::Greater
-            } else if byte_offset > line.byte_offset + line.byte_len {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        }) {
-            Ok(idx) => idx,
-            Err(idx) => idx.saturating_sub(1),
-        };
+        let idx = source_positions::line_index(lines, byte_offset);
 
         let line = &lines[idx];
         let line_num = idx + 1;

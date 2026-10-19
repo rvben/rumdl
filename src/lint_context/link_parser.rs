@@ -210,6 +210,8 @@ pub(super) fn collect_links_images<'a>(
 ) -> ParsedLinks<'a> {
     use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
 
+    let mut positions = super::source_positions::SourcePositions::new(content, lines);
+
     let mut link_byte_ranges = Vec::new();
     let mut links = Vec::with_capacity(content.len() / 500);
     let mut images = Vec::with_capacity(content.len() / 1000);
@@ -323,15 +325,14 @@ pub(super) fn collect_links_images<'a>(
                         continue;
                     }
 
-                    let (line_idx, line_num, col_start) =
-                        super::LintContext::find_line_for_offset(lines, content, start_pos);
+                    let (line_idx, line_num, col_start) = positions.position(start_pos);
 
                     if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
                         link_text_chunks.clear();
                         continue;
                     }
 
-                    let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
+                    let (_, end_line_num, col_end) = positions.position(span_end);
 
                     let is_reference = matches!(
                         link_type,
@@ -430,8 +431,8 @@ pub(super) fn collect_links_images<'a>(
                         continue;
                     }
 
-                    let (_, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, start_pos);
-                    let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
+                    let (_, line_num, col_start) = positions.position(start_pos);
+                    let (_, end_line_num, col_end) = positions.position(span_end);
 
                     let is_reference = matches!(
                         link_type,
@@ -530,7 +531,7 @@ pub(super) fn collect_links_images<'a>(
                     continue;
                 }
 
-                let (_, line_num, _) = super::LintContext::find_line_for_offset(lines, content, range.start);
+                let line_num = super::source_positions::line_index(lines, range.start) + 1;
                 footnote_refs.push(FootnoteRef {
                     id: footnote_id.to_string(),
                     line: line_num,
@@ -595,6 +596,8 @@ pub(super) fn finalize_links_and_images<'a>(
 ) {
     use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
 
+    let mut positions = super::source_positions::SourcePositions::new(content, lines);
+
     let LinkExclusions {
         code_blocks,
         code_spans,
@@ -616,13 +619,13 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, start_pos);
+        let (line_idx, line_num, col_start) = positions.position(start_pos);
 
         if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
             continue;
         }
 
-        let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
+        let (_, end_line_num, col_end) = positions.position(span_end);
 
         let raw_span = &content[broken.span.clone()];
         let is_image = raw_span.starts_with('!');
@@ -736,7 +739,7 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, match_start);
+        let (line_idx, line_num, col_start) = positions.position(match_start);
 
         if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
             continue;
@@ -746,7 +749,7 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
+        let (_, end_line_num, col_end) = positions.position(match_end);
 
         // Match discovery retains the native regex traversal, including spans
         // already covered by parser links. Extract groups only when this match
@@ -850,13 +853,13 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, match_start);
+        let (line_idx, line_num, col_start) = positions.position(match_start);
 
         if lines.get(line_idx).is_some_and(is_literal_html_context) {
             continue;
         }
 
-        let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
+        let (_, end_line_num, col_end) = positions.position(match_end);
         let cap = IMAGE_PATTERN
             .captures_at(content, match_start)
             .expect("the same regex already found this match");

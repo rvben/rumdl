@@ -9,7 +9,7 @@
 //!
 //! Inputs are generated deterministically (no RNG) so runs are comparable.
 
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rayon::prelude::*;
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::{LinkTargetPolicy, LintContext};
@@ -224,6 +224,28 @@ fn bench_lint_context_new(c: &mut Criterion) {
     c.bench_function("lint_context_new/quoted_lists_and_tables", |b| {
         b.iter(|| LintContext::new(black_box(&quoted), MarkdownFlavor::Standard, None));
     });
+}
+
+/// Many links on one source line expose repeated prefix-to-column scans.
+fn bench_context_long_line(c: &mut Criterion) {
+    let mut group = c.benchmark_group("context_long_line");
+    group.sample_size(10);
+    for (name, unit) in [
+        ("ascii", "[link](https://example.com) <hello@example.com> "),
+        (
+            "unicode",
+            "é日本🙂 [![图](image.png)](https://example.com) [未解決][missing] ",
+        ),
+    ] {
+        for size in [64, 1024, 4096, 16384] {
+            let content = unit.repeat(size);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_with_input(BenchmarkId::new(name, size), &content, |b, content| {
+                b.iter(|| LintContext::new(black_box(content), MarkdownFlavor::Standard, None));
+            });
+        }
+    }
+    group.finish();
 }
 
 /// Parser-only costs for the same inputs, without rumdl's extraction and line
@@ -725,6 +747,7 @@ criterion_group!(
     bench_link_analysis,
     bench_input_preparation,
     bench_lint_context_new,
+    bench_context_long_line,
     bench_markdown_parse,
     bench_lint_overhead,
     bench_md013_reflow,
