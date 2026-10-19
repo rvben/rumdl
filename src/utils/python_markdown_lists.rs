@@ -19,6 +19,7 @@
 //! MkDocs extensions are read as ordinary paragraph text, identically before
 //! and after a rewrite.
 
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 const TAB: usize = 4;
@@ -36,13 +37,13 @@ pub(crate) enum Leaf {
     Heading(usize),
 }
 
-#[derive(Clone)]
-struct Ln {
+#[derive(Clone, Copy)]
+struct Ln<'a> {
     idx: usize,
-    text: String,
+    text: &'a str,
 }
 
-type Block = Vec<Ln>;
+type Block<'a> = Vec<Ln<'a>>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tag {
@@ -129,29 +130,29 @@ fn indent_item_match(text: &str) -> bool {
     item_match(text, TAB, TAB * 2 - 1, true, true).is_some()
 }
 
-fn olist_test(block: &Block) -> bool {
+fn olist_test(block: &Block<'_>) -> bool {
     block
         .first()
-        .is_some_and(|l| item_match(&l.text, 0, TAB - 1, true, false).is_some())
+        .is_some_and(|l| item_match(l.text, 0, TAB - 1, true, false).is_some())
 }
 
-fn ulist_test(block: &Block) -> bool {
+fn ulist_test(block: &Block<'_>) -> bool {
     block
         .first()
-        .is_some_and(|l| item_match(&l.text, 0, TAB - 1, false, true).is_some())
+        .is_some_and(|l| item_match(l.text, 0, TAB - 1, false, true).is_some())
 }
 
-fn starts_with_tab(block: &Block) -> bool {
+fn starts_with_tab(block: &Block<'_>) -> bool {
     block.first().is_some_and(|l| l.text.starts_with("    "))
 }
 
 /// `"\n".join(block)` is not empty.
-fn joined_nonempty(block: &Block) -> bool {
+fn joined_nonempty(block: &Block<'_>) -> bool {
     block.len() > 1 || block.first().is_some_and(|l| !l.text.is_empty())
 }
 
 /// `text.split("\n\n")` over lines, keeping each line's source index.
-fn split_blocks(lines: &[Ln]) -> VecDeque<Block> {
+fn split_blocks_joined<'a>(lines: &[Ln<'a>]) -> VecDeque<Block<'a>> {
     let mut joined = String::new();
     let mut offsets = Vec::with_capacity(lines.len());
     for (i, line) in lines.iter().enumerate() {
@@ -159,7 +160,7 @@ fn split_blocks(lines: &[Ln]) -> VecDeque<Block> {
             joined.push('\n');
         }
         offsets.push(joined.len());
-        joined.push_str(&line.text);
+        joined.push_str(line.text);
     }
     let mut out = VecDeque::new();
     let mut start = 0;
@@ -172,7 +173,7 @@ fn split_blocks(lines: &[Ln]) -> VecDeque<Block> {
         let mut block = Vec::new();
         while next_line < lines.len() && offsets[next_line] <= end {
             if offsets[next_line] >= start {
-                block.push(lines[next_line].clone());
+                block.push(lines[next_line]);
             }
             next_line += 1;
         }
@@ -185,9 +186,34 @@ fn split_blocks(lines: &[Ln]) -> VecDeque<Block> {
     out
 }
 
+/// Split on non-overlapping pairs of line separators without joining the
+/// block. Exactly one empty line separates the blocks; extra empty lines retain
+/// Python-Markdown's original leading-empty-block behavior.
+fn split_blocks<'a>(lines: &[Ln<'a>]) -> VecDeque<Block<'a>> {
+    // Source normally contains physical lines. Preserve the old reading for an
+    // internal caller supplying a line containing its own separator.
+    if lines.iter().any(|line| line.text.contains('\n')) {
+        return split_blocks_joined(lines);
+    }
+    let mut out = VecDeque::new();
+    let mut start = 0;
+    let mut at = 1;
+    while at + 1 < lines.len() {
+        if lines[at].text.is_empty() {
+            out.push_back(lines[start..at].to_vec());
+            start = at + 1;
+            at += 2;
+        } else {
+            at += 1;
+        }
+    }
+    out.push_back(lines[start..].to_vec());
+    out
+}
+
 /// Remove one tab of indent from the leading lines that have it; blank lines
 /// pass; stop at the first other line. Returns (taken, rest).
-fn detab(block: Block) -> (Block, Block) {
+fn detab<'a>(block: Block<'a>) -> (Block<'a>, Block<'a>) {
     let mut taken = Vec::new();
     let mut iter = block.into_iter();
     let mut rest = Vec::new();
@@ -195,12 +221,12 @@ fn detab(block: Block) -> (Block, Block) {
         if line.text.starts_with("    ") {
             taken.push(Ln {
                 idx: line.idx,
-                text: line.text[TAB..].to_string(),
+                text: &line.text[TAB..],
             });
-        } else if is_blank(&line.text) {
+        } else if is_blank(line.text) {
             taken.push(Ln {
                 idx: line.idx,
-                text: String::new(),
+                text: "",
             });
         } else {
             rest.push(line);
@@ -211,15 +237,15 @@ fn detab(block: Block) -> (Block, Block) {
     (taken, rest)
 }
 
-fn loose_detab(block: Block, level: usize) -> Block {
-    let pad = " ".repeat(TAB * level);
+fn loose_detab(block: Block<'_>, level: usize) -> Block<'_> {
+    let pad = TAB * level;
     block
         .into_iter()
         .map(|l| {
-            if l.text.starts_with(&pad) {
+            if leading_spaces(l.text) >= pad {
                 Ln {
                     idx: l.idx,
-                    text: l.text[pad.len()..].to_string(),
+                    text: &l.text[pad..],
                 }
             } else {
                 l
@@ -279,7 +305,7 @@ impl Parser {
         self.nodes[node].tag
     }
 
-    fn record(&mut self, block: &Block, leaf: impl Fn(&Ln) -> Option<Leaf>) {
+    fn record(&mut self, block: &Block<'_>, leaf: impl Fn(&Ln<'_>) -> Option<Leaf>) {
         for line in block {
             if let Some(l) = leaf(line)
                 && let Some(slot) = self.kinds.get_mut(line.idx)
@@ -289,12 +315,12 @@ impl Parser {
         }
     }
 
-    fn parse_chunk(&mut self, parent: usize, block: &Block) {
+    fn parse_chunk(&mut self, parent: usize, block: &Block<'_>) {
         let blocks = split_blocks(block);
         self.parse_blocks(parent, blocks);
     }
 
-    fn parse_blocks(&mut self, parent: usize, mut blocks: VecDeque<Block>) {
+    fn parse_blocks(&mut self, parent: usize, mut blocks: VecDeque<Block<'_>>) {
         if self.depth >= MAX_DEPTH {
             self.overrun = true;
             return;
@@ -325,7 +351,7 @@ impl Parser {
         self.depth -= 1;
     }
 
-    fn run_empty(&mut self, blocks: &mut VecDeque<Block>) {
+    fn run_empty(&mut self, blocks: &mut VecDeque<Block<'_>>) {
         let mut block = blocks.pop_front().unwrap_or_default();
         if joined_nonempty(&block) {
             block.remove(0);
@@ -335,14 +361,14 @@ impl Parser {
         }
     }
 
-    fn indent_test(&self, parent: usize, block: &Block) -> bool {
+    fn indent_test(&self, parent: usize, block: &Block<'_>) -> bool {
         starts_with_tab(block)
             && !self.is_state(State::Detabbed)
             && (self.tag(parent) == Tag::Li || self.last_child(parent).is_some_and(|c| self.tag(c) == Tag::List))
     }
 
-    fn get_level(&self, parent: usize, block: &Block) -> (usize, usize) {
-        let indent_level = block.first().map_or(0, |l| leading_spaces(&l.text) / TAB);
+    fn get_level(&self, parent: usize, block: &Block<'_>) -> (usize, usize) {
+        let indent_level = block.first().map_or(0, |l| leading_spaces(l.text) / TAB);
         let mut level = usize::from(self.is_state(State::List));
         let mut parent = parent;
         while indent_level > level {
@@ -359,7 +385,7 @@ impl Parser {
         (level, parent)
     }
 
-    fn run_indent(&mut self, parent: usize, blocks: &mut VecDeque<Block>) {
+    fn run_indent(&mut self, parent: usize, blocks: &mut VecDeque<Block<'_>>) {
         let block = blocks.pop_front().unwrap_or_default();
         let (level, sibling) = self.get_level(parent, &block);
         let block = loose_detab(block, level);
@@ -396,7 +422,7 @@ impl Parser {
         }
     }
 
-    fn run_code(&mut self, parent: usize, blocks: &mut VecDeque<Block>) {
+    fn run_code(&mut self, parent: usize, blocks: &mut VecDeque<Block<'_>>) {
         let sibling = self.last_child(parent);
         let block = blocks.pop_front().unwrap_or_default();
         let pre = match sibling {
@@ -404,10 +430,10 @@ impl Parser {
             _ => self.sub_element(parent, Tag::Pre),
         };
         let (taken, rest) = detab(block);
-        self.record(&taken, |l| (!is_blank(&l.text)).then_some(Leaf::Code(pre)));
-        for line in taken.iter().filter(|l| !is_blank(&l.text)) {
+        self.record(&taken, |l| (!is_blank(l.text)).then_some(Leaf::Code(pre)));
+        for line in taken.iter().filter(|l| !is_blank(l.text)) {
             if let Some(slot) = self.code_text.get_mut(line.idx) {
-                *slot = Some(line.text.clone());
+                *slot = Some(line.text.to_owned());
             }
         }
         if joined_nonempty(&rest) {
@@ -415,11 +441,10 @@ impl Parser {
         }
     }
 
-    fn get_items(&mut self, block: Block) -> Vec<Block> {
-        let mut items: Vec<Block> = Vec::new();
+    fn get_items<'a>(&mut self, block: Block<'a>) -> Vec<Block<'a>> {
+        let mut items: Vec<Block<'_>> = Vec::new();
         for line in block {
-            if let Some(content) = child_match(&line.text) {
-                let content = content.to_string();
+            if let Some(content) = child_match(line.text) {
                 if let Some(slot) = self.kinds.get_mut(line.idx) {
                     slot.push(Leaf::Marker);
                 }
@@ -427,7 +452,7 @@ impl Parser {
                     idx: line.idx,
                     text: content,
                 }]);
-            } else if indent_item_match(&line.text) {
+            } else if indent_item_match(line.text) {
                 match items.last_mut() {
                     Some(last) if last[0].text.starts_with("    ") => last.push(line),
                     _ => items.push(vec![line]),
@@ -441,7 +466,7 @@ impl Parser {
         items
     }
 
-    fn note_list(&mut self, list: usize, item: &Block) {
+    fn note_list(&mut self, list: usize, item: &Block<'_>) {
         if let (Some(first), ordered) = (item.first(), self.nodes[list].ordered)
             && let Some(slot) = self.line_list.get_mut(first.idx)
         {
@@ -449,7 +474,7 @@ impl Parser {
         }
     }
 
-    fn run_list(&mut self, parent: usize, blocks: &mut VecDeque<Block>) {
+    fn run_list(&mut self, parent: usize, blocks: &mut VecDeque<Block<'_>>) {
         let block = blocks.pop_front().unwrap_or_default();
         let ordered = olist_test(&block);
         let mut items = self.get_items(block).into_iter();
@@ -499,7 +524,7 @@ impl Parser {
     /// An ATX heading line splits its block: the lines before it are parsed
     /// first, the heading becomes its own element, and the lines after it are
     /// parsed as a block of their own.
-    fn run_header(&mut self, parent: usize, blocks: &mut VecDeque<Block>, at: usize) {
+    fn run_header(&mut self, parent: usize, blocks: &mut VecDeque<Block<'_>>, at: usize) {
         let mut block = blocks.pop_front().unwrap_or_default();
         let mut rest = block.split_off(at);
         let after = rest.split_off(1);
@@ -515,9 +540,9 @@ impl Parser {
         }
     }
 
-    fn run_paragraph(&mut self, parent: usize, blocks: &mut VecDeque<Block>) {
+    fn run_paragraph(&mut self, parent: usize, blocks: &mut VecDeque<Block<'_>>) {
         let block = blocks.pop_front().unwrap_or_default();
-        if !block.iter().any(|l| !is_blank(&l.text)) {
+        if !block.iter().any(|l| !is_blank(l.text)) {
             return;
         }
         let id = if self.is_state(State::List) {
@@ -545,7 +570,7 @@ impl Parser {
             self.nodes[p].text = Some(id);
             id
         };
-        self.record(&block, |l| (!is_blank(&l.text)).then_some(Leaf::Para(id)));
+        self.record(&block, |l| (!is_blank(l.text)).then_some(Leaf::Para(id)));
     }
 }
 
@@ -599,21 +624,26 @@ fn fence_prefix_len(text: &str) -> usize {
     }
 }
 
-fn preprocess(source: &Source<'_>) -> Vec<Ln> {
+fn preprocess<'a>(source: &Source<'a>) -> Vec<(usize, Cow<'a, str>)> {
     let mut out = Vec::with_capacity(source.lines.len());
     for (idx, raw) in source.lines.iter().enumerate() {
         if source.fence_inside.contains(&idx) {
             continue;
         }
-        let mut text = expand_tabs(raw.trim_end_matches('\r'));
+        let raw = raw.trim_end_matches('\r');
+        let mut text = if raw.contains('\t') {
+            Cow::Owned(expand_tabs(raw))
+        } else {
+            Cow::Borrowed(raw)
+        };
         if source.fence_openers.contains(&idx) {
-            text = format!("{}\u{2}fence\u{3}", &text[..fence_prefix_len(&text)]);
+            text = Cow::Owned(format!("{}\u{2}fence\u{3}", &text[..fence_prefix_len(&text)]));
         } else if idx > 0 && text.bytes().all(|b| b == b' ') {
             // Python-Markdown clears a whitespace-only line only when a newline
             // precedes it, so the first line of the document keeps its spaces.
-            text.clear();
+            text = Cow::Borrowed("");
         }
-        out.push(Ln { idx, text });
+        out.push((idx, text));
     }
     out
 }
@@ -659,14 +689,15 @@ impl Parser {
 
 /// Per source line, what the parser produced.
 fn line_model(source: &Source<'_>) -> Option<LineModel> {
-    let lines = preprocess(source);
+    let prepared = preprocess(source);
+    let lines: Vec<_> = prepared.iter().map(|(idx, text)| Ln { idx: *idx, text }).collect();
     // Every nesting level re-measures the indentation of the lines below it, so
     // the work grows with the square of the indentation; a document past the
     // limit is left unmodeled instead of parsed.
     let work: usize = lines
         .iter()
         .map(|l| {
-            let indent = leading_spaces(&l.text);
+            let indent = leading_spaces(l.text);
             indent * indent / 4
         })
         .sum();
@@ -715,7 +746,8 @@ pub(crate) fn marker_lines(source: &Source<'_>) -> Option<Vec<bool>> {
 /// is neither indented nor a list. Lines in different regions cannot influence
 /// each other.
 fn regions(source: &Source<'_>) -> Vec<usize> {
-    let lines = preprocess(source);
+    let prepared = preprocess(source);
+    let lines: Vec<_> = prepared.iter().map(|(idx, text)| Ln { idx: *idx, text }).collect();
     let mut region_of = vec![0; source.lines.len()];
     let mut starts: Vec<usize> = Vec::new();
     for block in split_blocks(&lines) {

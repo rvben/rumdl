@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs.
 - MD013 semantic reflow joins wrapped list and blockquote prose consistently
   with paragraphs, including items containing only one semantic sentence.
+- Reduce silent-formatting work for nested lists and unsupported proof syntax,
+  and avoid copying line text while checking Python-Markdown list structure.
 
 ### Fixed
 

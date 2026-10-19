@@ -655,6 +655,14 @@ impl MD077ListContinuationIndent {
     fn parser_marker_lines(ctx: &NativeListSource<'_, '_>) -> Option<Vec<bool>> {
         use crate::utils::python_markdown_lists::{Source, marker_lines};
         let lines: Vec<&str> = ctx.content.split('\n').collect();
+        // Admonitions require the native indentation view. Do not build a
+        // marker model whose result cannot be used for this document.
+        if lines.iter().any(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("!!! ") || trimmed.starts_with("??? ") || trimmed.starts_with("???+ ")
+        }) {
+            return None;
+        }
         let (openers, inside) = Self::fence_lines(ctx, lines.len());
         let mut markers = marker_lines(&Source {
             lines: &lines,
@@ -670,11 +678,7 @@ impl MD077ListContinuationIndent {
                 *marker = true;
             }
         }
-        let admonition = lines.iter().any(|l| {
-            let t = l.trim_start();
-            t.starts_with("!!! ") || t.starts_with("??? ") || t.starts_with("???+ ")
-        });
-        (!admonition).then_some(markers)
+        Some(markers)
     }
 
     /// A line the list model reads the same way Python-Markdown does when it
