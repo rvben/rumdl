@@ -2,6 +2,15 @@
 //! Includes nested tables, Markdown HTML elements, admonitions and front matter.
 
 pub(crate) const SOURCES: &[&str] = &[
+    "[x]:\n  https://example.com\n",
+    "[x]:\n  name@example.com\n",
+    "[x]: https://example.com\n  \"www.example.com\"\n",
+    "![https://example.com][r]\n\n[r]: <>\n",
+    "![name@example.com][r]\n\n[r]: <>\n",
+    "[www.example.com][r]\n\n[r]: <>\n",
+    "![HTTPS://example.com][r]\n\n[r]: < >\n",
+    "[https://example.com](< >)\n",
+    "[https://example.com](#)\n",
     "1. a\n\n$$x\n- root\n  see `$$`\n  more\n",
     "- a\n\n$$x\n- root\n  - child\n    see `$$`\n    more\n",
     "1. a\n\n> $$x\n- root\n  see `$$`\n  more\n",

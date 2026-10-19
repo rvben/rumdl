@@ -22,7 +22,10 @@ struct ProofEvent {
 enum Kind {
     CodeBlock(bool),
     Code,
-    Link(bool),
+    Link {
+        is_empty: bool,
+        needs_destination_fix: bool,
+    },
     Heading(HeadingLevel),
     Strong,
     List(Option<u64>),
@@ -58,9 +61,10 @@ impl ProofEvents {
         let kind = match event {
             Event::Start(Tag::CodeBlock(kind)) => Kind::CodeBlock(matches!(kind, CodeBlockKind::Fenced(_))),
             Event::Code(_) => Kind::Code,
-            Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
-                Kind::Link(dest_url.trim().is_empty() || dest_url.trim() == "#")
-            }
+            Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => Kind::Link {
+                is_empty: dest_url.is_empty(),
+                needs_destination_fix: dest_url.trim().is_empty() || dest_url.trim() == "#",
+            },
             Event::Start(Tag::Heading { level, .. }) => Kind::Heading(*level),
             Event::Start(Tag::Strong) => Kind::Strong,
             Event::Start(Tag::List(number)) => Kind::List(*number),
@@ -87,7 +91,7 @@ impl ProofEvents {
 
     /// Replay only facts the proof consumes. Empty payloads are deliberate:
     /// labels, prose, fence info and HTML text are read from the original source
-    /// ranges; links consume only the empty-destination predicate. These events
+    /// ranges; links retain the exact-empty and MD042 destination predicates. These events
     /// must never be supplied to native context construction or diagnostics.
     pub(crate) fn observe(&self, mut observer: impl FnMut(&Event<'static>, &Range<usize>)) {
         for saved in &self.events {
@@ -96,9 +100,18 @@ impl ProofEvents {
                 Kind::CodeBlock(true) => Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(empty()))),
                 Kind::CodeBlock(false) => Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)),
                 Kind::Code => Event::Code(empty()),
-                Kind::Link(is_empty) => Event::Start(Tag::Link {
+                Kind::Link {
+                    is_empty,
+                    needs_destination_fix,
+                } => Event::Start(Tag::Link {
                     link_type: LinkType::Inline,
-                    dest_url: CowStr::Borrowed(if is_empty { "" } else { "x" }),
+                    dest_url: CowStr::Borrowed(if is_empty {
+                        ""
+                    } else if needs_destination_fix {
+                        "#"
+                    } else {
+                        "x"
+                    }),
                     title: empty(),
                     id: empty(),
                 }),

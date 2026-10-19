@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Silent formatting applies native bare-URL fixes in continued reference
+  definitions and reference labels with empty destinations.
 - Silent formatting applies native list-indentation fixes when display-math
   delimiters span blocks and close inside a code span.
 - MD013 semantic break words keep offsets in the original Unicode text, avoiding

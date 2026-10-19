@@ -357,6 +357,7 @@ impl<'a> FormatProof<'a> {
         }
         let mut inline_code = Vec::<Range<usize>>::new();
         let mut links = Vec::<Range<usize>>::new();
+        let mut unprotected_urls = Vec::<Range<usize>>::new();
         let mut fences = Vec::<Range<usize>>::new();
         let mut config_literals = Vec::<Range<usize>>::new();
         let mut tables = Vec::<Range<usize>>::new();
@@ -448,6 +449,12 @@ impl<'a> FormatProof<'a> {
                 Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
                     if dest_url.trim().is_empty() || dest_url.trim() == "#" {
                         facts.reject(&[42]);
+                    }
+                    // Native MD034 still reads the label of a reference link
+                    // or image whose destination is empty. An empty inline
+                    // destination can conservatively keep that native check too.
+                    if dest_url.is_empty() {
+                        unprotected_urls.push(range.clone());
                     }
                     links.push(range.clone());
                 }
@@ -621,6 +628,16 @@ impl<'a> FormatProof<'a> {
             facts.bits = 0;
             return facts;
         }
+        for reference in &references {
+            // MD034 skips only the definition's opening physical line. A URL
+            // in its continued destination or title still gets the native
+            // check, even though the parser's definition span contains it.
+            if let Some(next) = lines.get(line_at(reference.start) + 1)
+                && next.start < reference.end
+            {
+                unprotected_urls.push(next.start..reference.end);
+            }
+        }
         links.extend(references);
 
         // Ranges retain only source positions and are disjointed once here;
@@ -641,6 +658,7 @@ impl<'a> FormatProof<'a> {
         merge(&mut literals);
         merge(&mut inline_code);
         merge(&mut links);
+        merge(&mut unprotected_urls);
         merge(&mut config_literals);
         let contains = |ranges: &[Range<usize>], pos: usize| {
             let end = ranges.partition_point(|range| range.start <= pos);
@@ -843,16 +861,17 @@ impl<'a> FormatProof<'a> {
                     link_index += 1;
                 }
                 let in_link = links.get(link_index).is_some_and(|range| range.start <= absolute);
+                let url_is_protected = in_link && !contains(&unprotected_urls, absolute);
                 match bytes[at] {
                     // Standard's native code-span ranges come from these
                     // same primary parser events. Unmatched source backticks
                     // cannot add a native MD038 edit. Its context exclusions
                     // only remove spans; other flavors keep native analysis.
-                    b'@' if !in_link => facts.reject(&[34]),
-                    b':' if !in_link && (text[at..].starts_with("://") || text[..at].ends_with("xmpp")) => {
+                    b'@' if !url_is_protected => facts.reject(&[34]),
+                    b':' if !url_is_protected && (text[at..].starts_with("://") || text[..at].ends_with("xmpp")) => {
                         facts.reject(&[34])
                     }
-                    b'w' if text[at..].starts_with("www.") && !in_link => facts.reject(&[34]),
+                    b'w' if text[at..].starts_with("www.") && !url_is_protected => facts.reject(&[34]),
                     b')' if bytes.get(at + 1) == Some(&b'[') => facts.reject(&[11]),
                     b'[' => {
                         if bytes.get(at + 1).is_none_or(u8::is_ascii_whitespace) {
@@ -1244,6 +1263,39 @@ mod tests {
             }
         }
         failures
+    }
+
+    #[test]
+    fn reference_url_certificates_follow_native_line_and_destination_guards() {
+        use crate::rule::Rule;
+
+        let rule = crate::rules::MD034NoBareUrls;
+        let policy = NativeFormatPolicy::validated(&rule).unwrap();
+        for source in [
+            "[x]:\n  https://example.com\n",
+            "[x]: https://example.com\n  \"name@example.com\"\n",
+            "> [x]:\n>   https://example.com\n",
+            "![www.example.com][r]\n\n[r]: <>\n",
+            "[https://example.com][r]\n\n[r]: <>\n",
+        ] {
+            let context = LintContext::new(source, MarkdownFlavor::Standard, None);
+            assert_ne!(rule.fix(&context).unwrap(), source);
+            assert!(!policy.proven(&FormatProof::analyze(source, MarkdownFlavor::Standard)));
+            assert_proofs(source);
+        }
+        for source in [
+            "[x]: https://example.com\n",
+            "[x]:\n  /path\n",
+            "[https://example.com](#)\n",
+            "[https://example.com](< >)\n",
+            "[https://example.com][r]\n\n[r]: target\n",
+            "![name@example.com][r]\n\n[r]: target\n",
+        ] {
+            let context = LintContext::new(source, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&context).unwrap(), source);
+            assert!(policy.proven(&FormatProof::analyze(source, MarkdownFlavor::Standard)));
+            assert_proofs(source);
+        }
     }
 
     #[test]
