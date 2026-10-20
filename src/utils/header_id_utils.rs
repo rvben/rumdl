@@ -189,13 +189,22 @@ fn custom_id_at_end(line: &str) -> Option<(usize, String)> {
 /// display text.
 pub fn heading_text_end(line: &str) -> usize {
     let mut end = line.len();
+    let mut anchors = None;
     loop {
         end = line[..end].trim_end().len();
-        if let Some((attr_list_start, _)) = custom_id_at_end(&line[..end]) {
+        if line[..end].ends_with('}')
+            && let Some((attr_list_start, _)) = custom_id_at_end(&line[..end])
+        {
             end = attr_list_start;
-        } else if let Some((range, _)) = empty_anchor_elements(&line[..end]).pop()
+            // An attribute list can contain a closing backtick or tag delimiter.
+            // Removing it can expose anchors that the previous scan ignored.
+            anchors = None;
+        } else if let Some((range, _)) = anchors.get_or_insert_with(|| empty_anchor_elements(&line[..end])).pop()
             && range.end == end
         {
+            // A recognized trailing anchor cannot close an opaque range that
+            // starts before it: its opening tag would have been inside that range.
+            // Earlier anchors therefore remain valid when this one is removed.
             end = range.start;
         } else {
             return end;
@@ -559,6 +568,70 @@ pub fn extract_standalone_attr_list_id(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn heading_text_end_matches_rescanning() {
+        fn rescanning(line: &str) -> usize {
+            let mut end = line.len();
+            loop {
+                end = line[..end].trim_end().len();
+                if let Some((start, _)) = custom_id_at_end(&line[..end]) {
+                    end = start;
+                } else if let Some((range, _)) = empty_anchor_elements(&line[..end]).pop()
+                    && range.end == end
+                {
+                    end = range.start;
+                } else {
+                    return end;
+                }
+            }
+        }
+
+        // Complete and incomplete constructs deliberately meet at token boundaries.
+        let tokens = [
+            "",
+            "é🙂\u{2003}",
+            " ",
+            "\t",
+            "<a id=x></a>",
+            "<A name='y'> </A>",
+            "<a></a><a></a>",
+            "\\<a></a>",
+            "`",
+            "``",
+            "<!--",
+            "-->",
+            "![",
+            "](x)",
+            "<span title=\"",
+            "\">",
+            "{#id}",
+            "{#bad!}",
+            "{#id x=`}",
+            "{#id x=\">}",
+        ];
+        for first in tokens {
+            for second in tokens {
+                for third in tokens {
+                    let text = format!("# Word {first}{second}{third}");
+                    assert_eq!(heading_text_end(&text), rescanning(&text), "{text:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn heading_text_end_rescans_after_attribute_list() {
+        for (text, visible) in [
+            ("`<a id=live></a> {#id x=`}", "`"),
+            ("<a></a> `<a></a> {#id x=`} <a></a>", "<a></a> `"),
+            ("<span title=\"<a id=x></a> {#id x=\">} <a></a>", "<span title=\""),
+            ("![<a id=x></a> {#id x=](image)} <a></a>", "!["),
+        ] {
+            let expected = visible.len();
+            assert_eq!(heading_text_end(text), expected, "{text:?}");
+        }
+    }
 
     #[test]
     fn test_kramdown_format_extraction() {

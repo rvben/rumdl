@@ -823,6 +823,36 @@ fn bench_heading_anchor_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_heading_trailing_anchors(c: &mut Criterion) {
+    use rumdl_lib::rules::MD024NoDuplicateHeading;
+
+    let mut group = c.benchmark_group("heading_trailing_anchors");
+    group.sample_size(10);
+    let rule = MD024NoDuplicateHeading::default();
+    for (name, suffix) in [("plain", ""), ("custom-id", "{#custom}")] {
+        for count in [128, 512, 2048] {
+            let content = format!("# Word {}{suffix}\n\n", "<a id=x></a> ".repeat(count)).repeat(2);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            for stage in ["range", "MD024"] {
+                group.bench_function(BenchmarkId::new(format!("{name}-{stage}"), count), |b| {
+                    b.iter(|| {
+                        if stage == "range" {
+                            for heading in ctx.headings() {
+                                black_box(heading.text_byte_range(black_box(&content)));
+                            }
+                        } else {
+                            black_box(rule.check(black_box(&ctx)).unwrap());
+                        }
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_mdx_nested_context(c: &mut Criterion) {
     let mut group = c.benchmark_group("mdx_nested_context");
     group.sample_size(10);
@@ -1617,6 +1647,7 @@ criterion_group!(
     bench_md063_tag_pairing,
     bench_mdx_nested_context,
     bench_heading_anchor_lookup,
+    bench_heading_trailing_anchors,
     bench_md030_indented_fallback,
     bench_md087_suppressions,
     bench_directive_code_ranges,

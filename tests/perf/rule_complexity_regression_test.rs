@@ -720,6 +720,73 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// Removing trailing anchors must not rescan the heading for each element.
+#[test]
+fn test_heading_trailing_anchors_linear_complexity() {
+    let rule = MD024NoDuplicateHeading::default();
+    for (name, suffix) in [("plain", ""), ("custom-id", "{#custom}")] {
+        for stage in ["range", "MD024"] {
+            let times: Vec<_> = [512, 1024, 2048]
+                .into_iter()
+                .map(|count| {
+                    let content = format!("# Word {}{suffix}\n\n", "<a id=x></a> ".repeat(count)).repeat(2);
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+                    for heading in ctx.headings() {
+                        assert_eq!(&content[heading.text_byte_range(&content)], "Word");
+                    }
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            let start = MeasurementClock::now();
+                            if stage == "range" {
+                                for heading in ctx.headings() {
+                                    std::hint::black_box(heading.text_byte_range(&content));
+                                }
+                            } else {
+                                std::hint::black_box(rule.check(&ctx).unwrap());
+                            }
+                            start.elapsed()
+                        })
+                        .collect();
+                    samples.sort();
+                    samples[3]
+                })
+                .collect();
+            assert_linear_complexity(&format!("trailing anchors {name}/{stage}"), &times, 3.0);
+        }
+    }
+}
+
+/// Constructing nested JSX must not walk from the AST root for every node.
+#[test]
+fn test_mdx_nested_context_linear_complexity() {
+    for name in ["nested", "unmatched", "paired"] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let text = match name {
+                    "nested" => format!("{}text{}", "<b>".repeat(count), "</b>".repeat(count)),
+                    "unmatched" => format!("{}{}", "<b>".repeat(count), "</i>".repeat(count)),
+                    _ => "<b>text</b> ".repeat(count),
+                };
+                let content = format!("# {text}\n");
+                let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+                assert_eq!(ctx.headings().count(), 1);
+                let mut samples: Vec<_> = (0..7)
+                    .map(|_| {
+                        let start = MeasurementClock::now();
+                        std::hint::black_box(LintContext::new(&content, MarkdownFlavor::MDX, None));
+                        start.elapsed()
+                    })
+                    .collect();
+                samples.sort();
+                samples[3]
+            })
+            .collect();
+        assert_linear_complexity(&format!("MDX nested context {name}"), &times, 3.0);
+    }
+}
+
 /// Missing closing-tag names must not repeatedly search the open-element stack.
 #[test]
 fn test_md063_tag_pairing_linear_complexity() {
@@ -2924,35 +2991,6 @@ fn nested_list_table_confirmation_linear_complexity() {
         "confirming 16000 tables took {:.1}x the time of 2000",
         large / small
     );
-}
-
-#[test]
-fn test_mdx_nested_context_linear_complexity() {
-    for name in ["nested", "unmatched", "paired"] {
-        let times: Vec<_> = [1024, 2048, 4096]
-            .into_iter()
-            .map(|count| {
-                let text = match name {
-                    "nested" => format!("{}text{}", "<b>".repeat(count), "</b>".repeat(count)),
-                    "unmatched" => format!("{}{}", "<b>".repeat(count), "</i>".repeat(count)),
-                    _ => "<b>text</b> ".repeat(count),
-                };
-                let content = format!("# {text}\n");
-                let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
-                assert_eq!(ctx.headings().count(), 1);
-                let mut samples: Vec<_> = (0..7)
-                    .map(|_| {
-                        let start = MeasurementClock::now();
-                        std::hint::black_box(LintContext::new(&content, MarkdownFlavor::MDX, None));
-                        start.elapsed()
-                    })
-                    .collect();
-                samples.sort();
-                samples[3]
-            })
-            .collect();
-        assert_linear_complexity(&format!("MDX nested context {name}"), &times, 3.0);
-    }
 }
 
 /// Native MDX facts must bypass redundant primary-parser image label scans.
