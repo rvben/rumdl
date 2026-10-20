@@ -191,6 +191,72 @@ fn locate_destination(content: &str, link: &ParsedLink<'_>) -> Option<SourceDest
     )
 }
 
+/// A regex result stays valid while later queries have not passed its start.
+/// Keep misses too: searching an angle-free suffix again is quadratic. Starting
+/// inside an earlier match requires a fresh search, since matches can overlap.
+#[derive(Default)]
+struct DestinationSearch {
+    from: Option<usize>,
+    found: Option<SourceDestination>,
+}
+
+impl DestinationSearch {
+    fn at(
+        &mut self,
+        regex: &Regex,
+        source: &str,
+        base: usize,
+        anchor: usize,
+        angle: bool,
+    ) -> Option<SourceDestination> {
+        if self.from.is_none_or(|from| anchor < from)
+            || self
+                .found
+                .as_ref()
+                .is_some_and(|found| found.syntax.start < base + anchor)
+        {
+            self.from = Some(anchor);
+            self.found = regex
+                .captures_at(source, anchor)
+                .and_then(|caps| SourceDestination::from_captures(&caps, base, angle));
+        }
+        self.found.clone()
+    }
+}
+
+/// Workspace indexing searches ahead on a line and prefers angle destinations.
+/// Reuse those searches for successive link anchors without changing that policy.
+/// Backward queries restart the relevant search and preserve the same answer.
+pub(crate) struct LineDestinationSearch<'a> {
+    parsed: &'a LinkDestinations,
+    source: &'a str,
+    base: usize,
+    last_angle: Option<usize>,
+    angle: DestinationSearch,
+    bare: DestinationSearch,
+}
+
+impl LineDestinationSearch<'_> {
+    pub(crate) fn at(&mut self, anchor: usize) -> Option<SourceDestination> {
+        let parsed = self
+            .parsed
+            .at(self.base + anchor)
+            .filter(|destination| destination.syntax.end <= self.base + self.source.len());
+        if let Some(destination) =
+            parsed.filter(|destination| destination.angle || self.last_angle.is_none_or(|last| last < anchor))
+        {
+            return Some(destination.clone());
+        }
+        if let Some(destination) = self
+            .angle
+            .at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, self.source, self.base, anchor, true)
+        {
+            return Some(destination);
+        }
+        self.bare.at(&URL_EXTRACT_REGEX, self.source, self.base, anchor, false)
+    }
+}
+
 impl<'a> LintContext<'a> {
     fn link_destinations(&self) -> &LinkDestinations {
         self.link_destinations_cache.get_or_init(|| LinkDestinations::new(self))
@@ -206,24 +272,19 @@ impl<'a> LintContext<'a> {
             .map(|&i| facts.destinations[i].source.body(self.content))
     }
 
-    /// The workspace index historically searches ahead on a single line and
-    /// prefers any angle destination over a bare one. Reuse a parsed source
-    /// destination only when those rules give the same answer; retain the
-    /// original search for unmatched brackets and multiline syntax.
-    pub(crate) fn indexed_link_destination(&self, line: usize, anchor: usize) -> Option<SourceDestination> {
+    /// Build a reusable search for the workspace index's legacy single-line
+    /// destination policy. Parsed destinations are reused only when they give
+    /// the same answer as the original angle-first regex searches.
+    pub(crate) fn index_link_destinations(&self, line: usize) -> Option<LineDestinationSearch<'_>> {
         let info = self.line_info(line)?;
-        let source = info.content(self.content);
-        let base = info.byte_offset;
-        if let Some(destination) = self.link_destinations().at(base + anchor)
-            && destination.syntax.end <= base + source.len()
-            && (destination.angle || !source[anchor..].contains('<'))
-        {
-            return Some(destination.clone());
-        }
-        if let Some(caps) = URL_EXTRACT_ANGLE_BRACKET_REGEX.captures_at(source, anchor) {
-            return SourceDestination::from_captures(&caps, base, true);
-        }
-        SourceDestination::from_captures(&URL_EXTRACT_REGEX.captures_at(source, anchor)?, base, false)
+        Some(LineDestinationSearch {
+            parsed: self.link_destinations(),
+            source: info.content(self.content),
+            base: info.byte_offset,
+            last_angle: info.content(self.content).rfind('<'),
+            angle: DestinationSearch::default(),
+            bare: DestinationSearch::default(),
+        })
     }
 }
 
@@ -237,7 +298,17 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         for (i, line) in ctx.lines.iter().enumerate() {
             let source = line.content(content);
-            for (anchor, _) in source.match_indices(']') {
+            let mut search = ctx.index_link_destinations(i + 1).unwrap();
+            let anchors: Vec<_> = source
+                .char_indices()
+                .map(|(byte, _)| byte)
+                .chain([source.len()])
+                .collect();
+            for &anchor in anchors
+                .iter()
+                .chain(anchors.iter().rev())
+                .chain(anchors.iter().step_by(2))
+            {
                 let expected = URL_EXTRACT_ANGLE_BRACKET_REGEX
                     .captures_at(source, anchor)
                     .and_then(|caps| SourceDestination::from_captures(&caps, line.byte_offset, true))
@@ -246,11 +317,7 @@ mod tests {
                             .captures_at(source, anchor)
                             .and_then(|caps| SourceDestination::from_captures(&caps, line.byte_offset, false))
                     });
-                assert_eq!(
-                    ctx.indexed_link_destination(i + 1, anchor),
-                    expected,
-                    "{content:?}, anchor {anchor}"
-                );
+                assert_eq!(search.at(anchor), expected, "{content:?}, anchor {anchor}");
             }
         }
     }
@@ -259,6 +326,9 @@ mod tests {
     fn cached_destinations_preserve_each_consumers_search_boundaries() {
         for source in [
             "[first](one.md) [second](<two.md>)",
+            "[a](<a[b](<b[c](<c.md>)>)>)",
+            "[bad](<never closed [good](later.md)",
+            "[a](one.md) <not a destination> [b](two.md)",
             "[first](#fragment) [second](two.md#part)",
             "[first]() [second](<two.md>)",
             "[outer [inner]](one.md) [after](two.md)",

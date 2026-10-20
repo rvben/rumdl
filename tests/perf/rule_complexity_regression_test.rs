@@ -356,6 +356,49 @@ fn test_md049_warning_filter_linear_complexity() {
     }
 }
 
+/// Workspace extraction must reuse character columns and searches for later
+/// angle destinations, including a failed search over an angle-free suffix.
+#[test]
+fn test_workspace_link_extraction_linear_complexity() {
+    for (name, unit, suffix) in [
+        ("relative", "é日本🙂 [label](target.md) ", ""),
+        ("absolute", "é日本🙂 [label](/target.md) ", ""),
+        ("angle", "é日本🙂 [label](<target.md>) ", ""),
+        ("tail-angle", "é日本🙂 [label](target.md) ", " [last](<last.md>)"),
+        ("tail-marker", "é日本🙂 [label](target.md) ", " <no destination>"),
+    ] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("{}{suffix}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                let links = rumdl_lib::workspace_index::extract_cross_file_links(&ctx);
+                assert_eq!(
+                    links.relative.len() + links.root_relative.len(),
+                    count + usize::from(name == "tail-angle")
+                );
+                if name == "tail-angle" {
+                    assert!(links.relative.iter().all(|link| link.target_path == "last.md"));
+                }
+                let mut times: Vec<_> = (0..5)
+                    .map(|_| {
+                        let clock = MeasurementClock::now();
+                        for _ in 0..4 {
+                            std::hint::black_box(rumdl_lib::workspace_index::extract_cross_file_links(
+                                std::hint::black_box(&ctx),
+                            ));
+                        }
+                        clock.elapsed() / 4
+                    })
+                    .collect();
+                times.sort();
+                times[2]
+            })
+            .collect();
+        assert_linear_complexity(&format!("workspace {name}"), &times, 3.0);
+    }
+}
+
 /// A source path is essential: MD057 otherwise skips filesystem diagnostics.
 #[test]
 fn test_md057_warning_columns_linear_complexity() {

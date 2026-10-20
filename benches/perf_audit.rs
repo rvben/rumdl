@@ -486,6 +486,36 @@ fn bench_md057(c: &mut Criterion) {
     c.bench_function("md057/many_refs_check", |b| b.iter(|| rule.check(black_box(&ctx))));
 }
 
+fn bench_workspace_link_extraction(c: &mut Criterion) {
+    let mut group = c.benchmark_group("workspace_link_extraction");
+    group.sample_size(10);
+    for (name, unit, suffix) in [
+        ("relative", "é日本🙂 [label](target.md) ", ""),
+        ("absolute", "é日本🙂 [label](/target.md) ", ""),
+        ("angle", "é日本🙂 [label](<target.md>) ", ""),
+        ("tail-angle", "é日本🙂 [label](target.md) ", " [last](<last.md>)"),
+        ("tail-marker", "é日本🙂 [label](target.md) ", " <no destination>"),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = format!("{}{suffix}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let links = rumdl_lib::workspace_index::extract_cross_file_links(&ctx);
+            assert_eq!(
+                links.relative.len() + links.root_relative.len(),
+                count + usize::from(name == "tail-angle")
+            );
+            if name == "tail-angle" {
+                assert!(links.relative.iter().all(|link| link.target_path == "last.md"));
+            }
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| rumdl_lib::workspace_index::extract_cross_file_links(black_box(&ctx)))
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_workspace_build(c: &mut Criterion) {
     let n = 400usize;
     c.bench_function("workspace_build/400_crosslinked", |b| {
@@ -1154,6 +1184,7 @@ criterion_group!(
     bench_md057,
     bench_md057_positions,
     bench_workspace_build,
+    bench_workspace_link_extraction,
     bench_rules,
     bench_emphasis_pairing,
     bench_md037_filter,

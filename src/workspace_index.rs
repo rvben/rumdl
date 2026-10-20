@@ -24,7 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, SourcePositions};
 use crate::utils::range_utils::byte_to_char_count;
 
 // =============================================================================
@@ -263,6 +263,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
     // Track which lines we've already processed to avoid duplicates
     // (ctx.links() may have multiple entries for the same line)
     let mut processed_lines = HashSet::new();
+    let mut positions = SourcePositions::new(content, &ctx.lines);
 
     for link in ctx.links() {
         let line_idx = link.line - 1;
@@ -288,6 +289,21 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
             continue;
         }
 
+        let Some(mut destinations) = ctx.index_link_destinations(link.line) else {
+            continue;
+        };
+
+        // Most ordinary lines have only one indexed link. Allocate character
+        // checkpoints only when this line actually needs repeated columns.
+        let mut first_column = true;
+        let mut column_at = |offset| {
+            if std::mem::replace(&mut first_column, false) {
+                byte_to_char_count(line, offset - line_info.byte_offset)
+            } else {
+                positions.column_on_line(line_idx, offset) + 1
+            }
+        };
+
         // Find all links in this line
         for link_match in LINK_START_REGEX.find_iter(line) {
             let start_pos = link_match.start();
@@ -304,10 +320,9 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
 
             // Extract the URL (group 1) and fragment (group 2)
             // Try angle-bracket regex first (handles URLs with parens)
-            if let Some(destination) = ctx.indexed_link_destination(link.line, end_pos - 1) {
+            if let Some(destination) = destinations.at(end_pos - 1) {
                 let file_path = content[destination.url.clone()].trim();
                 let fragment = destination.fragment(content).trim_start_matches('#');
-                let url_start = destination.url.start - line_info.byte_offset;
 
                 // Root-relative links (leading `/`) resolve against content roots
                 // in the LSP, not the source directory, so they are captured in a
@@ -325,7 +340,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                                 target_path: stripped.to_string(),
                                 fragment: fragment.to_string(),
                                 line: link.line,
-                                column: byte_to_char_count(line, url_start),
+                                column: column_at(destination.url.start),
                                 origin: LinkOrigin::Body,
                             });
                         }
@@ -359,7 +374,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                         target_path: file_path.to_string(),
                         fragment: fragment.to_string(),
                         line: link.line,
-                        column: byte_to_char_count(line, url_start),
+                        column: column_at(destination.url.start),
                         origin: LinkOrigin::Body,
                     });
                 }
@@ -2246,6 +2261,41 @@ mod tests {
         assert_eq!(links[0].line, 1);
         // "Check [guide](" = 14 chars, so column 15 is where "./guide.md" starts
         assert_eq!(links[0].column, 15);
+    }
+
+    #[test]
+    fn indexed_columns_preserve_unicode_and_line_endings() {
+        for newline in ["\n", "\r\n"] {
+            for target in ["目标/é.md", "/目标/é.md"] {
+                let unit = format!("é日本🙂 [label]({target}#part) ");
+                let content = format!("{}{newline}{}", unit.repeat(80), unit.repeat(80));
+                let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                let extracted = extract_cross_file_links(&ctx);
+                let links = if target.starts_with('/') {
+                    extracted.root_relative
+                } else {
+                    extracted.relative
+                };
+                assert_eq!(links.len(), 160);
+                for (link, (offset, _)) in links.iter().zip(content.match_indices(target)) {
+                    assert_eq!((link.line, link.column), ctx.offset_to_line_col(offset));
+                    assert_eq!(link.target_path, "目标/é.md");
+                    assert_eq!(link.fragment, "part");
+                }
+            }
+        }
+        // The legacy angle-first search can report the same later destination
+        // for several earlier labels. Its columns must remain unchanged too.
+        let content = format!("{}[last](<目标/é.md>)", "é日本🙂 [label](one.md) ".repeat(160));
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let links = extract_cross_file_links(&ctx).relative;
+        assert_eq!(links.len(), 161);
+        let expected = ctx.offset_to_line_col(content.find("目标/é.md").unwrap());
+        assert!(
+            links
+                .iter()
+                .all(|link| (link.line, link.column) == expected && link.target_path == "目标/é.md")
+        );
     }
 
     #[test]
