@@ -1,3 +1,5 @@
+use std::cell::OnceCell;
+
 use crate::lint_context::LintContext;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::skip_context::is_table_line;
@@ -149,7 +151,7 @@ impl MD076ListItemSpacing {
     /// text is not enough: a marker followed by five spaces and a fence is an
     /// *indented* code block, which MD031 says nothing about, and the `in_code_block`
     /// flag is true for indented blocks as well as fenced ones.
-    fn is_fenced_code_block_list_item(ctx: &LintContext, line_num: usize) -> bool {
+    fn is_fenced_code_block_list_item(ctx: &LintContext, line_num: usize, fence_starts: &OnceCell<Vec<usize>>) -> bool {
         let Some(info) = ctx.line_info(line_num) else {
             return false;
         };
@@ -158,9 +160,20 @@ impl MD076ListItemSpacing {
         }
 
         let line_range = info.byte_offset..info.byte_offset + info.byte_len;
-        ctx.code_block_details
-            .iter()
-            .any(|detail| detail.is_fenced && line_range.contains(&detail.start))
+        // Initialize only for a list marker after a blank gap. Tight lists do
+        // not need this index, and all lists in this analysis share it.
+        let starts = fence_starts.get_or_init(|| {
+            let mut starts: Vec<_> = ctx
+                .code_block_details
+                .iter()
+                .filter(|detail| detail.is_fenced)
+                .map(|detail| detail.start)
+                .collect();
+            starts.sort_unstable();
+            starts
+        });
+        let next = starts.partition_point(|&start| start < line_range.start);
+        starts.get(next).is_some_and(|start| line_range.contains(start))
     }
 
     /// Check whether a non-blank line is continuation content within a list item
@@ -204,7 +217,7 @@ impl MD076ListItemSpacing {
     /// required by another rule (MD031/MD058) after structural content, or
     /// `ContinuationLoose` if the blank line follows continuation content
     /// within a list item.
-    fn classify_gap(ctx: &LintContext, first: usize, next: usize) -> GapKind {
+    fn classify_gap(ctx: &LintContext, first: usize, next: usize, fence_starts: &OnceCell<Vec<usize>>) -> GapKind {
         if next <= first + 1 {
             return GapKind::Tight;
         }
@@ -215,7 +228,7 @@ impl MD076ListItemSpacing {
         // A fence opened directly on a list marker is still part of that list
         // item. The blank before it belongs to MD031, not to MD076's spacing
         // consistency policy, so removing it would create a fix loop.
-        if Self::is_fenced_code_block_list_item(ctx, next) {
+        if Self::is_fenced_code_block_list_item(ctx, next, fence_starts) {
             return GapKind::Structural;
         }
         // Walk backwards past blank lines to find the last non-blank content line.
@@ -265,11 +278,18 @@ impl MD076ListItemSpacing {
     /// the lists they form, one per run of items at one nesting level, so a
     /// nested list is judged on its own spacing and never on its parent's.
     fn analyze(&self, ctx: &LintContext) -> Vec<ListAnalysis> {
+        let fence_starts = OnceCell::new();
         ctx.list_blocks
             .iter()
             .flat_map(|block| ctx.list_block_item_groups(block))
             .filter_map(|items| {
-                Self::analyze_list(ctx, items, &self.config.style, self.config.allow_loose_continuation)
+                Self::analyze_list(
+                    ctx,
+                    items,
+                    &self.config.style,
+                    self.config.allow_loose_continuation,
+                    &fence_starts,
+                )
             })
             .collect()
     }
@@ -284,13 +304,17 @@ impl MD076ListItemSpacing {
         items: Vec<usize>,
         style: &ListItemSpacingStyle,
         allow_loose_continuation: bool,
+        fence_starts: &OnceCell<Vec<usize>>,
     ) -> Option<ListAnalysis> {
         if items.len() < 2 {
             return None;
         }
 
         // Classify each inter-item gap.
-        let gaps: Vec<GapKind> = items.windows(2).map(|w| Self::classify_gap(ctx, w[0], w[1])).collect();
+        let gaps: Vec<GapKind> = items
+            .windows(2)
+            .map(|w| Self::classify_gap(ctx, w[0], w[1], fence_starts))
+            .collect();
 
         // Structural gaps and (when allowed) continuation gaps are excluded
         // from consistency analysis — they should not influence whether the

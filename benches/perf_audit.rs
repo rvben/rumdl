@@ -767,6 +767,28 @@ fn bench_md087_suppressions(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_spacing_fence_lookup(c: &mut Criterion) {
+    use rumdl_lib::rules::{MD031BlanksAroundFences, MD076ListItemSpacing};
+
+    let mut group = c.benchmark_group("spacing_fence_lookup");
+    group.sample_size(10);
+    let rules: [&dyn Rule; 2] = [&MD031BlanksAroundFences::default(), &MD076ListItemSpacing::default()];
+    for rule in rules {
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs] {
+            for count in [128, 1024, 4096] {
+                let content = "1. Item\n\n   ```toml\n   key = 1\n   ```\n\n".repeat(count);
+                let ctx = LintContext::new(&content, flavor, None);
+                assert!(rule.check(&ctx).unwrap().is_empty());
+                group.throughput(Throughput::Bytes(content.len() as u64));
+                group.bench_function(BenchmarkId::new(format!("{}-{flavor:?}", rule.name()), count), |b| {
+                    b.iter(|| rule.check(black_box(&ctx)).unwrap());
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_md077_fence_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("md077_fence_lookup");
     group.sample_size(10);
@@ -1409,6 +1431,7 @@ criterion_group!(
     bench_md093_positions,
     bench_md070_fence_lookup,
     bench_md077_fence_lookup,
+    bench_spacing_fence_lookup,
     bench_md087_suppressions,
     bench_directive_code_ranges,
     bench_lint,

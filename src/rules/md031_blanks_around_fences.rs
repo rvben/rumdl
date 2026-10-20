@@ -475,6 +475,13 @@ impl Rule for MD031BlanksAroundFences {
 
         // Handle MkDocs admonitions separately
         if is_mkdocs {
+            // Walk the filtered fence ranges once alongside the source lines.
+            // Sort a separate copy to preserve diagnostic order above, and keep
+            // the furthest end so overlapping ranges retain union semantics.
+            let mut fences = fenced_blocks.clone();
+            fences.sort_unstable_by_key(|&(start, _, _)| start);
+            let mut fences = fences.into_iter().peekable();
+            let mut fenced_through = None;
             let mut in_admonition = false;
             let mut admonition_indent = 0;
             let mut i = 0;
@@ -483,8 +490,14 @@ impl Rule for MD031BlanksAroundFences {
                 let line = lines[i];
 
                 // Skip if this line is inside a fenced code block
-                let in_fenced_block = fenced_blocks.iter().any(|(start, end, _)| i >= *start && i <= *end);
-                if in_fenced_block {
+                while let Some(&(start, end, _)) = fences.peek() {
+                    if start > i {
+                        break;
+                    }
+                    fenced_through = Some(fenced_through.map_or(end, |previous: usize| previous.max(end)));
+                    fences.next();
+                }
+                if fenced_through.is_some_and(|end| i <= end) {
                     i += 1;
                     continue;
                 }

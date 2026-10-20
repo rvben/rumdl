@@ -650,6 +650,29 @@ fn test_md077_fence_lookup_linear_complexity() {
     }
 }
 
+/// Spacing checks must not search every fence for each source line or list gap.
+#[test]
+fn test_spacing_fence_lookup_linear_complexity() {
+    let rules: [&dyn Rule; 2] = [&MD031BlanksAroundFences::default(), &MD076ListItemSpacing::default()];
+    for rule in rules {
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs] {
+            let times: Vec<_> = [2048, 4096, 8192]
+                .into_iter()
+                .map(|count| {
+                    let content = "1. Item\n\n   ```toml\n   key = 1\n   ```\n\n".repeat(count);
+                    let ctx = LintContext::new(&content, flavor, None);
+                    assert!(!rule.should_skip(&ctx));
+                    assert_eq!(ctx.code_block_details.len(), count);
+                    assert!(rule.check(&ctx).unwrap().is_empty());
+                    assert_eq!(rule.fix(&ctx).unwrap(), content);
+                    measure_rule_time_with_context(rule, &ctx, 7)
+                })
+                .collect();
+            assert_linear_complexity(&format!("{} {flavor:?} fence spacing", rule.name()), &times, 3.0);
+        }
+    }
+}
+
 /// Opening fences must not each search the document's entire block list.
 #[test]
 fn test_md070_fence_lookup_linear_complexity() {
