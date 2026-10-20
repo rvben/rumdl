@@ -167,6 +167,9 @@ impl Rule for MD054LinkImageStyle {
         };
         let entries_by_offset: HashMap<usize, &transform::PlannedEdit> =
             plan.entries.iter().map(|e| (e.edit.range.start, e)).collect();
+        // Reference insertions share the document's line ending and EOF
+        // padding. Inspect those once, and only when an insertion is needed.
+        let ref_appender = std::cell::LazyCell::new(|| transform::RefDefAppender::new(content));
         let build_fix = |offset: usize| -> Option<Fix> {
             let entry = entries_by_offset.get(&offset)?;
             let primary_range = entry.edit.range.clone();
@@ -174,7 +177,7 @@ impl Rule for MD054LinkImageStyle {
             match &entry.new_ref {
                 None => Some(Fix::new(primary_range, primary_replacement)),
                 Some(def) => {
-                    let appended = transform::render_ref_def_append(content, def)?;
+                    let appended = ref_appender.render(def)?;
                     let eof_range = content.len()..content.len();
                     Some(Fix::with_additional_edits(
                         primary_range,

@@ -1357,6 +1357,21 @@ fn test_md050_linear_complexity() {
 // =============================================================================
 
 #[test]
+fn test_md054_fix_planning_linear_complexity() {
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
+    for unit in [
+        "[label](https://example.com)\n",
+        "[![alt](image.png)](https://example.com) [plain](https://example.com)\n",
+    ] {
+        let durations: Vec<_> = [4096, 8192, 16384]
+            .into_iter()
+            .map(|size| measure_rule_time(&rule, &unit.repeat(size), 5))
+            .collect();
+        assert_linear_complexity("MD054 fix planning", &durations, 3.0);
+    }
+}
+
+#[test]
 fn test_md034_linear_complexity() {
     let sizes = [500, 1000, 2000];
     let iterations = 5;

@@ -336,13 +336,26 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
 /// referencing link is just dead weight and would re-trigger MD053 noise.
 fn finalize_plan(pending: Vec<(SpanEdit, Option<RefDefInsert>)>) -> FixPlan {
     let mut keep = vec![true; pending.len()];
-    for i in 0..pending.len() {
-        for j in (i + 1)..pending.len() {
-            let a = &pending[i].0.range;
-            let b = &pending[j].0.range;
+    if pending.len() > 1 {
+        // Sweep indices while keeping flags in original order. Sorting equal
+        // starts by end also preserves the predicate for empty ranges.
+        // The furthest-reaching prior interval detects every conflict; other
+        // overlapping prior intervals are already marked.
+        let mut order: Vec<_> = (0..pending.len()).collect();
+        order.sort_unstable_by_key(|&i| {
+            let range = &pending[i].0.range;
+            (range.start, range.end)
+        });
+        let mut furthest = order[0];
+        for &i in &order[1..] {
+            let a = &pending[furthest].0.range;
+            let b = &pending[i].0.range;
             if a.start < b.end && b.start < a.end {
+                keep[furthest] = false;
                 keep[i] = false;
-                keep[j] = false;
+            }
+            if b.end > a.end {
+                furthest = i;
             }
         }
     }
@@ -920,30 +933,7 @@ fn is_uri_autolink(url: &str) -> bool {
     i < bytes.len() && bytes[i] == b':'
 }
 
-/// Render a single reference definition as text suitable for an EOF append.
-///
-/// Returns the formatted line (e.g. `[label]: https://example.com "title"`)
-/// terminated with the document's line ending, or `None` if the URL cannot be
-/// expressed as a CommonMark destination.
-///
-/// Used by `Rule::check()` to attach a per-warning ref-def insertion as an
-/// `additional_edit` on each ref-emitting Fix, so quick-fix paths that apply
-/// a single warning's Fix produce a complete, parseable result without
-/// relying on the rule's whole-document `fix()` to materialize the def.
-pub(super) fn render_ref_def_line(content: &str, def: &RefDefInsert) -> Option<String> {
-    let dest = format_url_destination(&def.url)?;
-    let eol = crate::utils::line_ending::detect_line_ending(content);
-    let mut out = String::with_capacity(def.label.len() + dest.len() + 8);
-    out.push('[');
-    out.push_str(&def.label);
-    out.push_str("]: ");
-    out.push_str(&dest);
-    out.push_str(&format_title(def.title.as_deref()));
-    out.push_str(eol);
-    Some(out)
-}
-
-/// Build the per-warning replacement text for an EOF ref-def insertion.
+/// Document-wide formatting for per-warning EOF reference insertions.
 ///
 /// Inserted at byte offset `content.len()` (a zero-width range), this prepends
 /// the line-ending separator(s) needed to detach the new ref-def from any
@@ -952,31 +942,46 @@ pub(super) fn render_ref_def_line(content: &str, def: &RefDefInsert) -> Option<S
 /// path can't rearrange the document's tail, so we count existing trailing
 /// EOL sequences and pad up to exactly two so the ref-def is preceded by a
 /// blank line, matching CommonMark §4.7's block-context requirement.
-pub(super) fn render_ref_def_append(content: &str, def: &RefDefInsert) -> Option<String> {
-    let line = render_ref_def_line(content, def)?;
-    let eol = crate::utils::line_ending::detect_line_ending(content);
-    // If the document is empty, no leading separator is needed.
-    if content.is_empty() {
-        return Some(line);
-    }
-    let trailing = count_trailing_eol_sequences(content);
-    let mut prefix = String::new();
-    match trailing {
-        0 => {
-            prefix.push_str(eol);
-            prefix.push_str(eol);
+pub(super) struct RefDefAppender {
+    eol: &'static str,
+    padding: usize,
+}
+
+impl RefDefAppender {
+    pub(super) fn new(content: &str) -> Self {
+        Self {
+            eol: crate::utils::line_ending::detect_line_ending(content),
+            padding: if content.is_empty() {
+                0
+            } else {
+                2_usize.saturating_sub(count_trailing_eol_sequences(content))
+            },
         }
-        1 => prefix.push_str(eol),
-        _ => {} // already 2+ EOL sequences → blank line present, no padding needed
     }
-    Some(format!("{prefix}{line}"))
+
+    /// Render a complete insertion for an individual quick fix, or return
+    /// `None` if the URL cannot be expressed as a CommonMark destination.
+    pub(super) fn render(&self, def: &RefDefInsert) -> Option<String> {
+        let dest = format_url_destination(&def.url)?;
+        let mut out = String::with_capacity(def.label.len() + dest.len() + 8);
+        for _ in 0..self.padding {
+            out.push_str(self.eol);
+        }
+        out.push('[');
+        out.push_str(&def.label);
+        out.push_str("]: ");
+        out.push_str(&dest);
+        out.push_str(&format_title(def.title.as_deref()));
+        out.push_str(self.eol);
+        Some(out)
+    }
 }
 
 /// Count the number of trailing line-ending sequences in `s`, where each of
 /// `\r\n`, `\n`, and `\r` counts as exactly one sequence. Mixed-style tails
 /// (e.g. `\r\n\n`) are counted exactly — `\r\n\n` is two sequences, not 1.5.
 ///
-/// Used by `render_ref_def_append` to decide how many EOLs to prepend so the
+/// Used by `RefDefAppender` to decide how many EOLs to prepend so the
 /// inserted ref-def lands after exactly one blank line, regardless of the
 /// document's line-ending style or any inconsistencies in its tail.
 fn count_trailing_eol_sequences(s: &str) -> usize {
@@ -1081,6 +1086,72 @@ pub(super) fn apply(content: &str, plan: FixPlan) -> String {
 mod tests {
     use super::*;
 
+    fn assert_plan_matches_pairwise(ranges: &[Range<usize>]) {
+        let expected: Vec<_> = (0..ranges.len())
+            .filter(|&i| {
+                !(0..ranges.len()).any(|j| i != j && ranges[i].start < ranges[j].end && ranges[j].start < ranges[i].end)
+            })
+            .collect();
+        let pending = ranges
+            .iter()
+            .enumerate()
+            .map(|(i, range)| {
+                (
+                    SpanEdit {
+                        range: range.clone(),
+                        replacement: i.to_string(),
+                    },
+                    Some(RefDefInsert {
+                        label: format!("ref-{i}"),
+                        url: format!("https://example.com/{i}"),
+                        title: Some(format!("title-{i}")),
+                    }),
+                )
+            })
+            .collect();
+        let plan = finalize_plan(pending);
+        let actual: Vec<usize> = plan
+            .entries
+            .iter()
+            .map(|entry| entry.edit.replacement.parse().unwrap())
+            .collect();
+        assert_eq!(actual, expected, "{ranges:?}");
+        for (entry, i) in plan.entries.iter().zip(expected) {
+            assert_eq!(entry.edit.range, ranges[i]);
+            let definition = entry.new_ref.as_ref().unwrap();
+            assert_eq!(definition.label, format!("ref-{i}"));
+            assert_eq!(definition.url, format!("https://example.com/{i}"));
+            assert_eq!(definition.title, Some(format!("title-{i}")));
+        }
+    }
+
+    #[test]
+    fn finalize_plan_preserves_conflicts_order_and_definitions() {
+        for ranges in [
+            vec![],
+            vec![20..30, 0..10, 10..20, 5..15],
+            vec![0..4, 0..4, 8..10],
+            vec![0..100, 5..6, 7..8, 100..110],
+            vec![0..4, 3..7, 6..10, 20..21],
+            vec![2..2, 2..4, 0..3, 4..4, 4..5],
+            vec![0..usize::MAX, 10..11, usize::MAX..usize::MAX],
+        ] {
+            assert_plan_matches_pairwise(&ranges);
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(256))]
+        #[test]
+        fn finalize_plan_matches_pairwise_conflicts(
+            endpoints in proptest::collection::vec((0_usize..400, 0_usize..400), 0..64)
+        ) {
+            assert_plan_matches_pairwise(
+                &endpoints.into_iter().map(|(a, b)| a.min(b)..a.max(b)).collect::<Vec<_>>()
+            );
+        }
+    }
+
     #[test]
     fn extract_full_ref_simple() {
         assert_eq!(extract_full_ref("[text][ref]"), Some("ref".into()));
@@ -1125,27 +1196,57 @@ mod tests {
         };
 
         // No trailing EOL → prepend two so we end up with `\n\n[x]: …\n`.
-        let appended = render_ref_def_append("body", &def).unwrap();
+        let appended = RefDefAppender::new("body").render(&def).unwrap();
         assert_eq!(appended, "\n\n[x]: https://example.com\n");
 
         // Exactly one trailing EOL → prepend one to make a blank line.
-        let appended = render_ref_def_append("body\n", &def).unwrap();
+        let appended = RefDefAppender::new("body\n").render(&def).unwrap();
         assert_eq!(appended, "\n[x]: https://example.com\n");
 
         // Already a blank line (two EOLs) → no padding needed.
-        let appended = render_ref_def_append("body\n\n", &def).unwrap();
+        let appended = RefDefAppender::new("body\n\n").render(&def).unwrap();
         assert_eq!(appended, "[x]: https://example.com\n");
 
         // CRLF, exactly one trailing CRLF → prepend one CRLF.
-        let appended = render_ref_def_append("body\r\n", &def).unwrap();
+        let appended = RefDefAppender::new("body\r\n").render(&def).unwrap();
         assert_eq!(appended, "\r\n[x]: https://example.com\r\n");
 
         // CRLF + bare LF mixed tail (3 bytes, 2 sequences) — must be
         // recognized as already having a blank line, no padding added.
         // The previous byte-count heuristic over-padded this case.
         // `detect_line_ending` resolves a tied LF/CRLF count to LF.
-        let appended = render_ref_def_append("body\r\n\n", &def).unwrap();
+        let appended = RefDefAppender::new("body\r\n\n").render(&def).unwrap();
         assert_eq!(appended, "[x]: https://example.com\n");
+    }
+
+    #[test]
+    fn ref_appender_reuses_document_endings_for_individual_fixes() {
+        for (content, prefix, eol) in [
+            ("", "", "\n"),
+            ("body", "\n\n", "\n"),
+            ("body\r", "\n", "\n"),
+            ("body\n\n\n", "", "\n"),
+            ("a\r\nb\n", "\n", "\n"),
+            ("a\r\nb\r\nc\n", "\r\n", "\r\n"),
+            ("a\r\nb\r\nc", "\r\n\r\n", "\r\n"),
+            ("body\r\n\r\n\n", "", "\r\n"),
+        ] {
+            let appender = RefDefAppender::new(content);
+            for label in ["first", "second"] {
+                let mut definition = RefDefInsert {
+                    label: label.to_string(),
+                    url: "https://example.com".to_string(),
+                    title: Some("日本🙂".to_string()),
+                };
+                assert_eq!(
+                    appender.render(&definition).unwrap(),
+                    format!("{prefix}[{label}]: https://example.com \"日本🙂\"{eol}"),
+                    "{content:?}"
+                );
+                definition.url.push('\n');
+                assert!(appender.render(&definition).is_none());
+            }
+        }
     }
 
     #[test]

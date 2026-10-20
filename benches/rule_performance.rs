@@ -4,7 +4,7 @@ use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{
     MD013LineLength, MD033NoInlineHtml, MD034NoBareUrls, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
-    MD053LinkImageReferenceDefinitions,
+    MD053LinkImageReferenceDefinitions, MD054LinkImageStyle,
 };
 use std::hint::black_box;
 
@@ -252,6 +252,33 @@ fn bench_md053(c: &mut Criterion) {
     c.bench_function("MD053 fix unused references", |b| b.iter(|| rule.fix(black_box(&ctx))));
 }
 
+/// Separate lines keep column calculation cheap while exercising fix conflicts.
+fn bench_md054_fix_planning(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md054_fix_planning");
+    group.sample_size(10);
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
+    for count in [128, 1024, 4096] {
+        for (name, unit, warnings_per_unit) in [
+            ("links", "[label](https://example.com)\n", 1),
+            (
+                "nested",
+                "[![alt](image.png)](https://example.com) [plain](https://example.com)\n",
+                3,
+            ),
+        ] {
+            let content = unit.repeat(count);
+            let ctx = make_ctx(&content);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), count * warnings_per_unit);
+            assert_eq!(warnings.iter().filter(|warning| warning.fix.is_some()).count(), count);
+            group.bench_function(format!("{name}/{count}"), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_md034_scaling,
@@ -259,6 +286,7 @@ criterion_group!(
     bench_md033,
     bench_md033_scaling,
     bench_md033_allowed_inside,
+    bench_md054_fix_planning,
     bench_md037,
     bench_md044,
     bench_md051,
