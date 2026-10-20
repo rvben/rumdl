@@ -347,6 +347,7 @@ fn empty_anchor_elements(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
 fn opaque_ranges(text: &str) -> Vec<(usize, usize)> {
     let bytes = text.as_bytes();
     let mut ranges = Vec::new();
+    let mut backticks = BacktickLookup::default();
     let mut brackets = DelimiterLookup::default();
     let mut parentheses = DelimiterLookup::default();
     let mut pos = 0;
@@ -355,7 +356,7 @@ fn opaque_ranges(text: &str) -> Vec<(usize, usize)> {
         if bytes[pos] == b'`' {
             let run_end = pos + bytes[pos..].iter().take_while(|&&b| b == b'`').count();
             let run_len = run_end - pos;
-            match closing_backtick_run(bytes, run_end, run_len) {
+            match backticks.find(bytes, run_end, run_len) {
                 Some(close_start) => {
                     ranges.push((pos, close_start + run_len));
                     pos = close_start + run_len;
@@ -466,6 +467,44 @@ fn balanced_end(bytes: &[u8], from: usize, open: u8, close: u8) -> Option<usize>
         pos += 1;
     }
     None
+}
+
+/// Look up successors of complete backtick runs in one input. Like image
+/// delimiters, ordinary code spans need no index. Distinct unmatched lengths
+/// can repeatedly search the suffix, so bound direct scanning before indexing.
+#[derive(Default)]
+struct BacktickLookup {
+    scanned_bytes: usize,
+    successors: Option<HashMap<usize, usize>>,
+}
+
+impl BacktickLookup {
+    fn find(&mut self, bytes: &[u8], from: usize, run_len: usize) -> Option<usize> {
+        if self.successors.is_none() && self.scanned_bytes >= bytes.len().saturating_mul(2) {
+            let mut successors = HashMap::new();
+            let mut previous_by_length = HashMap::new();
+            let mut pos = 0;
+            while pos < bytes.len() {
+                if bytes[pos] != b'`' {
+                    pos += 1;
+                    continue;
+                }
+                let start = pos;
+                pos += bytes[pos..].iter().take_while(|&&byte| byte == b'`').count();
+                if let Some(previous_end) = previous_by_length.insert(pos - start, pos) {
+                    successors.insert(previous_end, start);
+                }
+            }
+            self.successors = Some(successors);
+        }
+        if let Some(successors) = &self.successors {
+            return successors.get(&from).copied();
+        }
+        let close = closing_backtick_run(bytes, from, run_len);
+        let scanned_to = close.map_or(bytes.len(), |start| start + run_len);
+        self.scanned_bytes = self.scanned_bytes.saturating_add(scanned_to - from);
+        close
+    }
 }
 
 /// Start of the first backtick run of exactly `run_len` after `from`, if any.
@@ -630,6 +669,59 @@ pub fn extract_standalone_attr_list_id(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backtick_lookup_matches_independent_scans() {
+        let tokens = ["x", "`", "``", "```", "\\", "é", "<!--", "-->", "![", "](x)"];
+        for pattern in 0..tokens.len().pow(4) {
+            let mut digits = pattern;
+            let mut text = String::new();
+            for _ in 0..4 {
+                text.push_str(tokens[digits % tokens.len()]);
+                digits /= tokens.len();
+            }
+            let bytes = text.as_bytes();
+            let mut runs = Vec::new();
+            let mut pos = 0;
+            while pos < bytes.len() {
+                if bytes[pos] == b'`' {
+                    let end = pos + bytes[pos..].iter().take_while(|&&byte| byte == b'`').count();
+                    runs.push((end, end - pos));
+                    pos = end;
+                } else {
+                    pos += 1;
+                }
+            }
+            for reverse in [false, true] {
+                let mut queries = runs.clone();
+                if reverse {
+                    queries.reverse();
+                }
+                let mut lookup = BacktickLookup::default();
+                for &(from, len) in queries.iter().cycle().take(queries.len() * 8) {
+                    assert_eq!(
+                        lookup.find(bytes, from, len),
+                        closing_backtick_run(bytes, from, len),
+                        "{text:?}, {from}, {len}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_backticks_preserve_opaque_anchor_ranges() {
+        let prefix = "`x ``x ```x ````x ";
+        for suffix in [
+            "`````<a id=hidden></a>````` <a id=live></a>",
+            "<!-- `````<a id=hidden></a> --> <a id=live></a>",
+            "![`````<a id=hidden></a>](image) <a id=live></a>",
+            r"\`````<a id=hidden></a>````` <a id=live></a>",
+        ] {
+            let text = format!("{prefix}{suffix}");
+            assert_eq!(extract_html_anchor_ids(&text), ["live"], "{text:?}");
+        }
+    }
 
     #[test]
     fn delimiter_lookup_matches_independent_scans() {

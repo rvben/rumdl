@@ -720,6 +720,70 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// Distinct unmatched backtick lengths must not repeatedly scan the suffix.
+#[test]
+fn test_heading_backtick_lookup_linear_complexity() {
+    use rumdl_lib::utils::header_id_utils::extract_heading_text;
+
+    for name in ["unmatched", "paired", "recovered", "indexed-pairs"] {
+        for stage in ["text", "context"] {
+            let measurements: Vec<_> = [128, 256, 512]
+                .into_iter()
+                .map(|count| {
+                    let unmatched = || {
+                        (1..=count)
+                            .map(|len| format!("{}x ", "`".repeat(len)))
+                            .collect::<String>()
+                    };
+                    let paired = || {
+                        (1..=count)
+                            .map(|len| {
+                                let ticks = "`".repeat(len);
+                                format!("{ticks}x{ticks} ")
+                            })
+                            .collect::<String>()
+                    };
+                    let text = match name {
+                        "unmatched" => unmatched(),
+                        "paired" => paired(),
+                        "recovered" => format!("{}x {}", "`".repeat(count + 1), paired()),
+                        _ => {
+                            let ticks = "`".repeat(count + 1);
+                            format!("{}{}", unmatched(), format!("{ticks}x{ticks} ").repeat(count))
+                        }
+                    };
+                    let content = format!("# {text}<span>text</span>\n");
+                    assert_eq!(extract_heading_text(&content).text, content.trim());
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            let start = MeasurementClock::now();
+                            if stage == "text" {
+                                std::hint::black_box(extract_heading_text(&content));
+                            } else {
+                                std::hint::black_box(LintContext::new(&content, MarkdownFlavor::Standard, None));
+                            }
+                            start.elapsed()
+                        })
+                        .collect();
+                    samples.sort();
+                    (content.len(), samples[3])
+                })
+                .collect();
+            // Doubling the number of distinct lengths roughly quadruples the
+            // input bytes. Compare timing growth to bytes, not the run count.
+            for pair in measurements.windows(2) {
+                let byte_growth = pair[1].0 as f64 / pair[0].0 as f64;
+                let time_growth = pair[1].1.as_secs_f64() / pair[0].1.as_secs_f64();
+                eprintln!("backticks {name}/{stage}: {byte_growth:.2}x bytes, {time_growth:.2}x time");
+                assert!(
+                    time_growth < byte_growth * 1.5,
+                    "backticks {name}/{stage}: timing grew {time_growth:.2}x for {byte_growth:.2}x bytes"
+                );
+            }
+        }
+    }
+}
+
 /// Malformed images must not search the same bracket/parenthesis ranges repeatedly.
 #[test]
 fn test_heading_image_delimiters_linear_complexity() {

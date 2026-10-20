@@ -823,6 +823,53 @@ fn bench_heading_anchor_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_heading_backtick_lookup(c: &mut Criterion) {
+    use rumdl_lib::utils::header_id_utils::extract_heading_text;
+
+    let mut group = c.benchmark_group("heading_backtick_lookup");
+    group.sample_size(10);
+    for name in ["unmatched", "paired", "recovered", "indexed-pairs"] {
+        for count in [64, 256, 1024] {
+            let unmatched = || {
+                (1..=count)
+                    .map(|len| format!("{}x ", "`".repeat(len)))
+                    .collect::<String>()
+            };
+            let paired = || {
+                (1..=count)
+                    .map(|len| {
+                        let ticks = "`".repeat(len);
+                        format!("{ticks}x{ticks} ")
+                    })
+                    .collect::<String>()
+            };
+            let text = match name {
+                "unmatched" => unmatched(),
+                "paired" => paired(),
+                "recovered" => format!("{}x {}", "`".repeat(count + 1), paired()),
+                _ => {
+                    let ticks = "`".repeat(count + 1);
+                    format!("{}{}", unmatched(), format!("{ticks}x{ticks} ").repeat(count))
+                }
+            };
+            let content = format!("# {text}<span>text</span>\n");
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            for stage in ["text", "context"] {
+                group.bench_function(BenchmarkId::new(format!("{name}-{stage}"), count), |b| {
+                    b.iter(|| {
+                        if stage == "text" {
+                            black_box(extract_heading_text(black_box(&content)));
+                        } else {
+                            black_box(LintContext::new(black_box(&content), MarkdownFlavor::Standard, None));
+                        }
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_heading_image_delimiters(c: &mut Criterion) {
     use rumdl_lib::utils::header_id_utils::extract_heading_text;
 
@@ -1715,6 +1762,7 @@ criterion_group!(
     bench_heading_trailing_anchors,
     bench_heading_anchor_spacing,
     bench_heading_image_delimiters,
+    bench_heading_backtick_lookup,
     bench_md030_indented_fallback,
     bench_md087_suppressions,
     bench_directive_code_ranges,
