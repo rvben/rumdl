@@ -235,6 +235,27 @@ fn test_unmatched_emphasis_pairing_linear_complexity() {
     assert_linear_complexity("MD049 unmatched emphasis", &times, 3.0);
 }
 
+#[test]
+fn test_md037_warning_filter_linear_complexity() {
+    for (unit, expected) in [
+        ("é日本🙂 * bad * _ other _ ", 2),
+        ("é日本🙂 * bad * <span>text</span> ", 1),
+        ("é日本🙂 `literal` $x$ ![image](image.png) * bad * ", 1),
+        ("*foo * bar* ", 0),
+    ] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("{}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert_eq!(MD037NoSpaceInEmphasis.check(&ctx).unwrap().len(), count * expected);
+                measure_rule_time(&MD037NoSpaceInEmphasis, &content, 5)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD037 filter {unit:?}"), &times, 3.0);
+    }
+}
+
 /// Assert linear complexity by checking growth ratios
 fn assert_linear_complexity(name: &str, durations: &[Duration], threshold: f64) {
     assert!(durations.len() >= 3, "Need at least 3 measurements for ratio check");

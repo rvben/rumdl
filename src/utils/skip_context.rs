@@ -454,6 +454,13 @@ pub fn is_in_pymdown_markup(line: &str, position: usize, flavor: MarkdownFlavor)
 /// Handles `<code>`, `<pre>`, `<samp>`, `<kbd>`, and `<var>` tags (case-insensitive).
 /// These are inline elements whose content should not be interpreted as markdown emphasis.
 pub fn is_in_inline_html_code(line: &str, position: usize) -> bool {
+    visit_inline_html_code_ranges(line, |start, end| start <= position && position < end)
+}
+
+fn visit_inline_html_code_ranges(line: &str, mut visit: impl FnMut(usize, usize) -> bool) -> bool {
+    if !line.contains('<') {
+        return false;
+    }
     // Tags whose content should not be parsed as markdown
     const TAGS: &[&str] = &["code", "pre", "samp", "kbd", "var"];
 
@@ -493,7 +500,7 @@ pub fn is_in_inline_html_code(line: &str, position: usize) -> bool {
             };
             let content_end = close_start;
 
-            if position >= content_start && position < content_end {
+            if visit(content_start, content_end) {
                 return true;
             }
 
@@ -650,37 +657,124 @@ pub(crate) fn mask_mdx_inline_code<'a>(ctx: &LintContext, source: &'a str, start
 /// Point membership in possibly overlapping regions. Sorted starts and prefix
 /// maximum ends preserve the union while allowing predecessor queries.
 #[derive(Default)]
-struct SkipRegions(Vec<(usize, usize)>);
+struct SkipRegions<T = usize>(Vec<(T, T)>);
 
-impl SkipRegions {
-    fn new(mut ranges: Vec<(usize, usize)>) -> Self {
+impl<T: Ord + Copy> SkipRegions<T> {
+    fn new(mut ranges: Vec<(T, T)>) -> Self {
         ranges.sort_unstable_by_key(|&(start, _)| start);
-        let mut end = 0;
+        let mut end = None;
         for range in &mut ranges {
-            end = end.max(range.1);
-            range.1 = end;
+            let maximum = end.map_or(range.1, |previous: T| previous.max(range.1));
+            range.1 = maximum;
+            end = Some(maximum);
         }
         Self(ranges)
     }
 
-    fn contains(&self, position: usize) -> bool {
+    fn contains(&self, position: T) -> bool {
         let index = self.0.partition_point(|&(start, _)| start <= position);
         index > 0 && position < self.0[index - 1].1
     }
+}
 
+impl SkipRegions {
     fn on_line(line: &str, flavor: MarkdownFlavor) -> Self {
         let mut ranges = Vec::new();
         visit_inline_code_ranges(line, |start, end| {
             ranges.push((start, end));
             false
         });
-        ranges.extend(mkdocs_icons::shortcode_spans(line));
-        match flavor {
-            MarkdownFlavor::MkDocs => ranges.extend(mkdocs_extensions::pymdown_spans(line)),
-            MarkdownFlavor::Obsidian => ranges.extend(mkdocs_extensions::find_mark_spans(line)),
-            _ => {}
-        }
+        append_markup_ranges(&mut ranges, line, flavor);
         Self::new(ranges)
+    }
+}
+
+fn append_markup_ranges(ranges: &mut Vec<(usize, usize)>, line: &str, flavor: MarkdownFlavor) {
+    ranges.extend(mkdocs_icons::shortcode_spans(line));
+    match flavor {
+        MarkdownFlavor::MkDocs => ranges.extend(mkdocs_extensions::pymdown_spans(line)),
+        MarkdownFlavor::Obsidian => ranges.extend(mkdocs_extensions::find_mark_spans(line)),
+        _ => {}
+    }
+}
+
+/// Cached equivalents of MD037's individual exclusion predicates. Code spans
+/// use character positions; inline HTML and markup use line-relative bytes.
+pub(crate) struct SpacingExclusions<'ctx, 'src> {
+    ctx: &'ctx LintContext<'src>,
+    lines: HashMap<usize, SkipRegions>,
+    math: OnceCell<SkipRegions>,
+    images: OnceCell<SkipRegions>,
+    code: OnceCell<SkipRegions<(usize, usize)>>,
+}
+
+impl<'ctx, 'src> SpacingExclusions<'ctx, 'src> {
+    pub(crate) fn new(ctx: &'ctx LintContext<'src>) -> Self {
+        Self {
+            ctx,
+            lines: HashMap::new(),
+            math: OnceCell::new(),
+            images: OnceCell::new(),
+            code: OnceCell::new(),
+        }
+    }
+
+    pub(crate) fn in_image(&self, byte: usize) -> bool {
+        self.images
+            .get_or_init(|| {
+                SkipRegions::new(
+                    self.ctx
+                        .images()
+                        .iter()
+                        .map(|image| (image.byte_offset, image.byte_end))
+                        .collect(),
+                )
+            })
+            .contains(byte)
+    }
+
+    pub(crate) fn in_math(&self, byte: usize) -> bool {
+        self.math
+            .get_or_init(|| SkipRegions::new(self.ctx.math_byte_ranges().to_vec()))
+            .contains(byte)
+    }
+
+    pub(crate) fn in_code_span(&self, line: usize, column: usize) -> bool {
+        if line == 0 || line > self.ctx.lines.len() {
+            return false;
+        }
+        self.code
+            .get_or_init(|| {
+                SkipRegions::new(
+                    self.ctx
+                        .source_code_spans()
+                        .iter()
+                        .map(|span| ((span.line, span.start_col), (span.end_line, span.end_col)))
+                        .collect(),
+                )
+            })
+            .contains((line, column.saturating_sub(1)))
+    }
+
+    pub(crate) fn in_html_code_or_markup(&mut self, index: usize, byte: usize) -> bool {
+        let Some(line) = self.ctx.raw_lines().get(index) else {
+            return false;
+        };
+        if line.len() < 256 {
+            return is_in_inline_html_code(line, byte) || is_in_mkdocs_markup(line, byte, self.ctx.flavor);
+        }
+        self.lines
+            .entry(index)
+            .or_insert_with(|| {
+                let mut ranges = Vec::new();
+                visit_inline_html_code_ranges(line, |start, end| {
+                    ranges.push((start, end));
+                    false
+                });
+                append_markup_ranges(&mut ranges, line, self.ctx.flavor);
+                SkipRegions::new(ranges)
+            })
+            .contains(byte)
     }
 }
 
@@ -806,6 +900,123 @@ mod tests {
             || is_in_math_context(ctx, span_start)
             || is_in_jsx_expression(ctx, span_start)
             || is_in_mdx_comment(ctx, span_start)
+    }
+
+    fn legacy_inline_html_code(line: &str, position: usize) -> bool {
+        // Tags whose content should not be parsed as markdown
+        const TAGS: &[&str] = &["code", "pre", "samp", "kbd", "var"];
+
+        let bytes = line.as_bytes();
+
+        for tag in TAGS {
+            let open_bytes = format!("<{tag}").into_bytes();
+            let close_pattern = format!("</{tag}>").into_bytes();
+
+            let mut search_from = 0;
+            while search_from + open_bytes.len() <= bytes.len() {
+                // Find opening tag (case-insensitive byte search)
+                let Some(open_abs) = find_case_insensitive(bytes, &open_bytes, search_from) else {
+                    break;
+                };
+
+                let after_tag = open_abs + open_bytes.len();
+
+                // Verify the character after the tag name is '>' or whitespace (not a longer tag name)
+                if after_tag < bytes.len() {
+                    let next = bytes[after_tag];
+                    if next != b'>' && next != b' ' && next != b'\t' {
+                        search_from = after_tag;
+                        continue;
+                    }
+                }
+
+                // Find the end of the opening tag
+                let Some(tag_close) = bytes[after_tag..].iter().position(|&b| b == b'>') else {
+                    break;
+                };
+                let content_start = after_tag + tag_close + 1;
+
+                // Find the closing tag (case-insensitive)
+                let Some(close_start) = find_case_insensitive(bytes, &close_pattern, content_start) else {
+                    break;
+                };
+                let content_end = close_start;
+
+                if position >= content_start && position < content_end {
+                    return true;
+                }
+
+                search_from = close_start + close_pattern.len();
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn spacing_exclusions_preserve_scalar_membership() {
+        let prefix = "é日本🙂e\u{301} ".repeat(40);
+        let source = format!(
+            "{prefix}<code>a <code>b</code> c</code> <VAR x='>'>literal</VAR> :smile: ^^insert^^ ==mark== ++ctrl+alt++ ^super^ ~sub~ ~~strike~~ {{--delete--}}
+
+{prefix}![a](x) [![b](y)](z) $x$ `é` ``a ` b``
+
+`multi
+line
+code` text
+"
+        );
+        for flavor in crate::format_proof::ALL_FLAVORS {
+            for ending in ["\n", "\r\n"] {
+                let content = source.replace('\n', ending);
+                let ctx = LintContext::new(&content, flavor, None);
+                let mut index = SpacingExclusions::new(&ctx);
+                for byte in (0..=content.len() + 1).rev() {
+                    assert_eq!(index.in_math(byte), is_in_math_context(&ctx, byte));
+                    assert_eq!(
+                        index.in_image(byte),
+                        ctx.images().iter().any(|s| s.byte_offset <= byte && byte < s.byte_end)
+                    );
+                }
+                for line in 0..=ctx.lines.len() + 1 {
+                    let width = line
+                        .checked_sub(1)
+                        .and_then(|i| ctx.raw_lines().get(i))
+                        .map_or(0, |s| s.chars().count());
+                    for column in (0..=width + 2).rev() {
+                        assert_eq!(
+                            index.in_code_span(line, column),
+                            ctx.is_in_code_span(line, column),
+                            "line={line}, column={column}"
+                        );
+                    }
+                }
+                for (i, line) in ctx.raw_lines().iter().enumerate().rev() {
+                    for byte in (0..=line.len() + 1).rev() {
+                        assert_eq!(
+                            index.in_html_code_or_markup(i, byte),
+                            legacy_inline_html_code(line, byte) || is_in_mkdocs_markup(line, byte, flavor)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(128))]
+        #[test]
+        fn indexed_inline_html_matches_legacy(
+            tokens in proptest::collection::vec(proptest::sample::select(vec!["text", "é日🙂", "<code>", "</code>", "<CODE x='>'>", "<codeword>", "<code/>", "<code", "<pre>", "</pre>", "<var>", "</VAR>", "<samp>", "</samp>", "<kbd\t>", "</kbd>", ">", "<", "\n"]), 0..60),
+        ) {
+            let source = tokens.concat();
+            let mut ranges = Vec::new();
+            visit_inline_html_code_ranges(&source, |start, end| { ranges.push((start, end)); false });
+            let index = SkipRegions::new(ranges);
+            for byte in 0..=source.len() + 1 {
+                proptest::prop_assert_eq!(index.contains(byte), legacy_inline_html_code(&source, byte));
+                proptest::prop_assert_eq!(is_in_inline_html_code(&source, byte), legacy_inline_html_code(&source, byte));
+            }
+        }
     }
 
     #[test]

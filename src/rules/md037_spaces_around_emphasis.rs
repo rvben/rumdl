@@ -2,15 +2,15 @@
 ///
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
 use crate::config::MarkdownFlavor;
+use crate::lint_context::SourcePositions;
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::emphasis_utils::{
     EmphasisEdges, EmphasisMarker, find_emphasis_edges, find_emphasis_markers, find_valid_emphasis_ranges,
     has_doc_patterns, replace_inline_code_cow, replace_inline_math_cow,
 };
 use crate::utils::kramdown_utils::has_span_ial;
-use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
-use crate::utils::skip_context::{is_in_inline_html_code, is_in_math_context, is_in_mkdocs_markup};
+use crate::utils::skip_context::SpacingExclusions;
 use crate::utils::table_utils::TableUtils;
 use std::ops::Range;
 
@@ -82,21 +82,6 @@ impl Default for MD037NoSpaceInEmphasis {
 }
 
 impl MD037NoSpaceInEmphasis {
-    /// Check if a byte position is within a link (inline links, reference links, or reference definitions)
-    fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
-        if ctx.is_range_in_rendered_link(&(byte_pos..byte_pos + 1))
-            || ctx
-                .images()
-                .iter()
-                .any(|image| image.byte_offset <= byte_pos && byte_pos < image.byte_end)
-        {
-            return true;
-        }
-
-        // Check reference definitions [ref]: url "title" using pre-computed data (O(1) vs O(n))
-        ctx.is_in_reference_def(byte_pos)
-    }
-
     /// Where each emphasis span ends, ascending, paired with where it began.
     ///
     /// Ordering by end position is what keeps [`Self::closes_earlier_emphasis`]
@@ -193,9 +178,11 @@ impl Rule for MD037NoSpaceInEmphasis {
             Self::emphasis_span_ends(ctx)
         };
 
+        let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
+        let mut exclusions = SpacingExclusions::new(ctx);
         for warning in &warnings {
             let line_num = warning.line;
-            let Some(line) = line_num.checked_sub(1).and_then(|index| lines.get(index)) else {
+            let Some(_) = line_num.checked_sub(1).and_then(|index| lines.get(index)) else {
                 continue;
             };
             let line_start_pos = ctx.line_start_byte(line_num).unwrap_or(0);
@@ -205,7 +192,7 @@ impl Rule for MD037NoSpaceInEmphasis {
             let byte_pos = line_start_pos + (warning.column - 1);
             // Calculate byte position within the line (0-indexed)
             let line_pos = warning.column - 1;
-            let char_col = byte_to_char_count(line, warning.column - 1);
+            let char_col = positions.column_on_line(line_num - 1, byte_pos) + 1;
 
             // Skip if inside links, HTML comments, math contexts, code spans, MDX constructs, or MkDocs markup
             // Note: is_in_code_span uses pulldown-cmark and correctly handles multi-line spans
@@ -229,23 +216,24 @@ impl Rule for MD037NoSpaceInEmphasis {
                 && !ctx.is_in_jinja_string(byte_pos)
                 && !ctx.is_in_jinja_string(closing_pos)
                 && !Self::closes_earlier_emphasis(&span_ends, byte_pos, byte_end)
-                && !self.is_in_link(ctx, byte_pos)
+                && !ctx.is_range_in_rendered_link(&(byte_pos..byte_pos + 1))
+                && !exclusions.in_image(byte_pos)
+                && !ctx.is_in_reference_def(byte_pos)
                 && !ctx.is_in_shortcode(byte_pos)
                 && !ctx.is_in_shortcode(closing_pos)
-                && !is_in_math_context(ctx, byte_pos)
-                && !ctx.is_in_code_span(line_num, char_col)
+                && !exclusions.in_math(byte_pos)
+                && !exclusions.in_code_span(line_num, char_col)
                 // A marker on the opening line of a multiline code span
                 // can appear to close emphasis that started outside code.
                 && !ctx.is_in_code_span_byte(closing_pos)
-                && !is_in_inline_html_code(line, line_pos)
+                && !exclusions.in_html_code_or_markup(line_num - 1, line_pos)
                 && !ctx.overlaps_mdx_inline_code(byte_pos, byte_end)
-                && !is_in_mkdocs_markup(line, line_pos, ctx.flavor)
-                && !ctx.is_position_in_obsidian_comment(line_num, char_col)
+                && !ctx.is_in_obsidian_comment(byte_pos)
             {
                 let mut adjusted_warning = warning.clone();
                 // Emit character-based columns (byte-based skip checks done above).
                 adjusted_warning.column = char_col;
-                adjusted_warning.end_column = byte_to_char_count(line, warning.end_column - 1);
+                adjusted_warning.end_column = positions.column_on_line(line_num - 1, byte_end) + 1;
                 filtered_warnings.push(adjusted_warning);
             }
         }
@@ -373,6 +361,17 @@ impl MD037NoSpaceInEmphasis {
         // marker (e.g. `*foo * bar*`), which the greedy finder above mispairs.
         let valid_ranges = find_valid_emphasis_ranges(processed_content, markers);
 
+        debug_assert!(
+            spans
+                .windows(2)
+                .all(|pair| pair[0].opening.start_pos <= pair[1].opening.start_pos)
+        );
+        debug_assert!(valid_ranges.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        // Both sequences are ordered by opening byte position. Advance once
+        // through valid ranges, retaining the furthest end for overlapping or
+        // nested spans of different marker types.
+        let mut valid_index = 0;
+        let mut valid_end = 0;
         // Check each span for spacing issues
         for span in spans {
             if has_spacing_issues(&span) {
@@ -380,10 +379,11 @@ impl MD037NoSpaceInEmphasis {
                 let full_end = span.closing.end_pos();
 
                 // Suppress when the spaced run is contained in valid emphasis.
-                if valid_ranges
-                    .iter()
-                    .any(|&(start, end)| start <= full_start && full_end <= end)
-                {
+                while valid_index < valid_ranges.len() && valid_ranges[valid_index].0 <= full_start {
+                    valid_end = valid_end.max(valid_ranges[valid_index].1);
+                    valid_index += 1;
+                }
+                if full_end <= valid_end {
                     continue;
                 }
 
@@ -1417,3 +1417,6 @@ mod mdx_adjacent_prose_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod filter_tests;

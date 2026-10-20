@@ -21,7 +21,9 @@ use rumdl_lib::rules::{
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
     MD051LinkFragments, MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks,
 };
-use rumdl_lib::rules::{MD014CommandsShowOutput, MD024NoDuplicateHeading, MD039NoSpaceInLinks, MD044ProperNames};
+use rumdl_lib::rules::{
+    MD014CommandsShowOutput, MD024NoDuplicateHeading, MD037NoSpaceInEmphasis, MD039NoSpaceInLinks, MD044ProperNames,
+};
 use rumdl_lib::utils::emphasis_utils::{
     find_emphasis_markers, find_emphasis_spans, find_single_emphasis_spans, find_valid_emphasis_ranges,
 };
@@ -491,6 +493,33 @@ fn link_document(padded: bool, escaped: bool) -> String {
     content
 }
 
+fn bench_md037_filter(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md037_filter");
+    group.sample_size(10);
+    for (name, unit, warnings_per_unit) in [
+        ("spaced", "é日本🙂 * bad * _ other _ ", 2),
+        ("html", "é日本🙂 * bad * <span>text</span> ", 1),
+        ("code", "é日本🙂 `literal` * bad * ", 1),
+        ("math", "é日本🙂 $x$ * bad * ", 1),
+        ("images", "é日本🙂 ![image](image.png) * bad * ", 1),
+        ("literal", "*foo * bar* ", 0),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = format!("{}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(
+                MD037NoSpaceInEmphasis.check(&ctx).unwrap().len(),
+                count * warnings_per_unit
+            );
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| MD037NoSpaceInEmphasis.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_emphasis_pairing(c: &mut Criterion) {
     let mut group = c.benchmark_group("emphasis_pairing");
     group.sample_size(10);
@@ -851,6 +880,7 @@ criterion_group!(
     bench_workspace_build,
     bench_rules,
     bench_emphasis_pairing,
+    bench_md037_filter,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,
