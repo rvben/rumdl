@@ -823,6 +823,39 @@ fn bench_heading_anchor_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_md063_tag_pairing(c: &mut Criterion) {
+    use rumdl_lib::rules::MD063HeadingCapitalization;
+
+    let mut group = c.benchmark_group("md063_tag_pairing");
+    group.sample_size(10);
+    let rule = MD063HeadingCapitalization::default();
+    for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX] {
+        for name in ["unmatched", "distinct", "paired", "nested", "recovered"] {
+            for count in [128, 1024, 4096] {
+                let text = match name {
+                    "paired" => "<b>text</b> ".repeat(count),
+                    "recovered" => format!("<b></missing></b> {}", "<b>text</b> ".repeat(count)),
+                    "nested" => format!("{}text{}", "<b>".repeat(count), "</b>".repeat(count)),
+                    "distinct" => format!(
+                        "{}{}",
+                        "<b>".repeat(count),
+                        (0..count).map(|i| format!("</missing{i}> ")).collect::<String>()
+                    ),
+                    _ => format!("{}{}", "<b>".repeat(count), "</i>".repeat(count)),
+                };
+                let content = format!("# {text}\n");
+                let ctx = LintContext::new(&content, flavor, None);
+                assert!(rule.check(&ctx).unwrap().is_empty());
+                group.throughput(Throughput::Bytes(content.len() as u64));
+                group.bench_function(BenchmarkId::new(format!("{flavor:?}-{name}"), count), |b| {
+                    b.iter(|| black_box(rule.check(black_box(&ctx)).unwrap()));
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_md063_heading_regions(c: &mut Criterion) {
     use rumdl_lib::rules::MD063HeadingCapitalization;
 
@@ -1561,6 +1594,7 @@ criterion_group!(
     bench_md031_list_membership,
     bench_list_code_context,
     bench_md063_heading_regions,
+    bench_md063_tag_pairing,
     bench_heading_anchor_lookup,
     bench_md030_indented_fallback,
     bench_md087_suppressions,

@@ -17,11 +17,74 @@ use crate::utils::html_elements::is_void_element;
 use crate::utils::mdg;
 use crate::utils::range_utils::byte_to_char_count;
 use regex::Regex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::sync::LazyLock;
 
 mod md063_config;
 pub(super) use md063_config::{HeadingCapStyle, MD063Config};
+
+/// Pair closing tags with the nearest matching opener. Successful searches
+/// discard the entries they visit; a failed search leaves them all open. Build
+/// a name index after the first miss so repeated unmatched tags stay linear,
+/// while ordinary paired markup uses only the stack.
+struct OpenElements<N> {
+    elements: Vec<(N, usize)>,
+    counts: Option<HashMap<N, usize>>,
+}
+
+impl<N: Clone + Eq + Hash> OpenElements<N> {
+    fn new() -> Self {
+        Self {
+            elements: Vec::new(),
+            counts: None,
+        }
+    }
+
+    fn push(&mut self, name: N, start: usize) {
+        if let Some(counts) = &mut self.counts {
+            *counts.entry(name.clone()).or_default() += 1;
+        }
+        self.elements.push((name, start));
+    }
+
+    fn close(&mut self, name: &N) -> Option<usize> {
+        if let Some(counts) = &self.counts
+            && !counts.contains_key(name)
+        {
+            return None;
+        }
+        if let Some(depth) = self.elements.iter().rposition(|(open_name, _)| open_name == name) {
+            let start = self.elements[depth].1;
+            if let Some(counts) = &mut self.counts {
+                for (name, _) in self.elements.drain(depth..) {
+                    let count = counts.get_mut(&name).unwrap();
+                    *count -= 1;
+                    if *count == 0 {
+                        counts.remove(&name);
+                    }
+                }
+                // A recovered stack starts fresh: later paired markup should
+                // not pay for an earlier unmatched tag.
+                if self.elements.is_empty() {
+                    self.counts = None;
+                }
+            } else {
+                self.elements.truncate(depth);
+            }
+            Some(start)
+        } else {
+            if self.counts.is_none() && !self.elements.is_empty() {
+                let mut counts = HashMap::new();
+                for (name, _) in &self.elements {
+                    *counts.entry(name.clone()).or_default() += 1;
+                }
+                self.counts = Some(counts);
+            }
+            None
+        }
+    }
+}
 
 // Regex to match inline code spans (backticks)
 static INLINE_CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+[^`]+`+").unwrap());
@@ -1014,7 +1077,7 @@ impl MD063HeadingCapitalization {
     /// tag written inside another tag's attribute value is part of that value.
     fn html_regions(text: &str, code_ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
         let mut regions: Vec<(usize, usize)> = Vec::new();
-        let mut open_elements: Vec<(String, usize)> = Vec::new();
+        let mut open_elements = OpenElements::new();
 
         // Both regex streams advance in source order; code ranges are disjoint.
         let mut code_index = 0;
@@ -1040,9 +1103,7 @@ impl MD063HeadingCapitalization {
 
             if let Some(closing) = token.get(1) {
                 let name = closing.as_str().to_ascii_lowercase();
-                if let Some(depth) = open_elements.iter().rposition(|(open_name, _)| *open_name == name) {
-                    let element_start = open_elements[depth].1;
-                    open_elements.truncate(depth);
+                if let Some(element_start) = open_elements.close(&name) {
                     // Regions stay ordered by start. A completed element
                     // replaces only the suffix beginning at its opening tag.
                     while regions.last().is_some_and(|&(start, _)| start >= element_start) {
@@ -1054,7 +1115,7 @@ impl MD063HeadingCapitalization {
             } else if let Some(opening) = token.get(2) {
                 let name = opening.as_str().to_ascii_lowercase();
                 if !whole.as_str().ends_with("/>") && !is_void_element(&name) {
-                    open_elements.push((name, whole.start()));
+                    open_elements.push(name, whole.start());
                 }
             }
 
@@ -1081,7 +1142,7 @@ impl MD063HeadingCapitalization {
         }
         tags.sort_unstable_by_key(|tag| tag.byte_offset);
         let mut regions = Vec::new();
-        let mut open = Vec::new();
+        let mut open = OpenElements::new();
         let mut requires_source_map = false;
         for tag in tags {
             let source = &ctx.content[tag.byte_offset..tag.byte_end];
@@ -1089,13 +1150,11 @@ impl MD063HeadingCapitalization {
                 .find(source)
                 .is_some_and(|token| token.start() == 0 && token.end() == source.len());
             if tag.is_closing {
-                if let Some(depth) = open.iter().rposition(|(name, _)| *name == tag.tag_name.as_str()) {
-                    let (_, element_start) = open[depth];
-                    open.truncate(depth);
+                if let Some(element_start) = open.close(&tag.tag_name.as_str()) {
                     regions.push((element_start, tag.byte_end));
                 }
             } else if !tag.is_self_closing && !is_void_element(&tag.tag_name) {
-                open.push((tag.tag_name.as_str(), tag.byte_offset));
+                open.push(tag.tag_name.as_str(), tag.byte_offset);
             }
             regions.push((tag.byte_offset, tag.byte_end));
         }
@@ -1723,6 +1782,65 @@ impl Rule for MD063HeadingCapitalization {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_open_elements_match_stack_pairing() {
+        // Include duplicate opens, missing closes, and case-distinct names.
+        // Sequences exercise both the stack path and the lazily indexed path.
+        let operations = [(true, "a"), (true, "A"), (false, "a"), (false, "A"), (false, "missing")];
+        for mut sequence in 0..operations.len().pow(6) {
+            let mut indexed = OpenElements::new();
+            let mut original = Vec::new();
+            for start in 0..6 {
+                let (opening, name) = operations[sequence % operations.len()];
+                sequence /= operations.len();
+                if opening {
+                    indexed.push(name, start);
+                    original.push((name, start));
+                } else {
+                    let expected = original
+                        .iter()
+                        .rposition(|(open_name, _)| *open_name == name)
+                        .map(|depth| {
+                            let start = original[depth].1;
+                            original.truncate(depth);
+                            start
+                        });
+                    assert_eq!(indexed.close(&name), expected);
+                }
+                assert_eq!(indexed.elements, original);
+                if let Some(counts) = &indexed.counts {
+                    let mut expected = HashMap::new();
+                    for (name, _) in &original {
+                        *expected.entry(*name).or_default() += 1;
+                    }
+                    assert_eq!(*counts, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_paired_elements_do_not_build_a_name_index() {
+        let mut elements = OpenElements::new();
+        assert_eq!(elements.close(&"missing"), None);
+        elements.push("a", 0);
+        elements.push("b", 3);
+        elements.push("a", 6);
+        assert_eq!(elements.close(&"a"), Some(6));
+        assert_eq!(elements.close(&"a"), Some(0));
+        assert!(elements.elements.is_empty());
+        assert!(elements.counts.is_none());
+
+        elements.push("a", 10);
+        assert_eq!(elements.close(&"missing"), None);
+        assert!(elements.counts.is_some());
+        assert_eq!(elements.close(&"a"), Some(10));
+        assert!(elements.counts.is_none());
+        elements.push("b", 20);
+        assert_eq!(elements.close(&"b"), Some(20));
+        assert!(elements.counts.is_none());
+    }
 
     fn create_rule() -> MD063HeadingCapitalization {
         let config = MD063Config {

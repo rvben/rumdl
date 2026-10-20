@@ -720,6 +720,45 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// Missing closing-tag names must not repeatedly search the open-element stack.
+#[test]
+fn test_md063_tag_pairing_linear_complexity() {
+    let rule = MD063HeadingCapitalization::default();
+    for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX] {
+        for name in ["unmatched", "distinct", "paired", "nested", "recovered"] {
+            let times: Vec<_> = [2048, 4096, 8192]
+                .into_iter()
+                .map(|count| {
+                    let text = match name {
+                        "paired" => "<b>text</b> ".repeat(count),
+                        "recovered" => format!("<b></missing></b> {}", "<b>text</b> ".repeat(count)),
+                        "nested" => format!("{}text{}", "<b>".repeat(count), "</b>".repeat(count)),
+                        "distinct" => format!(
+                            "{}{}",
+                            "<b>".repeat(count),
+                            (0..count).map(|i| format!("</missing{i}> ")).collect::<String>()
+                        ),
+                        _ => format!("{}{}", "<b>".repeat(count), "</i>".repeat(count)),
+                    };
+                    let content = format!("# {text}\n");
+                    let ctx = LintContext::new(&content, flavor, None);
+                    assert!(rule.check(&ctx).unwrap().is_empty());
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            let start = MeasurementClock::now();
+                            std::hint::black_box(rule.check(&ctx).unwrap());
+                            start.elapsed()
+                        })
+                        .collect();
+                    samples.sort();
+                    samples[3]
+                })
+                .collect();
+            assert_linear_complexity(&format!("MD063 tag pairing {flavor:?}/{name}"), &times, 3.0);
+        }
+    }
+}
+
 /// Each heading region must not scan every earlier region or code span.
 #[test]
 fn test_md063_heading_regions_linear_complexity() {
