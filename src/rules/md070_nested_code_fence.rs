@@ -211,6 +211,22 @@ impl MD070NestedCodeFence {
         None
     }
 
+    /// Whether the fence opened on `line_idx` is one the parser ended without a
+    /// closing fence line. Inside a list item or blockquote that happens when the
+    /// container ends: CommonMark ends the code block there, so the lines after
+    /// it are outside the block and a later fence cannot collide with it.
+    fn ends_without_closing_fence(ctx: &crate::lint_context::LintContext, line_idx: usize) -> bool {
+        let Some(info) = ctx.lines.get(line_idx) else {
+            return false;
+        };
+        let line_start = info.byte_offset;
+        let line_end = line_start + info.byte_len;
+        ctx.code_block_details
+            .iter()
+            .find(|detail| detail.is_fenced && detail.start >= line_start && detail.start <= line_end)
+            .is_some_and(|detail| !detail.closed)
+    }
+
     /// Check if a line is a valid closing fence for the given opening fence
     /// Per CommonMark, closing fences can have 0-3 spaces of indentation regardless of opening fence
     fn is_closing_fence(line: &str, fence_char: char, min_length: usize) -> bool {
@@ -282,6 +298,10 @@ impl Rule for MD070NestedCodeFence {
 
             // Try to parse as opening fence
             if let Some((_indent, fence_char, fence_length, info_string)) = Self::parse_fence_line(line) {
+                if Self::ends_without_closing_fence(ctx, i) {
+                    i += 1;
+                    continue;
+                }
                 let block_start = i;
 
                 // Extract the language (first word of info string)
@@ -662,6 +682,20 @@ also safe
         let result = run_check(content).unwrap();
         assert_eq!(result.len(), 1, "Should detect collision in indented block");
         assert!(result[0].message.contains("````"));
+    }
+
+    #[test]
+    fn test_unclosed_fence_ends_with_its_list_item() {
+        // CommonMark ends a fence that is never closed with the list item that
+        // holds it, so the paragraph and the fenced block after the list are not
+        // part of it, and the fence after the list cannot collide with it.
+        let content = "# Title\n\n- Item with a nested example:\n\n  ```yaml\n  key: |\n    raw\n\nAfter the list.\n\n```text\nplain\n```\n";
+        let result = run_check(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "A fence ended by its list item must not collide: {result:?}"
+        );
+        assert_eq!(run_fix(content).unwrap(), content);
     }
 
     #[test]

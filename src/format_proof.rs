@@ -1851,6 +1851,16 @@ mod tests {
     }
 
     #[test]
+    fn fence_ended_by_its_list_item_is_proven_for_md070() {
+        // The list item ends the unclosed `yaml` fence, so the fence after the
+        // list is a block of its own. MD070 agrees with the proof, so `fmt` on
+        // stdin and on a file give the same result.
+        let source = "- Item:\n\n  ```yaml\n  key: |\n    raw\n\nAfter the list.\n\n```text\nplain\n```\n";
+        assert!(NativeFormatPolicy::new(70).proven(&FormatProof::analyze(source, MarkdownFlavor::Standard)));
+        assert_proofs(source);
+    }
+
+    #[test]
     fn unclosed_fences_keep_native_repair() {
         for source in ["```sh\n# H\n", "plain```rust\ncode\n```\n", "~~~sh\ncode\n"] {
             assert_proofs(source);
