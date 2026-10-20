@@ -677,10 +677,10 @@ pub(crate) fn mask_mdx_inline_code<'a>(ctx: &LintContext, source: &'a str, start
 /// Point membership in possibly overlapping regions. Sorted starts and prefix
 /// maximum ends preserve the union while allowing predecessor queries.
 #[derive(Default)]
-struct SkipRegions<T = usize>(Vec<(T, T)>);
+pub(crate) struct SkipRegions<T = usize>(Vec<(T, T)>);
 
 impl<T: Ord + Copy> SkipRegions<T> {
-    fn new(mut ranges: Vec<(T, T)>) -> Self {
+    pub(crate) fn new(mut ranges: Vec<(T, T)>) -> Self {
         ranges.sort_unstable_by_key(|&(start, _)| start);
         let mut end = None;
         for range in &mut ranges {
@@ -689,6 +689,12 @@ impl<T: Ord + Copy> SkipRegions<T> {
             end = Some(maximum);
         }
         Self(ranges)
+    }
+
+    /// Strict containment preserves consumers that exclude both endpoints.
+    pub(crate) fn contains_interior(&self, position: T) -> bool {
+        let index = self.0.partition_point(|&(start, _)| start < position);
+        index > 0 && position < self.0[index - 1].1
     }
 
     fn contains(&self, position: T) -> bool {
@@ -908,6 +914,37 @@ impl<'ctx, 'src> EmphasisContext<'ctx, 'src> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_regions_preserve_endpoints_and_extreme_offsets() {
+        let ranges = vec![
+            (20, 30),
+            (4, 4),
+            (10, 3),
+            (0, 2),
+            (2, 5),
+            (1, 8),
+            (20, 22),
+            (usize::MAX - 2, usize::MAX),
+        ];
+        let index = SkipRegions::new(ranges.clone());
+        for position in (0..=32).chain([usize::MAX - 2, usize::MAX - 1, usize::MAX]) {
+            assert_eq!(
+                index.contains_interior(position),
+                ranges.iter().any(|&(start, end)| start < position && position < end)
+            );
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn strict_regions_match_scalar_membership(ranges in proptest::collection::vec((0usize..128, 0usize..128), 0..60)) {
+            let index = SkipRegions::new(ranges.clone());
+            for position in 0..=129 {
+                proptest::prop_assert_eq!(index.contains_interior(position), ranges.iter().any(|&(start, end)| start < position && position < end));
+            }
+        }
+    }
 
     #[test]
     fn markup_exclusions_match_scalar_at_each_byte() {

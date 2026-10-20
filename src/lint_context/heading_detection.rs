@@ -1,6 +1,8 @@
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
+use crate::utils::skip_context::SkipRegions;
 use crate::utils::table_utils::TableUtils;
+use std::cell::LazyCell;
 use std::sync::LazyLock;
 
 use super::line_computation::spanned_lines;
@@ -1214,6 +1216,9 @@ pub(super) fn detect_headings_and_blockquotes(
     mdx_flow_lines: Option<&[bool]>,
     mdx_literal_ranges: Option<[&[(usize, usize)]; 2]>,
 ) -> HeadingAnalysis {
+    // Most documents need no link membership queries. Index only when an ATX
+    // candidate asks, preserving strict endpoints and overlapping link ranges.
+    let link_regions = LazyCell::new(|| SkipRegions::new(link_byte_ranges.to_vec()));
     // Only a `=`/`-` run under a line of text asks what paragraph is open, and
     // most documents hold none, so the pass runs on the first one that does.
     let mut trailing: Option<Pass> = None;
@@ -1326,9 +1331,7 @@ pub(super) fn detect_headings_and_blockquotes(
         // Only a line opening with an ATX marker needs the range scan.
         let in_html_comment_or_link = atx.is_some()
             && (crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, line_offset)
-                || link_byte_ranges
-                    .iter()
-                    .any(|&(start, end)| line_offset > start && line_offset < end));
+                || link_regions.contains_interior(line_offset));
 
         if let Some(AtxOpening::MissingSpace { level }) = atx
             && !in_html_comment_or_link
@@ -1402,9 +1405,7 @@ pub(super) fn detect_headings_and_blockquotes(
             let state = pass.states[i];
             if state.carries_item
                 && !crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, line_offset)
-                && !link_byte_ranges
-                    .iter()
-                    .any(|&(start, end)| line_offset > start && line_offset < end)
+                && !link_regions.contains_interior(line_offset)
                 && let Some(AtxOpening::Heading(caps)) = atx_opening(state.text)
             {
                 let heading = atx_heading_info(&caps, state.text_start, content_lines, lines, i);

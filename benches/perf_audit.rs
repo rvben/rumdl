@@ -536,6 +536,44 @@ fn link_document(padded: bool, escaped: bool) -> String {
     content
 }
 
+fn bench_heading_link_ranges(c: &mut Criterion) {
+    let mut group = c.benchmark_group("heading_link_ranges");
+    group.sample_size(10);
+    for (name, unit, flavor) in [
+        (
+            "atx",
+            "## Repeated heading\n\nparagraph [jump](#repeated-heading).\n\n",
+            MarkdownFlavor::Standard,
+        ),
+        (
+            "list",
+            "- ## Repeated heading\n\n  paragraph [jump](#repeated-heading).\n\n",
+            MarkdownFlavor::Standard,
+        ),
+        (
+            "quoted-list",
+            "> - ## Repeated heading\n>\n>   paragraph [jump](#repeated-heading).\n\n",
+            MarkdownFlavor::Standard,
+        ),
+        (
+            "mdx",
+            "## Repeated heading\n\nparagraph [jump](#repeated-heading).\n\n",
+            MarkdownFlavor::MDX,
+        ),
+    ] {
+        for count in [128, 2048, 8192] {
+            let content = unit.repeat(count);
+            let ctx = LintContext::new(&content, flavor, None);
+            assert_eq!(ctx.headings().count(), count);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| LintContext::new(black_box(&content), flavor, None));
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_md089_indexes(c: &mut Criterion) {
     let mut group = c.benchmark_group("md089_indexes");
     group.sample_size(10);
@@ -1018,6 +1056,7 @@ criterion_group!(
     bench_md049_filter,
     bench_md095_positions,
     bench_md089_indexes,
+    bench_heading_link_ranges,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,

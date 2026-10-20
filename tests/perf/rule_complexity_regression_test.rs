@@ -353,6 +353,52 @@ fn test_md049_warning_filter_linear_complexity() {
     }
 }
 
+/// Every heading candidate must not rescan every link in the document.
+#[test]
+fn test_heading_link_membership_linear_complexity() {
+    for (name, unit, flavor) in [
+        (
+            "atx",
+            "## Repeated heading\n\nparagraph [jump](#repeated-heading).\n\n",
+            MarkdownFlavor::Standard,
+        ),
+        (
+            "list",
+            "- ## Repeated heading\n\n  paragraph [jump](#repeated-heading).\n\n",
+            MarkdownFlavor::Standard,
+        ),
+        (
+            "quoted-list",
+            "> - ## Repeated heading\n>\n>   paragraph [jump](#repeated-heading).\n\n",
+            MarkdownFlavor::Standard,
+        ),
+        (
+            "mdx",
+            "## Repeated heading\n\nparagraph [jump](#repeated-heading).\n\n",
+            MarkdownFlavor::MDX,
+        ),
+    ] {
+        let times: Vec<_> = [4096, 8192, 16384]
+            .into_iter()
+            .map(|count| {
+                let content = unit.repeat(count);
+                let ctx = LintContext::new(&content, flavor, None);
+                assert_eq!(ctx.headings().count(), count);
+                let mut samples: Vec<_> = (0..5)
+                    .map(|_| {
+                        let start = MeasurementClock::now();
+                        std::hint::black_box(LintContext::new(std::hint::black_box(&content), flavor, None));
+                        start.elapsed()
+                    })
+                    .collect();
+                samples.sort();
+                samples[2]
+            })
+            .collect();
+        assert_linear_complexity(&format!("heading link membership {name}"), &times, 3.0);
+    }
+}
+
 /// Image membership and warning columns must scale on long Unicode lines.
 #[test]
 fn test_md089_indexes_linear_complexity() {
