@@ -238,6 +238,8 @@ impl MD044ProperNames {
         let directive_comments =
             crate::inline_config::config_comment_ranges(content, |open| ctx.is_in_code_block_or_span(open));
 
+        let mut wikilink_urls = None;
+
         // Use ctx.lines for better performance
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -401,7 +403,10 @@ impl MD044ProperNames {
                 // parenthesised destination — [[text]](url). pulldown-cmark
                 // registers [[text]] as a WikiLink in ctx.links() but leaves the
                 // (url) as plain text, so is_in_link() misses those bytes.
-                if Self::is_in_wikilink_url(ctx, byte_pos) {
+                if crate::inline_config::offset_in_ranges(
+                    wikilink_urls.get_or_insert_with(|| Self::wikilink_url_ranges(ctx)),
+                    byte_pos,
+                ) {
                     continue;
                 }
 
@@ -622,60 +627,64 @@ impl MD044ProperNames {
         crate::inline_config::offset_in_ranges(&Self::angle_bracket_url_ranges(line), pos)
     }
 
-    /// Check if `byte_pos` falls inside the URL of a `[[text]](url)` construct.
-    ///
-    /// pulldown-cmark with WikiLinks enabled parses `[[text]]` as a WikiLink and
-    /// records it in `ctx.links()`, but the immediately following `(url)` is left as
-    /// plain text and is therefore absent from `ctx.links()`. This function detects
-    /// that gap by looking for a WikiLink entry whose `byte_end` falls exactly on a
-    /// `(` in the raw content, then checking whether `byte_pos` lies inside the
-    /// matching parenthesised URL span.
-    ///
-    /// Unlike `is_in_markdown_link_url`, this function is anchored to real parser
-    /// output (`ctx.links()`) and will not suppress violations in text that merely
-    /// looks like a link (e.g. `[foo](github x)` with a space in the URL).
-    fn is_in_wikilink_url(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+    /// Destinations immediately following parsed WikiLinks. The parser leaves
+    /// their parentheses as prose, so ordinary link ranges do not cover them.
+    /// Scan once for all requested openers, preserving the fallback's raw-byte
+    /// nesting, backslash escapes and rejection of unescaped whitespace.
+    fn wikilink_url_ranges(ctx: &crate::lint_context::LintContext) -> Vec<std::ops::Range<usize>> {
         use pulldown_cmark::LinkType;
         let content = ctx.content.as_bytes();
-
-        for link in ctx.links_starting_before_or_at(byte_pos) {
-            if !matches!(link.link_type, LinkType::WikiLink { .. }) {
-                continue;
-            }
-            let wiki_end = link.byte_end;
-            // The WikiLink must end before byte_pos and be immediately followed by '('.
-            if wiki_end >= byte_pos || wiki_end >= content.len() || content[wiki_end] != b'(' {
-                continue;
-            }
-            // Scan to the matching ')' tracking nested parens and backslash escapes.
-            // Per CommonMark, an unquoted inline link destination cannot contain
-            // spaces, tabs, or newlines. If we encounter one, this is parenthesised
-            // prose rather than a URL, and pulldown-cmark will not parse it as a link.
-            let mut depth: u32 = 1;
-            let mut k = wiki_end + 1;
-            let mut valid_destination = true;
-            while k < content.len() && depth > 0 {
-                match content[k] {
-                    b'\\' => {
-                        k += 1; // skip escaped character
+        let starts: HashSet<_> = ctx
+            .links()
+            .iter()
+            .filter(|link| matches!(link.link_type, LinkType::WikiLink { .. }))
+            .map(|link| link.byte_end)
+            .filter(|&end| content.get(end) == Some(&b'('))
+            .collect();
+        let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+        let Some(mut pos) = starts.iter().min().copied() else {
+            return ranges;
+        };
+        let last_start = *starts.iter().max().unwrap();
+        // Only requested destinations need stack entries; other parentheses
+        // contribute to depth without allocating per nesting level.
+        let mut stack = Vec::new();
+        let mut depth = 0usize;
+        while pos < content.len() {
+            match content[pos] {
+                b'\\' => pos += 1,
+                b'(' => {
+                    depth += 1;
+                    if starts.contains(&pos) {
+                        stack.push((pos, depth));
                     }
-                    b'(' => depth += 1,
-                    b')' => depth -= 1,
-                    b' ' | b'\t' | b'\n' | b'\r' => {
-                        valid_destination = false;
-                        break;
-                    }
-                    _ => {}
                 }
-                k += 1;
+                b')' => {
+                    if stack.last().is_some_and(|&(_, level)| level == depth) {
+                        let (open, _) = stack.pop().unwrap();
+                        // Balanced destinations are nested or disjoint. An outer
+                        // destination subsumes the inner ranges at the end of the
+                        // vector, leaving source-ordered disjoint ranges for lookup.
+                        while ranges.last().is_some_and(|range| range.start > open) {
+                            ranges.pop();
+                        }
+                        ranges.push(open + 1..pos + 1);
+                    }
+                    depth = depth.saturating_sub(1);
+                }
+                // Every still-open destination crosses this whitespace and is invalid.
+                b' ' | b'\t' | b'\n' | b'\r' => {
+                    stack.clear();
+                    depth = 0;
+                }
+                _ => {}
             }
-            // byte_pos is inside the URL if it falls between '(' and the matching ')'
-            // and the destination is valid (no unescaped whitespace).
-            if valid_destination && depth == 0 && byte_pos > wiki_end && byte_pos < k {
-                return true;
+            if pos >= last_start && stack.is_empty() {
+                break;
             }
+            pos += 1;
         }
-        false
+        ranges
     }
 
     /// Check if a position within a line falls inside a Markdown link's
@@ -3255,6 +3264,112 @@ Visit [github documentation](https://github.com/docs) for details.
             fixed.contains("Test text"),
             "Fix should correct prose 'test' to 'Test': {fixed}"
         );
+    }
+
+    #[test]
+    fn test_wikilink_url_ranges_match_scalar_queries() {
+        fn scalar(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+            use pulldown_cmark::LinkType;
+            let content = ctx.content.as_bytes();
+
+            for link in ctx.links_starting_before_or_at(byte_pos) {
+                if !matches!(link.link_type, LinkType::WikiLink { .. }) {
+                    continue;
+                }
+                let wiki_end = link.byte_end;
+                // The WikiLink must end before byte_pos and be immediately followed by '('.
+                if wiki_end >= byte_pos || wiki_end >= content.len() || content[wiki_end] != b'(' {
+                    continue;
+                }
+                // Scan to the matching ')' tracking nested parens and backslash escapes.
+                // Per CommonMark, an unquoted inline link destination cannot contain
+                // spaces, tabs, or newlines. If we encounter one, this is parenthesised
+                // prose rather than a URL, and pulldown-cmark will not parse it as a link.
+                let mut depth: u32 = 1;
+                let mut k = wiki_end + 1;
+                let mut valid_destination = true;
+                while k < content.len() && depth > 0 {
+                    match content[k] {
+                        b'\\' => {
+                            k += 1; // skip escaped character
+                        }
+                        b'(' => depth += 1,
+                        b')' => depth -= 1,
+                        b' ' | b'\t' | b'\n' | b'\r' => {
+                            valid_destination = false;
+                            break;
+                        }
+                        _ => {}
+                    }
+                    k += 1;
+                }
+                // byte_pos is inside the URL if it falls between '(' and the matching ')'
+                // and the destination is valid (no unescaped whitespace).
+                if valid_destination && depth == 0 && byte_pos > wiki_end && byte_pos < k {
+                    return true;
+                }
+            }
+            false
+        }
+
+        use crate::config::MarkdownFlavor;
+        let tokens = [
+            "[[target]](javascript)",
+            "[[target]](a(b)c)",
+            "[[target]](a\\)b)",
+            "[[target]](a\\ b)",
+            "[[target]](a b)",
+            "[[target]](a\tb)",
+            "[[target]](a\nb)",
+            "[[target]](a\rb)",
+            "[[target]](a",
+            "[[target]](a[[inner]](b)c)",
+            "[[target]](a[[inner]](b)",
+            "\\[[target]](path)",
+            "`[[target]](path)`",
+            "![x](path)",
+            "é🙂 ",
+            "[[x]]",
+            "\\)",
+            "([[target]](x))",
+        ];
+        for flavor in [
+            MarkdownFlavor::Standard,
+            MarkdownFlavor::Obsidian,
+            MarkdownFlavor::MDX,
+            MarkdownFlavor::Quarto,
+        ] {
+            for first in tokens {
+                for second in tokens {
+                    let content = format!("{first}{second}");
+                    let ctx = LintContext::new(&content, flavor, None);
+                    let ranges = MD044ProperNames::wikilink_url_ranges(&ctx);
+                    assert!(ranges.windows(2).all(|pair| pair[0].end <= pair[1].start));
+                    for byte in 0..=content.len() + 1 {
+                        assert_eq!(
+                            crate::inline_config::offset_in_ranges(&ranges, byte),
+                            scalar(&ctx, byte),
+                            "{flavor:?} {content:?} at {byte}: {ranges:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_wikilink_destinations_preserve_prose_fixes() {
+        use crate::config::MarkdownFlavor;
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::Obsidian] {
+            let content = "javascript [[target]](javascript) javascript [[other]](a(javascript)b) CAFÉ";
+            let ctx = LintContext::new(content, flavor, None);
+            let rule = MD044ProperNames::new(vec!["JavaScript".into(), "Café".into()], false);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 3);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                "JavaScript [[target]](javascript) JavaScript [[other]](a(javascript)b) Café"
+            );
+        }
     }
 
     #[test]

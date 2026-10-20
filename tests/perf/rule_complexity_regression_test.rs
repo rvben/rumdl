@@ -720,6 +720,52 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// WikiLink fallback destinations must be scanned once across all name matches.
+#[test]
+fn test_md044_link_destinations_linear_complexity() {
+    for (name, unit) in [
+        ("regular", "[label](target) javascript "),
+        ("wiki", "[[target]](path) javascript "),
+        ("nested", "[[target]](a(b)c) javascript "),
+        ("unclosed", "[[target]](path javascript "),
+        ("overlap", "[[target]](a"),
+    ] {
+        let times: Vec<_> = [2048, 4096, 8192]
+            .into_iter()
+            .map(|count| {
+                let content = if name == "overlap" {
+                    format!("{}javascript{} javascript\n", unit.repeat(count), ")".repeat(count))
+                } else {
+                    format!("{}\n", unit.repeat(count))
+                };
+                let ctx = LintContext::new(&content, MarkdownFlavor::Obsidian, None);
+                assert!(ctx.links().len() >= count);
+                let expected = if name == "overlap" { 1 } else { count };
+                assert_eq!(
+                    MD044ProperNames::new(vec!["JavaScript".into()], false)
+                        .check(&ctx)
+                        .unwrap()
+                        .len(),
+                    expected
+                );
+                let mut samples: Vec<_> = (0..7)
+                    .map(|_| {
+                        let rule = MD044ProperNames::new(vec!["JavaScript".into()], false);
+                        let start = MeasurementClock::now();
+                        let warnings = std::hint::black_box(rule.check(&ctx).unwrap());
+                        let elapsed = start.elapsed();
+                        assert_eq!(warnings.len(), expected);
+                        elapsed
+                    })
+                    .collect();
+                samples.sort();
+                samples[3]
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD044 link destinations {name}"), &times, 3.0);
+    }
+}
+
 /// Name matches must not repeatedly scan a plain line for URLs or character columns.
 #[test]
 fn test_md044_long_lines_linear_complexity() {

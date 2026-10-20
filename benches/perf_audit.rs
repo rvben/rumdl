@@ -1612,6 +1612,45 @@ fn bench_md044_long_lines(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_md044_link_destinations(c: &mut Criterion) {
+    let mut group = c.benchmark_group("MD044_link_destinations");
+    group.sample_size(10);
+    for (name, unit) in [
+        ("regular", "[label](target) javascript "),
+        ("wiki", "[[target]](path) javascript "),
+        ("nested", "[[target]](a(b)c) javascript "),
+        ("unclosed", "[[target]](path javascript "),
+        ("overlap", "[[target]](a"),
+    ] {
+        for count in [1024, 4096, 8192] {
+            let content = if name == "overlap" {
+                format!("{}javascript{} javascript\n", unit.repeat(count), ")".repeat(count))
+            } else {
+                format!("{}\n", unit.repeat(count))
+            };
+            let ctx = LintContext::new(&content, MarkdownFlavor::Obsidian, None);
+            assert!(ctx.links().len() >= count);
+            let expected = if name == "overlap" { 1 } else { count };
+            assert_eq!(
+                MD044ProperNames::new(vec!["JavaScript".into()], false)
+                    .check(&ctx)
+                    .unwrap()
+                    .len(),
+                expected
+            );
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter_batched(
+                    || MD044ProperNames::new(vec!["JavaScript".into()], false),
+                    |rule| black_box(rule.check(black_box(&ctx)).unwrap()),
+                    BatchSize::SmallInput,
+                );
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_dynamic_regex_cache(c: &mut Criterion) {
     let pattern = format!(
         "(?i)({})",
@@ -1836,6 +1875,7 @@ criterion_group!(
     bench_heading_utilities,
     bench_md044_name_lookup,
     bench_md044_long_lines,
+    bench_md044_link_destinations,
     bench_dynamic_regex_cache,
     bench_md024_duplicate_headings,
 );
