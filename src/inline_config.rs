@@ -418,6 +418,7 @@ impl InlineConfig {
         code_spans: &[(usize, usize)],
     ) -> Self {
         let mut config = Self::new();
+        let in_code = CommentCodeTest::new(content, code_blocks, code_spans);
         // Lines measured over `split('\n')`, whose pieces keep any `\r`, so the
         // offsets below match the code ranges for a CRLF document too.
 
@@ -426,7 +427,7 @@ impl InlineConfig {
         // applies before any enable/disable directive regardless of where it
         // sits. Comments inside fenced code blocks are skipped.
         for (offset, json_config) in scan_configure_file_comments(content) {
-            if offset_in_code_block(offset, code_blocks) || offset_in_code_span(offset, code_spans) {
+            if in_code.code_blocks.contains(offset) || in_code.code_spans.contains(offset) {
                 continue;
             }
             let Some(obj) = json_config.as_object() else {
@@ -471,7 +472,6 @@ impl InlineConfig {
         // Directive comments that span lines take effect on the line holding their
         // `-->`, ahead of any comment later on that line.
         let mut multiline_by_end_line: HashMap<usize, Vec<MultilineDirective<'_>>> = HashMap::new();
-        let in_code = CommentCodeTest::new(content, code_blocks, code_spans);
         for directive in scan_multiline_directives(content, |open| in_code.contains(open)) {
             multiline_by_end_line
                 .entry(directive.end_line)
@@ -500,7 +500,7 @@ impl InlineConfig {
             }
 
             // A line inside a code block holds no single-line directive
-            let in_code_block = line_in_code_block(line_position, line, code_blocks);
+            let in_code_block = line_in_code_block(line_position, line, &in_code.code_blocks);
 
             // Parse all directives on this line once via the unified parser.
             // Directives come back in left-to-right order with correct disambiguation.
@@ -508,7 +508,7 @@ impl InlineConfig {
             let single_line = if in_code_block {
                 Vec::new()
             } else {
-                directives_outside_code_spans(line, line_position, code_spans)
+                directives_outside_code_spans(line, line_position, &in_code.code_spans)
             };
             let directives: Vec<InlineDirective<'_>> = ending_here
                 .into_iter()
@@ -524,7 +524,7 @@ impl InlineConfig {
             let has_prettier_ignore = !in_code_block
                 && line.match_indices(COMMENT_OPEN).any(|(offset, _)| {
                     let body = comment_body(&line[offset + COMMENT_OPEN.len()..], 0);
-                    prettier_ignore_len(body).is_some() && !offset_in_code_span(line_position + offset, code_spans)
+                    prettier_ignore_len(body).is_some() && !in_code.code_spans.contains(line_position + offset)
                 });
 
             // Pass 1: file-wide directives (affect the entire file, not state-tracked)
@@ -977,8 +977,8 @@ fn scan_multiline_directives(text: &str, in_code: impl Fn(usize) -> bool) -> Vec
 /// long line cost one look at it between them.
 struct CommentCodeTest<'a> {
     content: &'a str,
-    code_blocks: &'a [(usize, usize)],
-    code_spans: &'a [(usize, usize)],
+    code_blocks: CodeRangeIndex<'a>,
+    code_spans: CodeRangeIndex<'a>,
     /// (start, end, in code) of the line last asked about
     line: std::cell::Cell<Option<(usize, usize, bool)>>,
 }
@@ -987,14 +987,14 @@ impl<'a> CommentCodeTest<'a> {
     fn new(content: &'a str, code_blocks: &'a [(usize, usize)], code_spans: &'a [(usize, usize)]) -> Self {
         Self {
             content,
-            code_blocks,
-            code_spans,
+            code_blocks: CodeRangeIndex::new(code_blocks),
+            code_spans: CodeRangeIndex::new(code_spans),
             line: std::cell::Cell::new(None),
         }
     }
 
     fn contains(&self, open: usize) -> bool {
-        if offset_in_code_block(open, self.code_blocks) || offset_in_code_span(open, self.code_spans) {
+        if self.code_blocks.contains(open) || self.code_spans.contains(open) {
             return true;
         }
         if let Some((start, end, in_code)) = self.line.get()
@@ -1006,7 +1006,7 @@ impl<'a> CommentCodeTest<'a> {
         let line_end = self.content[line_start..]
             .find('\n')
             .map_or(self.content.len(), |newline| line_start + newline);
-        let in_code = line_in_code_block(line_start, &self.content[line_start..line_end], self.code_blocks);
+        let in_code = line_in_code_block(line_start, &self.content[line_start..line_end], &self.code_blocks);
         self.line.set(Some((line_start, line_end.max(line_start + 1), in_code)));
         in_code
     }
@@ -1084,38 +1084,50 @@ pub fn is_restore_comment(line: &str) -> bool {
 
 const CONFIGURE_FILE_KEYWORD: &str = "configure-file";
 
-/// Whether a byte offset falls inside one of the given ranges.
-fn offset_within(offset: usize, ranges: &[(usize, usize)]) -> bool {
-    ranges.iter().any(|&(start, end)| offset >= start && offset < end)
-}
+/// Half-open range membership shared by every directive in a source operation.
+/// Parser ranges normally need no allocation. Public callers may supply
+/// overlapping or unsorted ranges; normalize those without changing membership.
+struct CodeRangeIndex<'a>(std::borrow::Cow<'a, [(usize, usize)]>);
 
-/// Whether a byte offset falls inside one of the given code block ranges.
-fn offset_in_code_block(offset: usize, code_blocks: &[(usize, usize)]) -> bool {
-    offset_within(offset, code_blocks)
-}
+impl<'a> CodeRangeIndex<'a> {
+    fn new(ranges: &'a [(usize, usize)]) -> Self {
+        if ranges.iter().all(|&(start, end)| start < end) && ranges.windows(2).all(|pair| pair[0].1 <= pair[1].0) {
+            return Self(std::borrow::Cow::Borrowed(ranges));
+        }
+        let mut sorted: Vec<_> = ranges.iter().copied().filter(|&(start, end)| start < end).collect();
+        sorted.sort_unstable_by_key(|&(start, _)| start);
+        let mut merged: Vec<(usize, usize)> = Vec::with_capacity(sorted.len());
+        for (start, end) in sorted {
+            if let Some(last) = merged.last_mut()
+                && start <= last.1
+            {
+                last.1 = last.1.max(end);
+            } else {
+                merged.push((start, end));
+            }
+        }
+        Self(std::borrow::Cow::Owned(merged))
+    }
 
-/// Whether a byte offset falls inside one of the given inline code spans.
-///
-/// A code span holds literal text, so a directive written between backticks
-/// documents a directive rather than writing one. Unlike a code block, a span
-/// covers part of a line, so the test is made against the directive's own offset
-/// and a live directive beside one in a span still applies.
-fn offset_in_code_span(offset: usize, code_spans: &[(usize, usize)]) -> bool {
-    offset_within(offset, code_spans)
+    fn contains(&self, offset: usize) -> bool {
+        let after = self.0.partition_point(|&(_, end)| end <= offset);
+        self.0.get(after).is_some_and(|&(start, _)| start <= offset)
+    }
 }
 
 /// The directives on a line that are not inside an inline code span.
 ///
 /// `line_start` is the line's byte offset in the document, which is what makes a
-/// directive's span comparable with the document-wide code span ranges.
+/// directive's span comparable with the document-wide code span ranges. Check
+/// each directive's own offset: a live directive beside a code span still applies.
 fn directives_outside_code_spans<'a>(
     line: &'a str,
     line_start: usize,
-    code_spans: &[(usize, usize)],
+    code_spans: &CodeRangeIndex<'_>,
 ) -> Vec<InlineDirective<'a>> {
     let mut directives = parse_inline_directives(line);
-    if !code_spans.is_empty() {
-        directives.retain(|directive| !offset_in_code_span(line_start + directive.span.start, code_spans));
+    if !code_spans.0.is_empty() {
+        directives.retain(|directive| !code_spans.contains(line_start + directive.span.start));
     }
     directives
 }
@@ -1127,11 +1139,11 @@ fn directives_outside_code_spans<'a>(
 /// line. Asking whether the whole line span is contained would answer "no" for
 /// every indented block and let a directive written in a code sample configure
 /// the document.
-fn line_in_code_block(line_start: usize, line: &str, code_blocks: &[(usize, usize)]) -> bool {
+fn line_in_code_block(line_start: usize, line: &str, code_blocks: &CodeRangeIndex<'_>) -> bool {
     let probe = line
         .find(|c: char| !c.is_whitespace())
         .map_or(line_start, |indent| line_start + indent);
-    offset_in_code_block(probe, code_blocks)
+    code_blocks.contains(probe)
 }
 
 /// A warning together with the byte offset of the directive that raised it.
@@ -1158,6 +1170,7 @@ fn drop_warnings_inside_code(
     }
     let code = crate::lint_context::code_ranges(content, flavor);
     if !code.blocks.is_empty() {
+        let blocks = CodeRangeIndex::new(&code.blocks);
         // Lines measured over `split('\n')`, whose pieces keep any `\r`, so a
         // CRLF document's offsets match the ranges above. A code block is judged
         // by the line, since an indented block's range starts at the indented
@@ -1176,11 +1189,12 @@ fn drop_warnings_inside_code(
             let Some(&(line_start, line)) = line_spans.get(warning.line_number.saturating_sub(1)) else {
                 return true;
             };
-            !line_in_code_block(line_start, line, &code.blocks)
+            !line_in_code_block(line_start, line, &blocks)
         });
     }
     if !code.spans.is_empty() {
-        warnings.retain(|&(_, offset)| !offset_in_code_span(offset, &code.spans));
+        let spans = CodeRangeIndex::new(&code.spans);
+        warnings.retain(|&(_, offset)| !spans.contains(offset));
     }
 
     warnings.into_iter().map(|(warning, _)| warning).collect()
@@ -1320,6 +1334,7 @@ pub fn collect_disable_sites(
         return Vec::new();
     }
 
+    let in_code = CommentCodeTest::new(content, code_blocks, code_spans);
     // Lines measured over `split('\n')`, whose pieces keep any `\r`, so a CRLF
     // document's offsets match the code block ranges.
     let line_spans: Vec<(usize, &str)> = {
@@ -1335,11 +1350,11 @@ pub fn collect_disable_sites(
     let mut sites = Vec::new();
 
     for (idx, &(line_start, line)) in line_spans.iter().enumerate() {
-        if line_in_code_block(line_start, line, code_blocks) {
+        if line_in_code_block(line_start, line, &in_code.code_blocks) {
             continue;
         }
         let line_num = idx + 1;
-        for directive in directives_outside_code_spans(line, line_start, code_spans) {
+        for directive in directives_outside_code_spans(line, line_start, &in_code.code_spans) {
             let (kind, scope) = match directive.kind {
                 DirectiveKind::Disable => ("disable", DisableScope::Block(line_num)),
                 DirectiveKind::DisableLine => ("disable-line", DisableScope::Line(line_num)),
@@ -1363,7 +1378,6 @@ pub fn collect_disable_sites(
 
     // A directive comment spanning lines opens on one line and takes effect where
     // it ends. The site is reported on the opening line with its span clipped to it.
-    let in_code = CommentCodeTest::new(content, code_blocks, code_spans);
     for directive in scan_multiline_directives(content, |open| in_code.contains(open)) {
         let (kind, scope) = match directive.kind {
             DirectiveKind::Disable => ("disable", DisableScope::Block(directive.end_line)),
@@ -1388,7 +1402,7 @@ pub fn collect_disable_sites(
     // exactly as disable-file does. The comment may span lines, so it is scanned
     // over the document and its span is clipped to the line it opens on.
     for (offset, json_config) in scan_configure_file_comments(content) {
-        if offset_in_code_block(offset, code_blocks) || offset_in_code_span(offset, code_spans) {
+        if in_code.code_blocks.contains(offset) || in_code.code_spans.contains(offset) {
             continue;
         }
         let Some(obj) = json_config.as_object() else {
@@ -1749,6 +1763,36 @@ fn collect_inline_config_warnings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_range_index_preserves_arbitrary_range_membership() {
+        let mut cases = vec![
+            vec![],
+            vec![(0, 2), (2, 5), (8, 10)],
+            vec![(8, 20), (0, 12), (4, 6), (3, 3), (9, 1)],
+            vec![(0, usize::MAX), (usize::MAX, usize::MAX)],
+            vec![(usize::MAX - 1, usize::MAX), (5, 2)],
+        ];
+        for seed in 0..32 {
+            cases.push(
+                (0..16)
+                    .map(|i| ((i * 7 + seed * 11) % 61, (i * 13 + seed * 17) % 61))
+                    .collect(),
+            );
+        }
+        for mut ranges in cases {
+            for reverse in [false, true] {
+                if reverse {
+                    ranges.reverse();
+                }
+                let index = CodeRangeIndex::new(&ranges);
+                for offset in (0..64).chain([usize::MAX - 1, usize::MAX]) {
+                    let expected = ranges.iter().any(|&(start, end)| start <= offset && offset < end);
+                    assert_eq!(index.contains(offset), expected, "{ranges:?}, byte {offset}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn configure_file_positions_match_source_lines() {

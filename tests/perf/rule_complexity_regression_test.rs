@@ -437,6 +437,92 @@ fn test_md057_warning_columns_linear_complexity() {
     }
 }
 
+/// Literal directives in many code ranges must not make every live directive
+/// search the entire range list in parsing, observation or warning filtering.
+#[test]
+fn test_directive_code_ranges_linear_complexity() {
+    use rumdl_lib::inline_config::{InlineConfig, validate_inline_enables_against_active_rules};
+    use rumdl_lib::rule::SuppressionReport;
+
+    for stage in ["config", "observer", "validation"] {
+        let directive = if stage == "validation" {
+            "enable"
+        } else {
+            "disable-line"
+        };
+        for fenced in [false, true] {
+            let unit = if fenced {
+                format!("```md\n<!-- rumdl-{directive} MD013 -->\n```\n\n<!-- rumdl-{directive} MD013 -->\n\n")
+            } else {
+                format!("`<!-- rumdl-{directive} MD013 -->` <!-- rumdl-{directive} MD013 --> ")
+            };
+            let times: Vec<_> = [1024, 2048, 4096]
+                .into_iter()
+                .map(|count| {
+                    let content = unit.repeat(count);
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    let ranges = rumdl_lib::lint_context::code_ranges(&content, MarkdownFlavor::Standard);
+                    let mut report = SuppressionReport::default();
+                    report.judged_rules.insert("MD013".into());
+                    let rule = MD087UnusedDisableComment::new();
+                    let active = std::collections::HashSet::new();
+                    match stage {
+                        "config" => {
+                            let config =
+                                InlineConfig::from_content_with_code_blocks(&content, &ranges.blocks, &ranges.spans);
+                            assert!(config.is_rule_disabled("MD013", if fenced { 5 } else { 1 }));
+                            if fenced {
+                                assert!(!config.is_rule_disabled("MD013", 2));
+                            }
+                        }
+                        "observer" => assert_eq!(rule.check_suppressions(&ctx, &report).unwrap().len(), count),
+                        _ => assert_eq!(
+                            validate_inline_enables_against_active_rules(
+                                &content,
+                                MarkdownFlavor::Standard,
+                                &active,
+                                &active
+                            )
+                            .len(),
+                            count
+                        ),
+                    }
+                    let run = || match stage {
+                        "config" => {
+                            std::hint::black_box(InlineConfig::from_content_with_code_blocks(
+                                std::hint::black_box(&content),
+                                &ranges.blocks,
+                                &ranges.spans,
+                            ));
+                        }
+                        "observer" => {
+                            std::hint::black_box(rule.check_suppressions(std::hint::black_box(&ctx), &report).unwrap());
+                        }
+                        _ => {
+                            std::hint::black_box(validate_inline_enables_against_active_rules(
+                                std::hint::black_box(&content),
+                                MarkdownFlavor::Standard,
+                                &active,
+                                &active,
+                            ));
+                        }
+                    };
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            let start = MeasurementClock::now();
+                            run();
+                            start.elapsed()
+                        })
+                        .collect();
+                    samples.sort();
+                    samples[3]
+                })
+                .collect();
+            assert_linear_complexity(&format!("directive ranges {stage}, fenced={fenced}"), &times, 3.0);
+        }
+    }
+}
+
 /// Suppression observers run after rule checks, so measure their actual entry
 /// point with a report rather than MD087's deliberately empty `check`.
 #[test]

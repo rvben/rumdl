@@ -604,6 +604,82 @@ fn bench_md057_positions(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_directive_code_ranges(c: &mut Criterion) {
+    use rumdl_lib::inline_config::{InlineConfig, validate_inline_enables_against_active_rules};
+    use rumdl_lib::rule::SuppressionReport;
+
+    let mut group = c.benchmark_group("directive_code_ranges");
+    group.sample_size(10);
+    for stage in ["config", "observer", "validation"] {
+        let directive = if stage == "validation" {
+            "enable"
+        } else {
+            "disable-line"
+        };
+        for fenced in [false, true] {
+            let unit = if fenced {
+                format!("```md\n<!-- rumdl-{directive} MD013 -->\n```\n\n<!-- rumdl-{directive} MD013 -->\n\n")
+            } else {
+                format!("`<!-- rumdl-{directive} MD013 -->` <!-- rumdl-{directive} MD013 --> ")
+            };
+            for count in [128, 1024, 4096] {
+                let content = unit.repeat(count);
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                let ranges = rumdl_lib::lint_context::code_ranges(&content, MarkdownFlavor::Standard);
+                let mut report = SuppressionReport::default();
+                report.judged_rules.insert("MD013".into());
+                let rule = MD087UnusedDisableComment::new();
+                let active = std::collections::HashSet::new();
+                match stage {
+                    "config" => {
+                        let config =
+                            InlineConfig::from_content_with_code_blocks(&content, &ranges.blocks, &ranges.spans);
+                        assert!(config.is_rule_disabled("MD013", if fenced { 5 } else { 1 }));
+                        if fenced {
+                            assert!(!config.is_rule_disabled("MD013", 2));
+                        }
+                    }
+                    "observer" => assert_eq!(rule.check_suppressions(&ctx, &report).unwrap().len(), count),
+                    _ => assert_eq!(
+                        validate_inline_enables_against_active_rules(
+                            &content,
+                            MarkdownFlavor::Standard,
+                            &active,
+                            &active
+                        )
+                        .len(),
+                        count
+                    ),
+                }
+                group.throughput(Throughput::Bytes(content.len() as u64));
+                group.bench_function(BenchmarkId::new(format!("{stage}-fenced-{fenced}"), count), |b| {
+                    b.iter(|| match stage {
+                        "config" => {
+                            black_box(InlineConfig::from_content_with_code_blocks(
+                                black_box(&content),
+                                &ranges.blocks,
+                                &ranges.spans,
+                            ));
+                        }
+                        "observer" => {
+                            black_box(rule.check_suppressions(black_box(&ctx), &report).unwrap());
+                        }
+                        _ => {
+                            black_box(validate_inline_enables_against_active_rules(
+                                black_box(&content),
+                                MarkdownFlavor::Standard,
+                                &active,
+                                &active,
+                            ));
+                        }
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_md087_suppressions(c: &mut Criterion) {
     use rumdl_lib::inline_config::{DisableLayer, validate_inline_config_rules};
     use rumdl_lib::rule::{SuppressedWarning, SuppressionReport};
@@ -1334,6 +1410,7 @@ criterion_group!(
     bench_md070_fence_lookup,
     bench_md077_fence_lookup,
     bench_md087_suppressions,
+    bench_directive_code_ranges,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,
