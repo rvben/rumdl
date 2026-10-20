@@ -1,9 +1,9 @@
+use super::source_positions::SourcePositions;
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_tabs;
 use crate::utils::parser_options::rumdl_parser_options_for;
-use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::URL_SIMPLE_REGEX;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
@@ -241,6 +241,7 @@ pub(super) fn build_code_spans_from_ranges(
         return code_spans;
     }
 
+    let mut positions = SourcePositions::new(content, lines);
     for &(start_pos, end_pos) in ranges {
         // The range includes the backticks, extract the actual content
         let full_span = &content[start_pos..end_pos];
@@ -261,21 +262,14 @@ pub(super) fn build_code_spans_from_ranges(
             .partition_point(|line| line.byte_offset <= start_pos)
             .saturating_sub(1);
         let line_num = line_idx + 1;
-        let byte_col_start = start_pos - lines[line_idx].byte_offset;
 
         // Find end column using binary search
         let end_line_idx = lines
             .partition_point(|line| line.byte_offset <= end_pos)
             .saturating_sub(1);
-        let byte_col_end = end_pos - lines[end_line_idx].byte_offset;
 
-        // Convert byte offsets to 0-indexed character positions (boundary-safe) for
-        // correct Unicode handling; consistent with warning.column being char-based.
-        let line_content = lines[line_idx].content(content);
-        let col_start = byte_to_char_count(line_content, byte_col_start) - 1;
-
-        let end_line_content = lines[end_line_idx].content(content);
-        let col_end = byte_to_char_count(end_line_content, byte_col_end) - 1;
+        let col_start = positions.column_on_line(line_idx, start_pos);
+        let col_end = positions.column_on_line(end_line_idx, end_pos);
 
         code_spans.push(SourceCodeSpan {
             line: line_num,
@@ -309,6 +303,7 @@ pub(super) fn parse_math_spans(content: &str, lines: &[LineInfo]) -> Vec<MathSpa
     options.insert(Options::ENABLE_MATH);
     let parser = Parser::new_ext(content, options).into_offset_iter();
 
+    let mut positions = SourcePositions::new(content, lines);
     for (event, range) in parser {
         let (is_display, math_content) = match &event {
             Event::InlineMath(text) => (false, text.as_ref()),
@@ -324,28 +319,14 @@ pub(super) fn parse_math_spans(content: &str, lines: &[LineInfo]) -> Vec<MathSpa
             .partition_point(|line| line.byte_offset <= start_pos)
             .saturating_sub(1);
         let line_num = line_idx + 1;
-        let byte_col_start = start_pos - lines[line_idx].byte_offset;
 
         // Find end column using binary search
         let end_line_idx = lines
             .partition_point(|line| line.byte_offset <= end_pos)
             .saturating_sub(1);
-        let byte_col_end = end_pos - lines[end_line_idx].byte_offset;
 
-        // Convert byte offsets to character positions for correct Unicode handling
-        let line_content = lines[line_idx].content(content);
-        let col_start = if byte_col_start <= line_content.len() {
-            line_content[..byte_col_start].chars().count()
-        } else {
-            line_content.chars().count()
-        };
-
-        let end_line_content = lines[end_line_idx].content(content);
-        let col_end = if byte_col_end <= end_line_content.len() {
-            end_line_content[..byte_col_end].chars().count()
-        } else {
-            end_line_content.chars().count()
-        };
+        let col_start = positions.column_on_line(line_idx, start_pos);
+        let col_end = positions.column_on_line(end_line_idx, end_pos);
 
         math_spans.push(MathSpan {
             line: line_num,
@@ -393,6 +374,7 @@ pub(super) fn parse_html_tags(
     let mut jsx_component_tags = Vec::new();
     let mut search_pos = 0;
     let mut next_gt = None;
+    let mut positions = SourcePositions::new(content, lines);
 
     // Find each '<' and run the regex from that position instead of scanning full content
     while search_pos < content_len {
@@ -460,17 +442,9 @@ pub(super) fn parse_html_tags(
             let line_idx = lines.partition_point(|info| info.byte_offset <= match_start);
             let line_idx = line_idx.saturating_sub(1);
             let line_num = line_idx + 1;
-            // Columns are 0-indexed character offsets (rumdl's diagnostic convention);
-            // byte_to_char_count is boundary-safe.
-            let line_content = lines[line_idx].content(content);
-            let byte_col_start = match_start - lines[line_idx].byte_offset;
-            let col_start = byte_to_char_count(line_content, byte_col_start) - 1;
-            let byte_col_end = if match_end <= lines[line_idx].byte_offset + lines[line_idx].byte_len {
-                match_end - lines[line_idx].byte_offset
-            } else {
-                lines[line_idx].byte_len
-            };
-            let col_end = byte_to_char_count(line_content, byte_col_end) - 1;
+            let col_start = positions.column_on_line(line_idx, match_start);
+            // Multiline tag end columns are clamped to the starting line.
+            let col_end = positions.column_on_line(line_idx, match_end);
 
             let tag = HtmlTag {
                 line: line_num,
@@ -707,5 +681,111 @@ fn byte_to_line(line_offsets: &[usize], byte_offset: usize) -> usize {
     match line_offsets.binary_search(&byte_offset) {
         Ok(idx) => idx + 1,
         Err(idx) => idx.max(1),
+    }
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+    use crate::utils::range_utils::byte_to_char_count;
+
+    /// The former conversion, independent of the checkpoint index.
+    fn legacy_position(content: &str, lines: &[LineInfo], byte: usize) -> (usize, usize) {
+        let idx = lines.partition_point(|line| line.byte_offset <= byte).saturating_sub(1);
+        let line = &lines[idx];
+        (
+            idx + 1,
+            byte_to_char_count(line.content(content), byte - line.byte_offset) - 1,
+        )
+    }
+
+    #[test]
+    fn code_columns_preserve_unicode_multiline_and_unordered_ranges() {
+        for newline in ["\n", "\r\n"] {
+            let prefix = "é日本🙂\t".repeat(80);
+            let content = format!("{prefix}`one` {prefix}``two ` ticks``\n{prefix}`multi\n{prefix}line`\n")
+                .replace('\n', newline);
+            for flavor in crate::format_proof::ALL_FLAVORS {
+                let ctx = LintContext::new(&content, flavor, None);
+                // Query the final span first, then revisit earlier lines.
+                let ranges: Vec<_> = ctx.inline_code_ranges().iter().copied().rev().collect();
+                let spans = build_code_spans_from_ranges(&content, &ctx.lines, &ranges);
+                assert_eq!(spans.len(), 3, "{flavor:?}");
+                assert!(spans.windows(2).all(|pair| pair[0].byte_offset < pair[1].byte_offset));
+                for span in &spans {
+                    assert_eq!(
+                        (span.line, span.start_col),
+                        legacy_position(&content, &ctx.lines, span.byte_offset)
+                    );
+                    assert_eq!(
+                        (span.end_line, span.end_col),
+                        legacy_position(&content, &ctx.lines, span.byte_end)
+                    );
+                }
+                assert_eq!(spans[0].content(&content), "one");
+                assert_eq!(spans[1].backtick_count, 2);
+                assert_eq!(spans[1].content(&content), "two ` ticks");
+                assert_eq!(spans[2].content(&content), format!("multi{newline}{prefix}line"));
+                assert!(spans[2].end_line > spans[2].line);
+            }
+        }
+    }
+
+    #[test]
+    fn math_columns_preserve_unicode_and_multiline_spans() {
+        for newline in ["\n", "\r\n"] {
+            let prefix = "é日本🙂\t".repeat(80);
+            let content = format!("{prefix}$x + y$ {prefix}$z$\n\n$$\n{prefix}x + y\n$$\n").replace('\n', newline);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let spans = parse_math_spans(&content, &ctx.lines);
+            assert_eq!(spans.len(), 3);
+            assert_eq!(spans[0].content, "x + y");
+            assert!(!spans[0].is_display);
+            assert!(spans[2].is_display);
+            assert!(spans[2].end_line > spans[2].line);
+            for span in spans {
+                assert_eq!(
+                    (span.line, span.start_col),
+                    legacy_position(&content, &ctx.lines, span.byte_offset)
+                );
+                assert_eq!(
+                    (span.end_line, span.end_col),
+                    legacy_position(&content, &ctx.lines, span.byte_end)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn html_columns_preserve_start_line_clamping_and_jsx_split() {
+        for newline in ["\n", "\r\n"] {
+            let prefix = "é日本🙂\t".repeat(80);
+            let content = format!("{prefix}<span title=\"long >\n{prefix}value\">x</span> <Card value=\"日本\"/>\n")
+                .replace('\n', newline);
+            for flavor in crate::format_proof::ALL_FLAVORS {
+                let ctx = LintContext::new(&content, flavor, None);
+                let (tags, jsx) = parse_html_tags(&content, &ctx.lines, &[], flavor);
+                assert_eq!(tags.len() + jsx.len(), 3, "{flavor:?}");
+                assert_eq!(jsx.len(), usize::from(flavor.supports_jsx()));
+                assert_eq!(tags[0].tag_name, "span");
+                assert!(!tags[0].is_closing);
+                assert!(tags[1].is_closing);
+                // The quoted '>' and newline belong to the opening tag.
+                assert!(content[tags[0].byte_offset..tags[0].byte_end].contains('\n'));
+                assert_eq!(tags[0].end_col, ctx.lines[0].content(&content).chars().count());
+                for tag in tags.iter().chain(&jsx) {
+                    assert_eq!(
+                        (tag.line, tag.start_col),
+                        legacy_position(&content, &ctx.lines, tag.byte_offset)
+                    );
+                    let line = &ctx.lines[tag.line - 1];
+                    assert_eq!(
+                        tag.end_col,
+                        byte_to_char_count(line.content(&content), tag.byte_end - line.byte_offset) - 1
+                    );
+                }
+            }
+        }
     }
 }

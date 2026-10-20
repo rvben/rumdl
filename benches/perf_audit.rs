@@ -248,6 +248,41 @@ fn bench_context_long_line(c: &mut Criterion) {
     group.finish();
 }
 
+/// Include first access to the lazy element caches: construction alone does
+/// not materialize these source columns.
+fn bench_context_inline_elements(c: &mut Criterion) {
+    let mut group = c.benchmark_group("context_inline_elements");
+    group.sample_size(10);
+    for (name, unit) in [
+        ("code", "text `code` "),
+        ("math", "é日本🙂 $x + y$ "),
+        ("html", "é日本🙂 <span>x</span> "),
+    ] {
+        for size in [128, 2048, 8192, 32768] {
+            let content = unit.repeat(size);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_with_input(BenchmarkId::new(name, size), &content, |b, content| {
+                b.iter(|| {
+                    let ctx = LintContext::new(black_box(content), MarkdownFlavor::Standard, None);
+                    match name {
+                        "code" => {
+                            black_box(ctx.code_spans());
+                        }
+                        "math" => {
+                            black_box(ctx.math_spans());
+                        }
+                        "html" => {
+                            black_box(ctx.html_tags());
+                        }
+                        _ => unreachable!(),
+                    }
+                });
+            });
+        }
+    }
+    group.finish();
+}
+
 /// Parser-only costs for the same inputs, without rumdl's extraction and line
 /// classification. Compare with context construction before replacing a parser.
 fn bench_markdown_parse(c: &mut Criterion) {
@@ -748,6 +783,7 @@ criterion_group!(
     bench_input_preparation,
     bench_lint_context_new,
     bench_context_long_line,
+    bench_context_inline_elements,
     bench_markdown_parse,
     bench_lint_overhead,
     bench_md013_reflow,

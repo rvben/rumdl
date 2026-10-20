@@ -531,6 +531,46 @@ fn test_lint_context_long_link_line_linear_complexity() {
 }
 
 #[test]
+fn test_inline_element_columns_linear_complexity() {
+    for (name, unit) in [
+        ("code", "text `code` "),
+        ("math", "é日本🙂 $x + y$ "),
+        ("html", "é日本🙂 <span>x</span> "),
+    ] {
+        let durations: Vec<_> = [8192, 16384, 32768]
+            .into_iter()
+            .map(|size| {
+                let content = unit.repeat(size);
+                let measure_first_access = || {
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    // Time the cold cache only. Context construction and drop
+                    // must not dilute the growth of column materialization.
+                    let start = MeasurementClock::now();
+                    match name {
+                        "code" => {
+                            std::hint::black_box(ctx.code_spans());
+                        }
+                        "math" => {
+                            std::hint::black_box(ctx.math_spans());
+                        }
+                        "html" => {
+                            std::hint::black_box(ctx.html_tags());
+                        }
+                        _ => unreachable!(),
+                    }
+                    start.elapsed()
+                };
+                measure_first_access();
+                let mut samples: Vec<_> = (0..3).map(|_| measure_first_access()).collect();
+                samples.sort();
+                samples[1]
+            })
+            .collect();
+        assert_linear_complexity(&format!("inline {name} columns"), &durations, 3.0);
+    }
+}
+
+#[test]
 fn test_lint_context_colon_definitions_linear_complexity() {
     let durations: Vec<_> = [4096, 8192, 16384]
         .into_iter()
