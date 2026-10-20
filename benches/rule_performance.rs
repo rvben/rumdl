@@ -91,6 +91,31 @@ fn bench_md033_scaling(c: &mut Criterion) {
     group.finish();
 }
 
+/// Many permitted regions exercise lookups both inside and outside each region.
+fn bench_md033_allowed_inside(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md033_allowed_inside");
+    group.sample_size(10);
+    let config = toml::from_str("allowed-inside = ['details', 'section']").unwrap();
+    let rule = MD033NoInlineHtml::from_config_struct(config);
+    for count in [128, 2048, 8192, 32768] {
+        for (name, unit) in [
+            ("siblings", "<details><b>inside</b></details><i>outside</i>\n"),
+            (
+                "nested",
+                "<details><section><b>inside</b></section><i>inside</i></details><b>outside</b>\n",
+            ),
+        ] {
+            let content = unit.repeat(count);
+            let ctx = make_ctx(&content);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count);
+            group.bench_function(format!("{name}/{count}"), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
 /// Benchmark MD037 rule on a large content with emphasis
 fn bench_md037(c: &mut Criterion) {
     let mut content = String::with_capacity(50_000);
@@ -233,6 +258,7 @@ criterion_group!(
     bench_md013,
     bench_md033,
     bench_md033_scaling,
+    bench_md033_allowed_inside,
     bench_md037,
     bench_md044,
     bench_md051,

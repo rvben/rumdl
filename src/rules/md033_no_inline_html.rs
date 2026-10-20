@@ -68,6 +68,30 @@ pub struct MD033NoInlineHtml {
     table_allows_no_markdown_equivalent: bool,
 }
 
+/// Point membership in allowed regions, including overlapping and nested ones.
+/// Each sorted start stores the greatest end seen so far, so the predecessor
+/// answers a query without scanning all regions or losing an enclosing one.
+struct AllowedInsideIndex {
+    ranges: Vec<Range<usize>>,
+}
+
+impl AllowedInsideIndex {
+    fn new(mut ranges: Vec<Range<usize>>) -> Self {
+        ranges.sort_unstable_by_key(|range| range.start);
+        let mut end = 0;
+        for range in &mut ranges {
+            end = end.max(range.end);
+            range.end = end;
+        }
+        Self { ranges }
+    }
+
+    fn contains(&self, offset: usize) -> bool {
+        let past = self.ranges.partition_point(|range| range.start <= offset);
+        past > 0 && offset < self.ranges[past - 1].end
+    }
+}
+
 impl Default for MD033NoInlineHtml {
     fn default() -> Self {
         Self::from_config_struct(MD033Config::default())
@@ -228,12 +252,6 @@ impl MD033NoInlineHtml {
 
         ranges.extend(open.into_iter().map(|(_, start)| start..ctx.content.len()));
         ranges
-    }
-
-    /// Whether a byte offset falls in one of the ranges `allowed_inside` covers.
-    #[inline]
-    fn is_inside_allowed_element(ranges: &[Range<usize>], byte_offset: usize) -> bool {
-        ranges.iter().any(|range| range.contains(&byte_offset))
     }
 
     /// Check if a tag is in the disallowed set (for disallowed-only mode).
@@ -1140,11 +1158,11 @@ impl Rule for MD033NoInlineHtml {
         let html_tags = ctx.html_tags();
 
         // Disallowed-only mode is a denylist, which the allowlists take no part in.
-        let allowed_inside_ranges = if self.is_disallowed_mode() {
+        let allowed_inside = AllowedInsideIndex::new(if self.is_disallowed_mode() {
             Vec::new()
         } else {
             self.allowed_inside_ranges(ctx)
-        };
+        });
 
         let closing_tags = if self.config.fix {
             ClosingTagIndex::new(content)
@@ -1224,14 +1242,12 @@ impl Rule for MD033NoInlineHtml {
             } else if ctx.is_in_table_block(line_num) {
                 // An explicit table allowlist is the whole answer for a table cell,
                 // so it decides there instead of the surrounding element.
-                let inside_allowed_element = self.config.table_allowed_elements.is_none()
-                    && Self::is_inside_allowed_element(&allowed_inside_ranges, tag_byte_start);
+                let inside_allowed_element =
+                    self.config.table_allowed_elements.is_none() && allowed_inside.contains(tag_byte_start);
                 if self.is_tag_allowed_in_table(tag, ctx.flavor) || inside_allowed_element {
                     continue;
                 }
-            } else if self.is_tag_allowed(tag, ctx.flavor)
-                || Self::is_inside_allowed_element(&allowed_inside_ranges, tag_byte_start)
-            {
+            } else if self.is_tag_allowed(tag, ctx.flavor) || allowed_inside.contains(tag_byte_start) {
                 continue;
             }
 
@@ -1358,6 +1374,41 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::rule::Rule;
+
+    #[test]
+    fn allowed_inside_index_preserves_nested_ranges_and_boundaries() {
+        for ranges in [
+            vec![],
+            vec![5..20, 8..10, 0..2, 5..7, 20..22, 30..40],
+            vec![0..usize::MAX, 10..11],
+        ] {
+            let index = AllowedInsideIndex::new(ranges.clone());
+            for offset in (0..=45).chain([usize::MAX - 1, usize::MAX]) {
+                assert_eq!(
+                    index.contains(offset),
+                    ranges.iter().any(|range| range.contains(&offset)),
+                    "offset {offset}, ranges {ranges:?}"
+                );
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(128))]
+        #[test]
+        fn allowed_inside_index_matches_linear_search(
+            endpoints in proptest::collection::vec((0_usize..256, 0_usize..256), 0..80)
+        ) {
+            let ranges: Vec<_> = endpoints.into_iter().map(|(a, b)| a.min(b)..a.max(b)).collect();
+            let index = AllowedInsideIndex::new(ranges.clone());
+            for offset in 0..=256 {
+                proptest::prop_assert_eq!(
+                    index.contains(offset),
+                    ranges.iter().any(|range| range.contains(&offset))
+                );
+            }
+        }
+    }
 
     #[test]
     fn closing_tag_index_finds_what_a_case_insensitive_search_finds() {
@@ -3362,6 +3413,16 @@ tR += `# ${file}\n\nCreated: ${date}\nIn: ${folder}`;
         assert!(
             reported_tags(&rule_allowing_inside(&["details"]), unclosed).is_empty(),
             "an unclosed element reaches the end of the document"
+        );
+    }
+
+    #[test]
+    fn test_md033_allowed_inside_mismatched_and_unclosed_elements() {
+        let content = "<details><section><b>in</b></details><i>out</i></section><b>out</b>\
+                       <details><section/><i>in</i>";
+        assert_eq!(
+            reported_tags(&rule_allowing_inside(&["details", "section"]), content),
+            vec!["<i>", "<b>"]
         );
     }
 

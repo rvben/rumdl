@@ -483,6 +483,22 @@ fn test_md033_long_html_line_linear_complexity() {
     }
 }
 
+#[test]
+fn test_md033_allowed_inside_linear_complexity() {
+    let config = toml::from_str("allowed-inside = ['details', 'section']").unwrap();
+    let rule = MD033NoInlineHtml::from_config_struct(config);
+    for unit in [
+        "<details><b>inside</b></details><i>outside</i>\n",
+        "<details><section><b>inside</b></section><i>inside</i></details><b>outside</b>\n",
+    ] {
+        let durations: Vec<_> = [4096, 8192, 16384]
+            .into_iter()
+            .map(|size| measure_rule_time(&rule, &unit.repeat(size), 5))
+            .collect();
+        assert_linear_complexity("MD033 allowed-inside", &durations, 3.0);
+    }
+}
+
 // =============================================================================
 // LintContext Construction Tests
 // =============================================================================
