@@ -29,10 +29,9 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::filtered_lines::FilteredLinesExt;
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, SourcePositions};
 use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::obsidian_tag::TAG_PATTERN;
-use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::unicode::is_cjk_letter;
 use md089_config::MD089Config;
 
@@ -228,16 +227,26 @@ fn attached_run(units: &[Unit], j: usize, latin_right: &[bool], latin_left: &[bo
 /// whitespace between the opening `[` and the image, and nothing but
 /// whitespace between the image and the `]` that closes the text.
 fn link_wraps_only_an_image(content: &str, link: (usize, usize), images: &[(usize, usize)]) -> bool {
-    images.iter().any(|&(start, end)| {
-        link.0 < start
-            && end < link.1
-            && content
-                .get(link.0 + 1..start)
-                .is_some_and(|before| before.trim().is_empty())
-            && content
-                .get(end..link.1)
-                .is_some_and(|after| after.trim_start().starts_with(']'))
-    })
+    if images.is_empty() {
+        return false;
+    }
+    let Some(text) = content.get(link.0 + 1..link.1) else {
+        return false;
+    };
+    // Parsed images start at markup, never whitespace. Only an image at the
+    // first non-whitespace byte can leave a whitespace-only link-text prefix.
+    // Images are in source order; equal starts can arise from fallback parses.
+    let start = link.0 + 1 + text.len() - text.trim_start().len();
+    let first = images.partition_point(|&(open, _)| open < start);
+    images[first..]
+        .iter()
+        .take_while(|&&(open, _)| open == start)
+        .any(|&(_, end)| {
+            end < link.1
+                && content
+                    .get(end..link.1)
+                    .is_some_and(|after| after.trim_start().starts_with(']'))
+        })
 }
 
 /// The end of the `[^id]` marker that starts at `start`. `FootnoteRef` carries
@@ -544,6 +553,7 @@ impl Rule for MD089CjkSpacing {
         let specials = collect_specials(ctx);
         let mut cursor = 0;
         let mut warnings = Vec::new();
+        let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
         for line in ctx
             .filtered_lines()
             .skip_front_matter()
@@ -583,7 +593,7 @@ impl Rule for MD089CjkSpacing {
                 if ctx.is_in_inline_code_attr(gap.insert_at) || ctx.is_in_bracketed_span(gap.insert_at) {
                     continue;
                 }
-                let column = byte_to_char_count(line.content, gap.insert_at - line_start);
+                let column = positions.column_on_line(line.line_num - 1, gap.insert_at) + 1;
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: line.line_num,

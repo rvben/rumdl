@@ -23,7 +23,7 @@ use rumdl_lib::rules::{
 };
 use rumdl_lib::rules::{
     MD014CommandsShowOutput, MD024NoDuplicateHeading, MD037NoSpaceInEmphasis, MD039NoSpaceInLinks, MD044ProperNames,
-    MD049EmphasisStyle, MD095LinkConfusables,
+    MD049EmphasisStyle, MD089CjkSpacing, MD095LinkConfusables,
 };
 use rumdl_lib::utils::emphasis_utils::{
     find_emphasis_markers, find_emphasis_spans, find_single_emphasis_spans, find_valid_emphasis_ranges,
@@ -536,6 +536,34 @@ fn link_document(padded: bool, escaped: bool) -> String {
     content
 }
 
+fn bench_md089_indexes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md089_indexes");
+    group.sample_size(10);
+    for (name, unit, expected) in [
+        (
+            "links",
+            "é日本🙂 [label](https://example.com) ![图](https://example.com/image.png) ",
+            0,
+        ),
+        ("badges", "中文[![图](img.png)](target)中文 ", 0),
+        ("mixed", "中文[label](target)中文 ![图](img.png) ", 2),
+        ("warnings", "é日本🙂 中文english ", 1),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = format!("{}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let rule = MD089CjkSpacing::default();
+            assert!(!rule.should_skip(&ctx));
+            assert_eq!(rule.check(&ctx).unwrap().len(), expected * count);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_md095_positions(c: &mut Criterion) {
     let mut group = c.benchmark_group("md095_positions");
     group.sample_size(10);
@@ -989,6 +1017,7 @@ criterion_group!(
     bench_md037_filter,
     bench_md049_filter,
     bench_md095_positions,
+    bench_md089_indexes,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,

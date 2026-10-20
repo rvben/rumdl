@@ -563,3 +563,86 @@ fn an_unclosed_math_block_is_kept_quiet_by_the_line_filter() {
     );
     assert_eq!(rule.fix(&ctx).unwrap(), content, "fix must be a no-op for {content:?}");
 }
+
+#[test]
+fn indexed_image_links_match_scalar_classification_across_flavors() {
+    let units = [
+        "中文[![图](img.png)](target)中文",
+        "中文[ \t![图](img.png) \t](target)中文",
+        "中文[\u{a0}![图](img.png)\u{2003}](target)中文",
+        "中文[![图](img.png) text](target)中文",
+        "中文[text ![图](img.png)](target)中文",
+        "中文[![一](a.png)![二](b.png)](target)中文",
+        "中文[![![inner](i.png)](outer.png)](target)中文",
+        "中文[![图][img]][dest]中文",
+        "中文[![图][]][dest]中文",
+        "中文[![图][missing]](target)中文",
+        "中文[\n![图](img.png)\n](target)中文",
+        "中文[![图](img.png)][]中文",
+        "![before](a.png) 中文[label](target) ![after](b.png)",
+        "中文[![图]()](target)中文",
+    ];
+    for ending in ["\n", "\r\n"] {
+        let content = format!(
+            "{}\n\n[img]: img.png\n[图]: img.png\n[dest]: target\n",
+            units.join("\n\n").repeat(12),
+        )
+        .replace('\n', ending);
+        for flavor in crate::format_proof::ALL_FLAVORS {
+            let ctx = LintContext::new(&content, flavor, None);
+            let images: Vec<_> = ctx
+                .images()
+                .iter()
+                .map(|image| (image.byte_offset, image.byte_end))
+                .collect();
+            assert!(images.windows(2).all(|pair| pair[0].0 <= pair[1].0), "{flavor:?}");
+            assert!(
+                images
+                    .iter()
+                    .all(|&(start, _)| !content[start..].starts_with(char::is_whitespace))
+            );
+            for link in ctx.links() {
+                let range = (link.byte_offset, link.byte_end);
+                let expected = images.iter().any(|&(start, end)| {
+                    range.0 < start
+                        && end < range.1
+                        && content
+                            .get(range.0 + 1..start)
+                            .is_some_and(|before| before.trim().is_empty())
+                        && content
+                            .get(end..range.1)
+                            .is_some_and(|after| after.trim_start().starts_with(']'))
+                });
+                assert_eq!(
+                    super::link_wraps_only_an_image(&content, range, &images),
+                    expected,
+                    "{flavor:?}: {:?}",
+                    &content[range.0..range.1]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn cached_columns_preserve_unicode_warning_spans_and_fixes() {
+    for ending in ["", "\n", "\r\n", "\r"] {
+        let unit = "é日本🙂 中文english ";
+        let content = format!("{}{ending}", unit.repeat(160));
+        let expected = content.replace("中文english", "中文 english");
+        for flavor in crate::format_proof::ALL_FLAVORS {
+            let ctx = LintContext::new(&content, flavor, None);
+            let warnings = rule().check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 160, "{flavor:?}");
+            for (warning, (offset, _)) in warnings.iter().zip(content.match_indices("english")) {
+                let (line, column) = ctx.offset_to_line_col(offset);
+                assert_eq!(
+                    (warning.line, warning.column, warning.end_line, warning.end_column),
+                    (line, column, line, column + 1)
+                );
+                assert_eq!(warning.fix.as_ref().unwrap().range, offset..offset);
+            }
+            assert_eq!(rule().fix(&ctx).unwrap(), expected, "{flavor:?}");
+        }
+    }
+}

@@ -353,6 +353,34 @@ fn test_md049_warning_filter_linear_complexity() {
     }
 }
 
+/// Image membership and warning columns must scale on long Unicode lines.
+#[test]
+fn test_md089_indexes_linear_complexity() {
+    for (name, unit, expected) in [
+        (
+            "links",
+            "é日本🙂 [label](https://example.com) ![图](https://example.com/image.png) ",
+            0,
+        ),
+        ("badges", "中文[![图](img.png)](target)中文 ", 0),
+        ("mixed", "中文[label](target)中文 ![图](img.png) ", 2),
+        ("warnings", "é日本🙂 中文english ", 1),
+    ] {
+        let rule = MD089CjkSpacing::default();
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("{}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert!(!rule.should_skip(&ctx));
+                assert_eq!(rule.check(&ctx).unwrap().len(), count * expected);
+                measure_rule_time(&rule, &content, 5)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD089 indexes {name}"), &times, 3.0);
+    }
+}
+
 /// Source positions must scale with input size on long Unicode lines.
 #[test]
 fn test_md095_source_positions_linear_complexity() {
