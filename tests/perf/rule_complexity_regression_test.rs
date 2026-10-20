@@ -471,6 +471,18 @@ fn test_md023_quoted_list_flags_linear_complexity() {
     }
 }
 
+#[test]
+fn test_md033_long_html_line_linear_complexity() {
+    let rule = MD033NoInlineHtml::default();
+    for unit in ["text <span>x</span> ", "é日本🙂 <span>x</span> "] {
+        let durations: Vec<_> = [8192, 16384, 32768]
+            .into_iter()
+            .map(|size| measure_rule_time(&rule, &unit.repeat(size), 5))
+            .collect();
+        assert_linear_complexity(&format!("MD033 {unit:?}"), &durations, 3.0);
+    }
+}
+
 // =============================================================================
 // LintContext Construction Tests
 // =============================================================================

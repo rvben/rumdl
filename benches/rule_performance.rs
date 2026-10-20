@@ -70,6 +70,27 @@ fn bench_md033(c: &mut Criterion) {
     c.bench_function("MD033 check 500 HTML tags", |b| b.iter(|| rule.check(black_box(&ctx))));
 }
 
+/// Repeated tags on one line exercise diagnostic end-column calculation.
+fn bench_md033_scaling(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md033_scaling");
+    group.sample_size(10);
+    let rule = MD033NoInlineHtml::default();
+    for count in [128, 2048, 8192, 32768] {
+        for (name, unit) in [
+            ("ascii", "text <span>x</span> "),
+            ("unicode", "é日本🙂 <span>x</span> "),
+        ] {
+            let content = unit.repeat(count);
+            let ctx = make_ctx(&content);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count);
+            group.bench_function(format!("{name}/{count}"), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
 /// Benchmark MD037 rule on a large content with emphasis
 fn bench_md037(c: &mut Criterion) {
     let mut content = String::with_capacity(50_000);
@@ -211,6 +232,7 @@ criterion_group!(
     bench_md034_scaling,
     bench_md013,
     bench_md033,
+    bench_md033_scaling,
     bench_md037,
     bench_md044,
     bench_md051,

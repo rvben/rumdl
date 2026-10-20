@@ -1252,21 +1252,27 @@ impl Rule for MD033NoInlineHtml {
                 .calculate_fix(content, &closing_tags, tag, tag_byte_start, in_html_block)
                 .map(|(range, replacement)| Fix::new(range, replacement));
 
-            // Calculate actual end line and column for multiline tags
-            // Use byte_end - 1 to get the last character position of the tag
-            let (end_line, end_col) = if html_tag.byte_end > 0 {
-                ctx.offset_to_line_col(html_tag.byte_end - 1)
-            } else {
-                (line_num, html_tag.end_col + 1)
-            };
+            // Advance from the known start instead of rescanning the line
+            // prefix for every warning. Columns count Unicode scalar values;
+            // only LF advances a source line, including within CRLF.
+            let mut end_line = line_num;
+            let mut end_column = html_tag.start_col + 1;
+            for ch in tag.chars() {
+                if ch == '\n' {
+                    end_line += 1;
+                    end_column = 1;
+                } else {
+                    end_column += 1;
+                }
+            }
 
             // Report the HTML tag
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line: line_num,
                 column: html_tag.start_col + 1, // Convert to 1-indexed
-                end_line,                       // Actual end line for multiline tags
-                end_column: end_col + 1,        // Actual end column
+                end_line,
+                end_column,
                 message: format!("Inline HTML found: {tag}"),
                 severity: Severity::Warning,
                 fix,
@@ -1379,6 +1385,43 @@ mod tests {
                         expected,
                         "{tag_name:?} from {offset} in {content:?}"
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn diagnostic_ends_match_source_positions() {
+        // Include source characters with different UTF-8 widths, combining
+        // marks, tabs, and a lone CR (only LF advances the source line).
+        let prefix = "é日本🙂e\u{301}\t\r".repeat(80);
+        for newline in ["\n", "\r\n"] {
+            for body in [
+                format!("{prefix}<span title=\"é > 🙂\">x</span> <img src=\"日本\"/>"),
+                format!("{prefix}<span\n title=\"é >\n🙂\">x</span> <br/>"),
+                format!("{prefix}<span title=\"é\r🙂\">x</span>"),
+                format!("<span title=\"first\n{prefix}last\">x</span>"),
+            ] {
+                let content = body.replace('\n', newline);
+                for flavor in crate::format_proof::ALL_FLAVORS {
+                    let ctx = LintContext::new(&content, flavor, None);
+                    let warnings = MD033NoInlineHtml::default().check(&ctx).unwrap();
+                    let tags = ctx.html_tags();
+                    assert!(!warnings.is_empty(), "{flavor:?}: {content:?}");
+                    for warning in warnings {
+                        let tag = tags
+                            .iter()
+                            .find(|tag| tag.line == warning.line && tag.start_col + 1 == warning.column)
+                            .unwrap();
+                        // Independent oracle: calculate the legacy position
+                        // from the full source rather than from the tag.
+                        let (end_line, end_col) = ctx.offset_to_line_col(tag.byte_end - 1);
+                        assert_eq!(
+                            (warning.end_line, warning.end_column),
+                            (end_line, end_col + 1),
+                            "{flavor:?}: {content:?}"
+                        );
+                    }
                 }
             }
         }
