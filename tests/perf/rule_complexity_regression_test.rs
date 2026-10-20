@@ -170,6 +170,71 @@ fn measure_context_time(content: &str, iterations: usize) -> Duration {
     times[iterations / 2]
 }
 
+#[test]
+fn test_mdx_jsx_positions_linear_complexity() {
+    let durations: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|count| {
+            let content = "é日本🙂 <span>x</span> <Card /> ".repeat(count);
+            let mut times: Vec<_> = (0..5)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+                    assert_eq!(ctx.html_tags().len(), count * 2);
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[times.len() / 2]
+        })
+        .collect();
+    assert_linear_complexity("MDX JSX positions", &durations, 3.0);
+}
+
+#[test]
+fn test_mdx_links_linear_complexity() {
+    let durations: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|count| {
+            let content = "é日本🙂 [label](https://example.com) ![图](image.png) ".repeat(count);
+            let mut times: Vec<_> = (0..5)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+                    assert_eq!(ctx.links().len(), count);
+                    assert_eq!(ctx.images().len(), count);
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[times.len() / 2]
+        })
+        .collect();
+    assert_linear_complexity("MDX links and images", &durations, 3.0);
+}
+
+/// Unmatched openers must stop at the first blocking delimiter.
+#[test]
+fn test_unmatched_emphasis_pairing_linear_complexity() {
+    for unit in ["*word ", "__word "] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = unit.repeat(count);
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert!(MD037NoSpaceInEmphasis.check(&ctx).unwrap().is_empty());
+                measure_rule_time(&MD037NoSpaceInEmphasis, &content, 5)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD037 unmatched {unit:?}"), &times, 3.0);
+    }
+    let times: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|count| measure_rule_time(&MD049EmphasisStyle::default(), &"*word ".repeat(count), 5))
+        .collect();
+    assert_linear_complexity("MD049 unmatched emphasis", &times, 3.0);
+}
+
 /// Assert linear complexity by checking growth ratios
 fn assert_linear_complexity(name: &str, durations: &[Duration], threshold: f64) {
     assert!(durations.len() >= 3, "Need at least 3 measurements for ratio check");
@@ -2046,48 +2111,7 @@ fn nested_list_table_confirmation_linear_complexity() {
     );
 }
 
-#[test]
-fn test_mdx_jsx_positions_linear_complexity() {
-    let durations: Vec<_> = [1024, 2048, 4096]
-        .into_iter()
-        .map(|count| {
-            let content = "é日本🙂 <span>x</span> <Card /> ".repeat(count);
-            let mut times: Vec<_> = (0..5)
-                .map(|_| {
-                    let start = MeasurementClock::now();
-                    let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
-                    assert_eq!(ctx.html_tags().len(), count * 2);
-                    start.elapsed()
-                })
-                .collect();
-            times.sort();
-            times[times.len() / 2]
-        })
-        .collect();
-    assert_linear_complexity("MDX JSX positions", &durations, 3.0);
-}
 
-#[test]
-fn test_mdx_links_linear_complexity() {
-    let durations: Vec<_> = [1024, 2048, 4096]
-        .into_iter()
-        .map(|count| {
-            let content = "é日本🙂 [label](https://example.com) ![图](image.png) ".repeat(count);
-            let mut times: Vec<_> = (0..5)
-                .map(|_| {
-                    let start = MeasurementClock::now();
-                    let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
-                    assert_eq!(ctx.links().len(), count);
-                    assert_eq!(ctx.images().len(), count);
-                    start.elapsed()
-                })
-                .collect();
-            times.sort();
-            times[times.len() / 2]
-        })
-        .collect();
-    assert_linear_complexity("MDX links and images", &durations, 3.0);
-}
 
 #[test]
 fn test_mdx_nested_context_linear_complexity() {

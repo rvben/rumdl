@@ -22,6 +22,9 @@ use rumdl_lib::rules::{
     MD051LinkFragments, MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks,
 };
 use rumdl_lib::rules::{MD014CommandsShowOutput, MD024NoDuplicateHeading, MD039NoSpaceInLinks, MD044ProperNames};
+use rumdl_lib::utils::emphasis_utils::{
+    find_emphasis_markers, find_emphasis_spans, find_single_emphasis_spans, find_valid_emphasis_ranges,
+};
 use rumdl_lib::utils::regex_cache::{RegexCache, get_cached_regex};
 use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin, WorkspaceIndex};
 use std::hint::black_box;
@@ -488,6 +491,31 @@ fn link_document(padded: bool, escaped: bool) -> String {
     content
 }
 
+fn bench_emphasis_pairing(c: &mut Criterion) {
+    let mut group = c.benchmark_group("emphasis_pairing");
+    group.sample_size(10);
+    for (name, unit) in [
+        ("unmatched_single", "*word "),
+        ("unmatched_strong", "__word "),
+        ("mixed_strength", "*word **word "),
+        ("literal_marker", "*foo * bar* "),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = unit.repeat(count);
+            let markers = find_emphasis_markers(&content);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_with_input(BenchmarkId::new(name, count), &content, |b, content| {
+                b.iter(|| {
+                    black_box(find_emphasis_spans(black_box(content), black_box(&markers)));
+                    black_box(find_single_emphasis_spans(black_box(content), black_box(&markers)));
+                    black_box(find_valid_emphasis_ranges(black_box(content), black_box(&markers)));
+                });
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_rules(c: &mut Criterion) {
     let commands = shell_document(false);
     let output = shell_document(true);
@@ -822,6 +850,7 @@ criterion_group!(
     bench_md057,
     bench_workspace_build,
     bench_rules,
+    bench_emphasis_pairing,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,

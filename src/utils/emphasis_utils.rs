@@ -212,58 +212,34 @@ fn find_single_emphasis_spans_with<T>(
     let mut spans = Vec::new();
     let mut used_markers = vec![false; markers.len()];
 
-    // Process markers in pairs more efficiently
     for i in 0..markers.len() {
         if used_markers[i] || markers[i].count != 1 || !can_open(&markers[i]) {
             continue;
         }
-
         let opening = &markers[i];
-
-        // Look for the nearest matching closing marker using optimized search
-        for j in (i + 1)..markers.len() {
-            if used_markers[j] {
-                continue;
-            }
-
-            let closing = &markers[j];
-
-            // Quick type and count check - only single emphasis that can close
-            if closing.marker_type == opening.marker_type && closing.count == 1 && can_close(closing) {
-                let content_start = opening.end_pos();
-                let content_end = closing.start_pos;
-
-                if content_end > content_start {
-                    let content = &line[content_start..content_end];
-
-                    // Optimized validation checks
-                    if is_valid_emphasis_content_fast(content) && is_valid_emphasis_span_fast(line, opening, closing) {
-                        // A pairing is only blocked by an intervening *viable*
-                        // delimiter (one that can itself open or close); a
-                        // transparent literal marker does not interfere, which
-                        // lets `*foo * bar*` pair its outer asterisks the way
-                        // CommonMark does.
-                        let crosses_markers = markers[i + 1..j].iter().any(|marker| {
-                            marker.marker_type == opening.marker_type
-                                && marker.count == 1
-                                && (can_open(marker) || can_close(marker))
-                        });
-
-                        if !crosses_markers {
-                            // Flanking guarantees the content is not whitespace-
-                            // padded, but keep the fields honest for callers.
-                            let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
-                            let has_trailing_space = content.ends_with(' ') || content.ends_with('\t');
-
-                            spans.push(emit(opening, closing, content, has_leading_space, has_trailing_space));
-
-                            // Mark both markers as used
-                            used_markers[i] = true;
-                            used_markers[j] = true;
-                            break;
-                        }
-                    }
-                }
+        // A viable single delimiter blocks every later candidate of this type,
+        // even when it is already used or can only open. Literal markers and
+        // strong delimiters remain transparent to this single-emphasis finder.
+        let Some(j) = (i + 1..markers.len()).find(|&j| {
+            let marker = &markers[j];
+            marker.marker_type == opening.marker_type && marker.count == 1 && (can_open(marker) || can_close(marker))
+        }) else {
+            continue;
+        };
+        let closing = &markers[j];
+        if used_markers[j] || !can_close(closing) {
+            continue;
+        }
+        let content_start = opening.end_pos();
+        let content_end = closing.start_pos;
+        if content_end > content_start {
+            let content = &line[content_start..content_end];
+            if is_valid_emphasis_content_fast(content) && is_valid_emphasis_span_fast(line, opening, closing) {
+                let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
+                let has_trailing_space = content.ends_with(' ') || content.ends_with('\t');
+                spans.push(emit(opening, closing, content, has_leading_space, has_trailing_space));
+                used_markers[i] = true;
+                used_markers[j] = true;
             }
         }
     }
@@ -293,50 +269,31 @@ fn find_emphasis_spans_with<T>(
     let mut spans = Vec::new();
     let mut used_markers = vec![false; markers.len()];
 
-    // Process markers in pairs more efficiently
     for i in 0..markers.len() {
         if used_markers[i] {
             continue;
         }
-
         let opening = &markers[i];
-
-        // Look for the nearest matching closing marker using optimized search
-        for j in (i + 1)..markers.len() {
-            if used_markers[j] {
-                continue;
-            }
-
-            let closing = &markers[j];
-
-            // Quick type and count check
-            if closing.marker_type == opening.marker_type && closing.count == opening.count {
-                let content_start = opening.end_pos();
-                let content_end = closing.start_pos;
-
-                if content_end > content_start {
-                    let content = &line[content_start..content_end];
-
-                    // Optimized validation checks
-                    if is_valid_emphasis_content_fast(content) && is_valid_emphasis_span_fast(line, opening, closing) {
-                        // Quick check for crossing markers
-                        let crosses_markers = markers[i + 1..j]
-                            .iter()
-                            .any(|marker| marker.marker_type == opening.marker_type);
-
-                        if !crosses_markers {
-                            let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
-                            let has_trailing_space = content.ends_with(' ') || content.ends_with('\t');
-
-                            spans.push(emit(opening, closing, content, has_leading_space, has_trailing_space));
-
-                            // Mark both markers as used
-                            used_markers[i] = true;
-                            used_markers[j] = true;
-                            break;
-                        }
-                    }
-                }
+        // Every marker of this type blocks later candidates, regardless of
+        // strength or whether it has already been paired. Only the first can
+        // close this opener without crossing another marker of the same type.
+        let Some(j) = (i + 1..markers.len()).find(|&j| markers[j].marker_type == opening.marker_type) else {
+            continue;
+        };
+        let closing = &markers[j];
+        if used_markers[j] || closing.count != opening.count {
+            continue;
+        }
+        let content_start = opening.end_pos();
+        let content_end = closing.start_pos;
+        if content_end > content_start {
+            let content = &line[content_start..content_end];
+            if is_valid_emphasis_content_fast(content) && is_valid_emphasis_span_fast(line, opening, closing) {
+                let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
+                let has_trailing_space = content.ends_with(' ') || content.ends_with('\t');
+                spans.push(emit(opening, closing, content, has_leading_space, has_trailing_space));
+                used_markers[i] = true;
+                used_markers[j] = true;
             }
         }
     }
@@ -375,39 +332,27 @@ pub fn find_valid_emphasis_ranges(line: &str, markers: &[EmphasisMarker]) -> Vec
         if used[i] || !can_open(&markers[i]) {
             continue;
         }
-
         let opening = &markers[i];
-
-        for j in (i + 1)..markers.len() {
-            if used[j] {
-                continue;
-            }
-
-            let closing = &markers[j];
-
-            // Same marker run (type and strength) that can validly close.
-            if closing.marker_type == opening.marker_type && closing.count == opening.count && can_close(closing) {
-                let content_start = opening.end_pos();
-                let content_end = closing.start_pos;
-
-                if content_end > content_start {
-                    let content = &line[content_start..content_end];
-
-                    if is_valid_emphasis_content_fast(content) && is_valid_emphasis_span_fast(line, opening, closing) {
-                        // Only an intervening *viable* delimiter of the same
-                        // type blocks the pairing; transparent literals do not.
-                        let crosses = markers[i + 1..j]
-                            .iter()
-                            .any(|m| m.marker_type == opening.marker_type && (can_open(m) || can_close(m)));
-
-                        if !crosses {
-                            ranges.push((opening.start_pos, closing.end_pos()));
-                            used[i] = true;
-                            used[j] = true;
-                            break;
-                        }
-                    }
-                }
+        // Unlike the single-emphasis finder, any viable strength blocks later
+        // candidates. Whitespace-flanked literal markers remain transparent.
+        let Some(j) = (i + 1..markers.len()).find(|&j| {
+            let marker = &markers[j];
+            marker.marker_type == opening.marker_type && (can_open(marker) || can_close(marker))
+        }) else {
+            continue;
+        };
+        let closing = &markers[j];
+        if used[j] || closing.count != opening.count || !can_close(closing) {
+            continue;
+        }
+        let content_start = opening.end_pos();
+        let content_end = closing.start_pos;
+        if content_end > content_start {
+            let content = &line[content_start..content_end];
+            if is_valid_emphasis_content_fast(content) && is_valid_emphasis_span_fast(line, opening, closing) {
+                ranges.push((opening.start_pos, closing.end_pos()));
+                used[i] = true;
+                used[j] = true;
             }
         }
     }
@@ -703,3 +648,6 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod pairing_tests;
