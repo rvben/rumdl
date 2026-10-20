@@ -437,6 +437,31 @@ fn test_md057_warning_columns_linear_complexity() {
     }
 }
 
+/// Fence candidates in list continuations must share block lookups, including
+/// both delimiters and compound-fix endpoints.
+#[test]
+fn test_md077_fence_lookup_linear_complexity() {
+    let rule = MD077ListContinuationIndent::default();
+    for (flavor, unit) in [
+        (MarkdownFlavor::Standard, "- Item\n\n ```\n code\n ```\n\n"),
+        (MarkdownFlavor::MkDocs, "1. Item\n\n   ```toml\n   key = 1\n   ```\n\n"),
+    ] {
+        let times: Vec<_> = [2048, 4096, 8192]
+            .into_iter()
+            .map(|count| {
+                let content = unit.repeat(count);
+                let ctx = LintContext::new(&content, flavor, None);
+                assert!(!rule.should_skip(&ctx));
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), count);
+                assert!(warnings.iter().all(|warning| warning.fix.is_some()));
+                measure_rule_time_with_context(&rule, &ctx, 7)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD077 {flavor:?} fences"), &times, 3.0);
+    }
+}
+
 /// Opening fences must not each search the document's entire block list.
 #[test]
 fn test_md070_fence_lookup_linear_complexity() {

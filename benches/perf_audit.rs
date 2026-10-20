@@ -20,6 +20,7 @@ use rumdl_lib::rules::{
     AbsoluteLinksOption, MD011NoReversedLinks, MD013Config, MD013LineLength, MD018NoMissingSpaceAtx,
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
     MD051LinkFragments, MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks, MD070NestedCodeFence,
+    MD077ListContinuationIndent,
 };
 use rumdl_lib::rules::{
     MD014CommandsShowOutput, MD024NoDuplicateHeading, MD037NoSpaceInEmphasis, MD039NoSpaceInLinks, MD044ProperNames,
@@ -597,6 +598,33 @@ fn bench_md057_positions(c: &mut Criterion) {
             group.throughput(Throughput::Bytes(content.len() as u64));
             group.bench_function(BenchmarkId::new(name, count), |b| {
                 b.iter(|| rule.check(black_box(&ctx)).unwrap())
+            });
+        }
+    }
+    group.finish();
+}
+
+fn bench_md077_fence_lookup(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md077_fence_lookup");
+    group.sample_size(10);
+    let rule = MD077ListContinuationIndent::default();
+    for (name, flavor, unit) in [
+        ("standard", MarkdownFlavor::Standard, "- Item\n\n ```\n code\n ```\n\n"),
+        (
+            "mkdocs",
+            MarkdownFlavor::MkDocs,
+            "1. Item\n\n   ```toml\n   key = 1\n   ```\n\n",
+        ),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = unit.repeat(count);
+            let ctx = LintContext::new(&content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), count);
+            assert!(warnings.iter().all(|warning| warning.fix.is_some()));
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
             });
         }
     }
@@ -1217,6 +1245,7 @@ criterion_group!(
     bench_md084_fixes,
     bench_md093_positions,
     bench_md070_fence_lookup,
+    bench_md077_fence_lookup,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,

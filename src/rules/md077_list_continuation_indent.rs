@@ -159,12 +159,7 @@ impl MD077ListContinuationIndent {
     /// Whether a line is the delimiter of a fenced code block. Inside an
     /// indented code block, fence-like text is code content.
     fn is_fence_delimiter(ctx: &NativeListSource<'_, '_>, info: &LineInfo, trimmed: &str) -> bool {
-        let line_end = info.byte_offset + info.byte_len;
-        Self::is_code_fence(trimmed)
-            && ctx
-                .code_block_details
-                .iter()
-                .any(|b| b.is_fenced && b.start <= line_end && info.byte_offset < b.end)
+        Self::is_code_fence(trimmed) && ctx.fenced_block_overlaps_line(info)
     }
 
     /// Column of the `>` that opens a blockquote deeper than `depth`, if the
@@ -229,11 +224,8 @@ impl MD077ListContinuationIndent {
         if !Self::is_code_fence(trimmed) {
             return None;
         }
-        let line_end = info.byte_offset + info.byte_len;
-        ctx.code_block_details
-            .iter()
-            .find(|b| b.is_fenced && info.byte_offset <= b.start && b.start <= line_end)
-            .map(|b| ctx.offset_to_line_col(b.end.saturating_sub(1).max(b.start)).0)
+        ctx.fenced_block_opened_on_line(info)
+            .map(|b| ctx.line_number_at_offset(b.end.saturating_sub(1).max(b.start)))
     }
 
     /// Build an atomic fix that reindents a fenced code block from its opener

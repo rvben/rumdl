@@ -32,6 +32,7 @@ pub(crate) struct NativeListSource<'a, 's> {
     pub(crate) lines: &'a [LineInfo],
     pub(crate) list_blocks: &'a [ListBlock],
     pub(crate) code_block_details: &'a [CodeBlockDetail],
+    fenced_blocks: OnceLock<FencedBlockIndex>,
     html_block_lines: &'a [std::ops::Range<usize>],
     offsets: &'a [usize],
     inline_code_ranges: &'a [(usize, usize)],
@@ -44,6 +45,17 @@ pub(crate) struct NativeListSource<'a, 's> {
     parser_has_math: bool,
 }
 
+/// Per-view fence queries, initialized only when a continuation candidate looks
+/// like a fence. Neither ordinary prose nor other users of this view pay for
+/// indexing the blocks.
+#[derive(Default)]
+struct FencedBlockIndex {
+    /// First fenced detail opening on each line, preserving source-vector order.
+    openers: std::collections::HashMap<usize, usize>,
+    /// Sorted starts paired with the largest end seen up to that start.
+    ranges: Vec<(usize, usize)>,
+}
+
 impl NativePreparedStructure<'_> {
     #[cfg(test)]
     pub(crate) fn list_source(&self) -> NativeListSource<'_, '_> {
@@ -53,6 +65,7 @@ impl NativePreparedStructure<'_> {
             lines: &self.lines,
             list_blocks: &self.list_blocks,
             code_block_details: &self.code_block_details,
+            fenced_blocks: OnceLock::new(),
             html_block_lines: &self.html_block_lines,
             offsets: &self.line_offsets,
             inline_code_ranges: &self.inline_code_ranges,
@@ -75,6 +88,7 @@ impl LintContext<'_> {
             lines: &self.lines,
             list_blocks: &self.list_blocks,
             code_block_details: &self.code_block_details,
+            fenced_blocks: OnceLock::new(),
             html_block_lines: &self.html_block_lines,
             offsets: &self.line_offsets,
             inline_code_ranges: &self.inline_code_ranges,
@@ -116,6 +130,48 @@ impl NativeListSource<'_, '_> {
         offset_to_line_col(self.content, self.offsets, offset)
     }
 
+    pub(crate) fn line_number_at_offset(&self, offset: usize) -> usize {
+        self.offsets.partition_point(|&start| start <= offset)
+    }
+
+    fn fenced_block_index(&self) -> &FencedBlockIndex {
+        self.fenced_blocks.get_or_init(|| {
+            let mut index = FencedBlockIndex::default();
+            for (detail_idx, detail) in self.code_block_details.iter().enumerate() {
+                if !detail.is_fenced {
+                    continue;
+                }
+                index.ranges.push((detail.start, detail.end));
+                if let Some(info) = self.line_info(self.line_number_at_offset(detail.start))
+                    && info.byte_offset <= detail.start
+                    && detail.start <= info.byte_offset + info.byte_len
+                {
+                    index.openers.entry(info.byte_offset).or_insert(detail_idx);
+                }
+            }
+            index.ranges.sort_unstable_by_key(|&(start, _)| start);
+            let mut max_end = 0;
+            for (_, end) in &mut index.ranges {
+                max_end = max_end.max(*end);
+                *end = max_end;
+            }
+            index
+        })
+    }
+
+    pub(crate) fn fenced_block_overlaps_line(&self, info: &LineInfo) -> bool {
+        let ranges = &self.fenced_block_index().ranges;
+        let after = ranges.partition_point(|&(start, _)| start <= info.byte_offset + info.byte_len);
+        after > 0 && ranges[after - 1].1 > info.byte_offset
+    }
+
+    pub(crate) fn fenced_block_opened_on_line(&self, info: &LineInfo) -> Option<&CodeBlockDetail> {
+        self.fenced_block_index()
+            .openers
+            .get(&info.byte_offset)
+            .map(|&index| &self.code_block_details[index])
+    }
+
     pub(crate) fn front_matter_end_line(&self) -> usize {
         self.front_matter_end
     }
@@ -152,6 +208,66 @@ mod tests {
     use super::*;
     use crate::rule::Rule;
     use crate::rules::{ContinuationStyle, MD077ListContinuationIndent};
+
+    #[test]
+    fn indexed_fence_queries_match_block_scans() {
+        for content in ["", "\n", "é日本🙂\r\n\n```rust\nx\n```", "```\r\nx\r\n", "```\nx\n"] {
+            let mut ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            // Exercise overlapping, empty, reversed, duplicate and out-of-range
+            // records, without assuming parser order or UTF-8 boundaries.
+            for variant in 0..24 {
+                ctx.code_block_details = (0..8)
+                    .map(|i| {
+                        let start = if i == 7 {
+                            usize::MAX
+                        } else {
+                            (i / 2 * 7 + variant * 13) % (content.len() + 3)
+                        };
+                        let end = (i * 11 + variant * 17) % (content.len() + 5);
+                        CodeBlockDetail {
+                            start,
+                            end: if variant == 1 { 0 } else { end },
+                            is_fenced: variant != 0 && i % 3 != 0,
+                            info_string: i.to_string(),
+                            content_column: None,
+                            closed: i % 2 == 0,
+                        }
+                    })
+                    .collect();
+                for order in 0..3 {
+                    match order {
+                        1 => ctx.code_block_details.reverse(),
+                        2 => ctx.code_block_details.rotate_left(3),
+                        _ => {}
+                    }
+                    let source = ctx.native_list_source();
+                    for info in &ctx.lines {
+                        let line_end = info.byte_offset + info.byte_len;
+                        let overlaps = ctx
+                            .code_block_details
+                            .iter()
+                            .any(|b| b.is_fenced && b.start <= line_end && info.byte_offset < b.end);
+                        assert_eq!(source.fenced_block_overlaps_line(info), overlaps, "{content:?}");
+                        let opener = ctx
+                            .code_block_details
+                            .iter()
+                            .find(|b| b.is_fenced && info.byte_offset <= b.start && b.start <= line_end);
+                        assert_eq!(
+                            source.fenced_block_opened_on_line(info).map(std::ptr::from_ref),
+                            opener.map(std::ptr::from_ref),
+                            "{content:?}"
+                        );
+                    }
+                    for offset in (0..=content.len() + 1).chain(std::iter::once(usize::MAX)) {
+                        assert_eq!(
+                            source.line_number_at_offset(offset),
+                            source.offset_to_line_col(offset).0
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     fn compare(source: &str, flavor: MarkdownFlavor) {
         let (prepared, finish) = LintContext::prepare_native_structure(source, flavor, None, None, None);
