@@ -303,6 +303,8 @@ impl MD030ListMarkerSpace {
             drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
         }
 
+        let mut previous_indented_query = None;
+
         // Second pass: Detect list-like patterns the parser didn't recognize
         // This handles cases like "1.Text" where there's no space after the marker
         for (line_idx, line) in lines.iter().enumerate() {
@@ -337,7 +339,7 @@ impl MD030ListMarkerSpace {
             }
 
             // Skip indented code blocks
-            if self.is_indented_code_block(line, line_idx, lines) {
+            if Self::is_indented_code_block(line, line_idx, lines, &mut previous_indented_query) {
                 continue;
             }
 
@@ -565,50 +567,26 @@ impl MD030ListMarkerSpace {
         None
     }
 
-    /// Check if a line is part of an indented code block (4+ columns with blank line before)
-    fn is_indented_code_block(&self, line: &str, line_idx: usize, lines: &[&str]) -> bool {
-        // Must have 4+ columns of indentation (accounting for tab expansion)
+    /// Check if an indented run follows a blank line. Queries arrive in source
+    /// order, so a later query only searches the lines since the previous one.
+    fn is_indented_code_block(
+        line: &str,
+        line_idx: usize,
+        lines: &[&str],
+        previous_query: &mut Option<(usize, bool)>,
+    ) -> bool {
         if calculate_indentation_width_default(line) < 4 {
             return false;
         }
 
-        // If it's the first line, it's not an indented code block
-        if line_idx == 0 {
-            return false;
-        }
-
-        // Check if there's a blank line before this line or before the start of the indented block
-        if self.has_blank_line_before_indented_block(line_idx, lines) {
-            return true;
-        }
-
-        false
-    }
-
-    /// Check if there's a blank line before the start of an indented block
-    fn has_blank_line_before_indented_block(&self, line_idx: usize, lines: &[&str]) -> bool {
-        // Walk backwards to find the start of the indented block
-        let mut current_idx = line_idx;
-
-        // Find the first line in this indented block
-        while current_idx > 0 {
-            let current_line = lines[current_idx];
-            let prev_line = lines[current_idx - 1];
-
-            // If current line is not indented (< 4 columns), we've gone too far
-            if calculate_indentation_width_default(current_line) < 4 {
-                break;
-            }
-
-            // If previous line is not indented, check if it's blank
-            if calculate_indentation_width_default(prev_line) < 4 {
-                return prev_line.trim().is_empty();
-            }
-
-            current_idx -= 1;
-        }
-
-        false
+        let (start, previous_result) = previous_query.map_or((0, false), |(index, result)| (index + 1, result));
+        let result = lines[start..line_idx]
+            .iter()
+            .rev()
+            .find(|line| calculate_indentation_width_default(line) < 4)
+            .map_or(previous_result, |line| line.trim().is_empty());
+        *previous_query = Some((line_idx, result));
+        result
     }
 }
 
@@ -617,6 +595,62 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use indoc::indoc;
+
+    #[test]
+    fn test_indented_block_cache_matches_backward_scan() {
+        fn original_scan(lines: &[&str], mut index: usize) -> bool {
+            while index > 0 {
+                if calculate_indentation_width_default(lines[index]) < 4 {
+                    break;
+                }
+                if calculate_indentation_width_default(lines[index - 1]) < 4 {
+                    return lines[index - 1].trim().is_empty();
+                }
+                index -= 1;
+            }
+            false
+        }
+
+        let variants = [
+            "",
+            " ",
+            "    ",
+            "\t",
+            "paragraph",
+            "   2.bad",
+            "    2.bad",
+            "\t2.bad",
+            "\u{a0}",
+        ];
+        for mut combination in 0..variants.len().pow(4) {
+            let lines: Vec<_> = (0..4)
+                .map(|_| {
+                    let line = variants[combination % variants.len()];
+                    combination /= variants.len();
+                    line
+                })
+                .collect();
+            // The caller skips recognized markers and literal blocks. Exercise
+            // gaps between queries as well as querying every line.
+            for step in 1..=3 {
+                for first in 0..step {
+                    let mut previous_query = None;
+                    for index in (first..lines.len()).step_by(step) {
+                        assert_eq!(
+                            MD030ListMarkerSpace::is_indented_code_block(
+                                lines[index],
+                                index,
+                                &lines,
+                                &mut previous_query,
+                            ),
+                            original_scan(&lines, index),
+                            "lines={lines:?}, index={index}, step={step}",
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     /// Assert that running `fix()` on content with violations produces output that
     /// passes `check()` with zero remaining violations.

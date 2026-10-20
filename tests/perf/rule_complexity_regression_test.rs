@@ -650,6 +650,32 @@ fn test_md077_fence_lookup_linear_complexity() {
     }
 }
 
+/// Unrecognized numeric text must not rescan the same indented run per line.
+#[test]
+fn test_md030_indented_fallback_linear_complexity() {
+    let rule = MD030ListMarkerSpace::default();
+    for (name, unit) in [("spaces", "    2.bad\n"), ("tabs", "\t2.bad\n")] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("- Root\n{}", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert!(rule.check(&ctx).unwrap().is_empty());
+                let mut samples: Vec<_> = (0..7)
+                    .map(|_| {
+                        let start = MeasurementClock::now();
+                        std::hint::black_box(rule.check(&ctx).unwrap());
+                        start.elapsed()
+                    })
+                    .collect();
+                samples.sort();
+                samples[3]
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD030 indented fallback {name}"), &times, 3.0);
+    }
+}
+
 /// HTML tags in headings must not each search every opaque code/comment range.
 #[test]
 fn test_heading_anchor_lookup_linear_complexity() {

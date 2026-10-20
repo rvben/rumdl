@@ -767,6 +767,26 @@ fn bench_md087_suppressions(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_md030_indented_fallback(c: &mut Criterion) {
+    use rumdl_lib::rules::MD030ListMarkerSpace;
+
+    let rule = MD030ListMarkerSpace::default();
+    let mut group = c.benchmark_group("md030_indented_fallback");
+    group.sample_size(10);
+    for (name, unit) in [("spaces", "    2.bad\n"), ("tabs", "\t2.bad\n")] {
+        for count in [128, 1024, 4096] {
+            let content = format!("- Root\n{}", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty());
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| black_box(rule.check(black_box(&ctx)).unwrap()));
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_heading_anchor_lookup(c: &mut Criterion) {
     use rumdl_lib::utils::header_id_utils::{extract_heading_text, extract_html_anchor_ids};
 
@@ -1542,6 +1562,7 @@ criterion_group!(
     bench_list_code_context,
     bench_md063_heading_regions,
     bench_heading_anchor_lookup,
+    bench_md030_indented_fallback,
     bench_md087_suppressions,
     bench_directive_code_ranges,
     bench_lint,
