@@ -23,7 +23,7 @@ use rumdl_lib::rules::{
 };
 use rumdl_lib::rules::{
     MD014CommandsShowOutput, MD024NoDuplicateHeading, MD037NoSpaceInEmphasis, MD039NoSpaceInLinks, MD044ProperNames,
-    MD049EmphasisStyle, MD089CjkSpacing, MD095LinkConfusables,
+    MD049EmphasisStyle, MD084InvisibleCharacters, MD089CjkSpacing, MD095LinkConfusables,
 };
 use rumdl_lib::utils::emphasis_utils::{
     find_emphasis_markers, find_emphasis_spans, find_single_emphasis_spans, find_valid_emphasis_ranges,
@@ -534,6 +534,47 @@ fn link_document(padded: bool, escaped: bool) -> String {
         ));
     }
     content
+}
+
+fn bench_md084_fixes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md084_fixes");
+    group.sample_size(10);
+    for strict in [false, true] {
+        let mut config = rumdl_lib::config::Config::default();
+        config
+            .rules
+            .entry("MD084".to_string())
+            .or_default()
+            .values
+            .insert("strict".to_string(), strict.into());
+        let rule = MD084InvisibleCharacters::from_config(&config);
+        for (name, unit, expected) in [
+            ("invisible", "é日本🙂 x\u{200b} y ", 1),
+            ("tone-mark", "é日本🙂 x\u{0340} y ", 1),
+            ("clusters", "é日本🙂 x\u{200b}\u{200b}y ", if strict { 2 } else { 1 }),
+            ("nonfixable", "é日本🙂 x\u{fffc}y ", 1),
+            ("sparse", "é日本🙂 text ", 0),
+        ] {
+            for count in [128, 1024, 4096] {
+                let suffix = if name == "sparse" { " \u{200b}" } else { "" };
+                let content = format!("{}{suffix}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert!(!rule.should_skip(&ctx));
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), expected * count + usize::from(name == "sparse"));
+                assert!(
+                    warnings
+                        .iter()
+                        .all(|warning| warning.fix.is_some() == (name != "nonfixable"))
+                );
+                group.throughput(Throughput::Bytes(content.len() as u64));
+                group.bench_function(BenchmarkId::new(format!("{name}/strict={strict}"), count), |b| {
+                    b.iter(|| rule.check(black_box(&ctx)).unwrap());
+                });
+            }
+        }
+    }
+    group.finish();
 }
 
 fn bench_heading_link_ranges(c: &mut Criterion) {
@@ -1057,6 +1098,7 @@ criterion_group!(
     bench_md095_positions,
     bench_md089_indexes,
     bench_heading_link_ranges,
+    bench_md084_fixes,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,

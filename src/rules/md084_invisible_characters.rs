@@ -20,6 +20,45 @@ use crate::lint_context::LintContext;
 use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::unicode;
 use md084_config::MD084Config;
+use std::cell::OnceCell;
+use std::ops::Range;
+
+const FIX_CHECKPOINT_CHARS: usize = 256;
+
+/// Sparse byte checkpoints for this line's character-indexed findings. Build
+/// once on the first fix; lines with no fixable findings need no allocation.
+struct LineFixSource<'a> {
+    line: usize,
+    byte_start: usize,
+    chars: &'a [char],
+    byte_offsets: OnceCell<Vec<usize>>,
+}
+
+impl LineFixSource<'_> {
+    /// Every caller supplies an in-bounds character span from this line.
+    fn byte_range(&self, column: usize, length: usize) -> Range<usize> {
+        let offsets = self.byte_offsets.get_or_init(|| {
+            let mut byte = self.byte_start;
+            let mut checkpoints = Vec::with_capacity(self.chars.len() / FIX_CHECKPOINT_CHARS + 2);
+            checkpoints.push(byte);
+            for chunk in self.chars.chunks(FIX_CHECKPOINT_CHARS) {
+                byte += chunk.iter().map(|c| c.len_utf8()).sum::<usize>();
+                checkpoints.push(byte);
+            }
+            checkpoints
+        });
+        let byte_at = |index: usize| {
+            let checkpoint = index / FIX_CHECKPOINT_CHARS;
+            offsets[checkpoint]
+                + self.chars[checkpoint * FIX_CHECKPOINT_CHARS..index]
+                    .iter()
+                    .map(|c| c.len_utf8())
+                    .sum::<usize>()
+        };
+        let start = column - 1;
+        byte_at(start)..byte_at(start + length)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct MD084InvisibleCharacters {
@@ -81,12 +120,13 @@ impl MD084InvisibleCharacters {
     /// A code point flagged by one of the two sets above, with the message that is
     /// true of it and the replacement that preserves the text, if one exists.
     fn markup_finding(c: char) -> Option<(String, Option<String>)> {
-        let codepoint = unicode::format_codepoint(c);
-        if unicode::is_deprecated_char(c) {
-            return Some((format!("Deprecated Unicode code point {codepoint} detected"), None));
-        }
-        if !unicode::is_unsuitable_for_markup_char(c) {
+        let deprecated = unicode::is_deprecated_char(c);
+        if !deprecated && !unicode::is_unsuitable_for_markup_char(c) {
             return None;
+        }
+        let codepoint = unicode::format_codepoint(c);
+        if deprecated {
+            return Some((format!("Deprecated Unicode code point {codepoint} detected"), None));
         }
         // The tone marks are canonical singletons: every normalization form already
         // rewrites them this way, so the substitution cannot change what renders.
@@ -178,25 +218,19 @@ impl MD084InvisibleCharacters {
     #[inline]
     fn build_warning(
         &self,
-        ctx: &LintContext,
-        line: usize,
+        source: &LineFixSource,
         start_col: usize,
         len_chars: usize,
         message: String,
         replacement: Option<String>,
     ) -> LintWarning {
-        let fix = replacement.map(|replacement| {
-            Fix::new(
-                ctx.line_column_byte_range_with_length(line, start_col, len_chars),
-                replacement,
-            )
-        });
+        let fix = replacement.map(|replacement| Fix::new(source.byte_range(start_col, len_chars), replacement));
 
         LintWarning {
             rule_name: Some(self.name().to_string()),
-            line,
+            line: source.line,
             column: start_col,
-            end_line: line,
+            end_line: source.line,
             end_column: start_col + len_chars,
             severity: Severity::Warning,
             message,
@@ -242,6 +276,13 @@ impl Rule for MD084InvisibleCharacters {
                 continue;
             }
 
+            let source = LineFixSource {
+                line: line_num,
+                byte_start: ctx.line_offsets[line_idx],
+                chars: &chars,
+                byte_offsets: OnceCell::new(),
+            };
+
             // Quick return for strict mode: flag any invisible character that is neither
             // allow-listed nor a line ending. Strict widens which hidden characters are
             // worth reporting, which is a judgment the allow list already lets users
@@ -252,8 +293,7 @@ impl Rule for MD084InvisibleCharacters {
                         None
                     } else if unicode::is_invisible_char(c) {
                         Some(self.build_warning(
-                            ctx,
-                            line_num,
+                            &source,
                             i + 1,
                             1,
                             format!(
@@ -263,9 +303,8 @@ impl Rule for MD084InvisibleCharacters {
                             Some(String::new()),
                         ))
                     } else {
-                        Self::markup_finding(c).map(|(message, replacement)| {
-                            self.build_warning(ctx, line_num, i + 1, 1, message, replacement)
-                        })
+                        Self::markup_finding(c)
+                            .map(|(message, replacement)| self.build_warning(&source, i + 1, 1, message, replacement))
                     }
                 }));
                 continue;
@@ -304,8 +343,7 @@ impl Rule for MD084InvisibleCharacters {
                         if !stretch[0] {
                             flagged[start..start + stretch_len].fill(true);
                             warnings.push(self.build_warning(
-                                ctx,
-                                line_num,
+                                &source,
                                 start + 1,
                                 stretch_len,
                                 Self::cluster_message(stretch_len, chars[start]),
@@ -328,8 +366,7 @@ impl Rule for MD084InvisibleCharacters {
                 if i == 0 || i == chars.len() - 1 {
                     flagged[i] = true;
                     warnings.push(self.build_warning(
-                        ctx,
-                        line_num,
+                        &source,
                         i + 1,
                         1,
                         format!(
@@ -347,8 +384,7 @@ impl Rule for MD084InvisibleCharacters {
                 if chars[i - 1].is_whitespace() || chars[i + 1].is_whitespace() {
                     flagged[i] = true;
                     warnings.push(self.build_warning(
-                        ctx,
-                        line_num,
+                        &source,
                         i + 1,
                         1,
                         format!(
@@ -373,7 +409,7 @@ impl Rule for MD084InvisibleCharacters {
                     continue;
                 };
                 flagged[i] = true;
-                warnings.push(self.build_warning(ctx, line_num, i + 1, 1, message, replacement));
+                warnings.push(self.build_warning(&source, i + 1, 1, message, replacement));
             }
         }
 
@@ -438,6 +474,88 @@ mod tests {
 
     fn fix(content: &str) -> String {
         fix_with_config(content, false, "")
+    }
+
+    #[test]
+    fn cached_byte_boundaries_match_scalar_ranges() {
+        for content in ["", "\n", "é日本🙂\r\n\nlast\r", "a\u{200b}\u{200d}⚠️\n日本\u{0340}"] {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            for (line_idx, line) in ctx.raw_lines().iter().enumerate() {
+                let chars: Vec<_> = line.chars().collect();
+                let source = LineFixSource {
+                    line: line_idx + 1,
+                    byte_start: ctx.line_offsets[line_idx],
+                    chars: &chars,
+                    byte_offsets: OnceCell::new(),
+                };
+                for start in (0..=chars.len()).rev() {
+                    for len in 0..=chars.len() - start {
+                        assert_eq!(
+                            source.byte_range(start + 1, len),
+                            ctx.line_column_byte_range_with_length(line_idx + 1, start + 1, len)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sparse_fix_checkpoints_match_scalar_ranges_in_any_order() {
+        for repeats in [64, 160] {
+            let content = format!("first\r\n{}", "aé日🙂".repeat(repeats));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let chars: Vec<_> = ctx.raw_lines()[1].chars().collect();
+            let source = LineFixSource {
+                line: 2,
+                byte_start: ctx.line_offsets[1],
+                chars: &chars,
+                byte_offsets: OnceCell::new(),
+            };
+            for start in (0..=chars.len()).rev() {
+                for len in [0, 1.min(chars.len() - start), chars.len() - start] {
+                    assert_eq!(
+                        source.byte_range(start + 1, len),
+                        ctx.line_column_byte_range_with_length(2, start + 1, len)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cached_fix_ranges_preserve_unicode_exceptions_and_line_endings() {
+        let unit = "\u{200b} é日本🙂 x\u{200b}\u{200b} y\u{0340} z\u{206a} ⚠️ 🏳️‍🌈 ";
+        for ending in ["\n", "\r\n", "\r"] {
+            let content = format!("{}{ending}{}\u{200b}", unit.repeat(48), unit.repeat(48));
+            for flavor in crate::format_proof::ALL_FLAVORS {
+                let ctx = LintContext::new(&content, flavor, None);
+                for strict in [false, true] {
+                    for allow in ["", "\u{200b}\u{0340}"] {
+                        let rule = MD084InvisibleCharacters::from_config_struct(MD084Config {
+                            strict,
+                            allow: allow.chars().collect(),
+                        });
+                        let warnings = rule.check(&ctx).unwrap();
+                        assert!(!warnings.is_empty());
+                        assert!(warnings.iter().any(|warning| warning.fix.is_some()));
+                        for warning in warnings {
+                            if let Some(fix) = warning.fix {
+                                assert_eq!(
+                                    fix.range,
+                                    ctx.line_column_byte_range_with_length(
+                                        warning.line,
+                                        warning.column,
+                                        warning.end_column - warning.column
+                                    ),
+                                    "{flavor:?}, strict={strict}, allow={allow:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

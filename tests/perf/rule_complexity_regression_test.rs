@@ -108,11 +108,11 @@ fn measurement_clock_excludes_other_test_threads() {
 }
 
 /// Run with warm-up and multiple iterations for stable measurements
-fn measure_rule_time<R: Rule>(rule: &R, content: &str, iterations: usize) -> Duration {
+fn measure_rule_time<R: Rule + ?Sized>(rule: &R, content: &str, iterations: usize) -> Duration {
     measure_rule_time_for_flavor(rule, content, MarkdownFlavor::Standard, iterations)
 }
 
-fn measure_rule_time_for_flavor<R: Rule>(
+fn measure_rule_time_for_flavor<R: Rule + ?Sized>(
     rule: &R,
     content: &str,
     flavor: MarkdownFlavor,
@@ -350,6 +350,47 @@ fn test_md049_warning_filter_linear_complexity() {
             })
             .collect();
         assert_linear_complexity(&format!("MD049 filter {flavor:?} {unit:?}"), &times, 3.0);
+    }
+}
+
+/// Building fixes must not rescan a Unicode line for every warning.
+#[test]
+fn test_md084_fix_ranges_linear_complexity() {
+    for strict in [false, true] {
+        let mut config = rumdl_lib::config::Config::default();
+        config
+            .rules
+            .entry("MD084".to_string())
+            .or_default()
+            .values
+            .insert("strict".to_string(), strict.into());
+        let rule = MD084InvisibleCharacters::from_config(&config);
+        for (name, unit, expected) in [
+            ("invisible", "é日本🙂 x\u{200b} y ", 1),
+            ("tone-mark", "é日本🙂 x\u{0340} y ", 1),
+            ("clusters", "é日本🙂 x\u{200b}\u{200b}y ", if strict { 2 } else { 1 }),
+            ("nonfixable", "é日本🙂 x\u{fffc}y ", 1),
+            ("sparse", "é日本🙂 text ", 0),
+        ] {
+            let times: Vec<_> = [1024, 2048, 4096]
+                .into_iter()
+                .map(|count| {
+                    let suffix = if name == "sparse" { " \u{200b}" } else { "" };
+                    let content = format!("{}{suffix}\n", unit.repeat(count));
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    assert!(!rule.should_skip(&ctx));
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), expected * count + usize::from(name == "sparse"));
+                    assert!(
+                        warnings
+                            .iter()
+                            .all(|warning| warning.fix.is_some() == (name != "nonfixable"))
+                    );
+                    measure_rule_time(rule.as_ref(), &content, 5)
+                })
+                .collect();
+            assert_linear_complexity(&format!("MD084 {name} strict={strict}"), &times, 3.0);
+        }
     }
 }
 
