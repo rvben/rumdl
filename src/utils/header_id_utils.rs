@@ -247,17 +247,30 @@ fn display_text(slug_text: &str, seams: &[usize]) -> String {
     if seams.is_empty() {
         return slug_text.trim().to_string();
     }
-    let mut text = slug_text.to_string();
+    let bytes = slug_text.as_bytes();
+    let mut reversed = Vec::with_capacity(bytes.len());
+    let mut end = bytes.len();
+    // Seams are source-ordered and may repeat for adjacent anchors. Build from
+    // the right so each seam sees the suffix left by the seams after it, without
+    // shifting that suffix every time a blank is removed.
     for &seam in seams.iter().rev() {
-        if seam == 0 || seam >= text.len() {
+        if seam == 0 || seam >= bytes.len() {
             continue;
         }
+        reversed.extend(bytes[seam..end].iter().rev());
+        end = seam;
         let is_blank = |byte: u8| matches!(byte, b' ' | b'\t');
-        if is_blank(text.as_bytes()[seam - 1]) && is_blank(text.as_bytes()[seam]) {
-            text.remove(seam);
+        if is_blank(bytes[seam - 1]) && reversed.last().is_some_and(|&byte| is_blank(byte)) {
+            reversed.pop();
         }
     }
-    text.trim().to_string()
+    reversed.extend(bytes[..end].iter().rev());
+    reversed.reverse();
+    // Only ASCII blanks were removed, so restoring byte order preserves UTF-8.
+    String::from_utf8(reversed)
+        .expect("removing ASCII blanks preserves UTF-8")
+        .trim()
+        .to_string()
 }
 
 /// The targets of the empty `<a>` elements in `text`, in source order.
@@ -568,6 +581,65 @@ pub fn extract_standalone_attr_list_id(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_text_matches_sequential_removal() {
+        fn sequential(slug_text: &str, seams: &[usize]) -> String {
+            let mut text = slug_text.to_string();
+            for &seam in seams.iter().rev() {
+                if seam == 0 || seam >= text.len() {
+                    continue;
+                }
+                let is_blank = |byte: u8| matches!(byte, b' ' | b'\t');
+                if is_blank(text.as_bytes()[seam - 1]) && is_blank(text.as_bytes()[seam]) {
+                    text.remove(seam);
+                }
+            }
+            text.trim().to_string()
+        }
+
+        let tokens = ["a", "é🙂", " ", "\t", "\u{2003}"];
+        for first in tokens {
+            for second in tokens {
+                for third in tokens {
+                    let text = format!("{first}{second}{third}");
+                    let offsets = [0, first.len(), first.len() + second.len(), text.len(), text.len() + 10];
+                    // Zero, one or two anchors at every boundary, including seams
+                    // beyond the text after a trailing attribute list is removed.
+                    for pattern in 0..3_usize.pow(offsets.len() as u32) {
+                        let mut digits = pattern;
+                        let mut seams = Vec::new();
+                        for offset in offsets {
+                            seams.extend(std::iter::repeat_n(offset, digits % 3));
+                            digits /= 3;
+                        }
+                        assert_eq!(
+                            display_text(&text, &seams),
+                            sequential(&text, &seams),
+                            "{text:?} {seams:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn display_text_preserves_anchor_spacing_and_slug() {
+        for (source, text, slug) in [
+            ("é <a></a> 🙂", "é 🙂", "é  🙂"),
+            ("a <a></a><a></a>  b", "a b", "a   b"),
+            ("a\t<a></a>\tb", "a\tb", "a\t\tb"),
+            ("a\u{2003}<a></a>\u{2003}b", "a\u{2003}\u{2003}b", "a\u{2003}\u{2003}b"),
+            ("a  <a></a>   b", "a    b", "a     b"),
+            ("a <a></a> {#id <a></a>}", "a", "a"),
+            ("a<a></a>b", "ab", "ab"),
+        ] {
+            let heading = extract_heading_text(source);
+            assert_eq!(heading.text, text, "{source:?}");
+            assert_eq!(heading.slug_text, slug, "{source:?}");
+        }
+    }
 
     #[test]
     fn heading_text_end_matches_rescanning() {

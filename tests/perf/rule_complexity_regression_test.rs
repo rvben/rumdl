@@ -720,6 +720,44 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// Removing blanks at anchor seams must not repeatedly shift the heading suffix.
+#[test]
+fn test_heading_anchor_spacing_linear_complexity() {
+    use rumdl_lib::utils::header_id_utils::extract_heading_text;
+
+    for (name, unit, visible) in [
+        ("single", "word <a id=x></a> ", "word "),
+        ("adjacent", "é <a></a><a></a>  🙂 ", "é 🙂 "),
+    ] {
+        for stage in ["text", "context"] {
+            let times: Vec<_> = [8192, 16384, 32768]
+                .into_iter()
+                .map(|count| {
+                    let content = format!("# {}\n", unit.repeat(count));
+                    assert_eq!(
+                        extract_heading_text(&content).text,
+                        format!("# {}", visible.repeat(count).trim_end())
+                    );
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            let start = MeasurementClock::now();
+                            if stage == "text" {
+                                std::hint::black_box(extract_heading_text(&content));
+                            } else {
+                                std::hint::black_box(LintContext::new(&content, MarkdownFlavor::Standard, None));
+                            }
+                            start.elapsed()
+                        })
+                        .collect();
+                    samples.sort();
+                    samples[3]
+                })
+                .collect();
+            assert_linear_complexity(&format!("anchor spacing {name}/{stage}"), &times, 3.0);
+        }
+    }
+}
+
 /// Removing trailing anchors must not rescan the heading for each element.
 #[test]
 fn test_heading_trailing_anchors_linear_complexity() {
