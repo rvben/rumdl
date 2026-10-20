@@ -429,6 +429,10 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
     // Track list-breaking content since last item (fixes O(n^2) bottleneck)
     let mut has_list_breaking_content_since_last_item = false;
     let mut min_continuation_for_tracking = 0;
+    // The first code-line query searches backward only as far as necessary.
+    // Later queries search only the new interval, stopping at its most recent
+    // boundary. Include code lines and lines skipped by the state machine.
+    let mut code_continuation: Option<(usize, usize)> = None;
 
     for (line_idx, line_info) in lines.iter().enumerate() {
         let line_num = line_idx + 1;
@@ -444,12 +448,22 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         // as list items, so this exception only ever matches the marker line.
         if line_info.in_code_block && line_info.list_item.is_none() {
             if let Some(ref mut block) = current_block {
-                // Calculate minimum indentation for list continuation
-                let min_continuation_indent =
-                    CodeBlockUtils::calculate_min_continuation_indent(content, lines, line_idx);
+                let (scanned_to, min_continuation_indent) = code_continuation.get_or_insert_with(|| {
+                    (
+                        line_idx,
+                        CodeBlockUtils::calculate_min_continuation_indent(content, lines, line_idx),
+                    )
+                });
+                for preceding in lines[*scanned_to..line_idx].iter().rev() {
+                    if let Some(indent) = CodeBlockUtils::continuation_indent_boundary(content, preceding) {
+                        *min_continuation_indent = indent;
+                        break;
+                    }
+                }
+                *scanned_to = line_idx;
 
                 // Analyze code block context using the three-tier classification
-                let context = CodeBlockUtils::analyze_code_block_context(lines, line_idx, min_continuation_indent);
+                let context = CodeBlockUtils::analyze_code_block_context(lines, line_idx, *min_continuation_indent);
 
                 match context {
                     CodeBlockContext::Indented => {

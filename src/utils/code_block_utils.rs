@@ -747,26 +747,35 @@ impl CodeBlockUtils {
         lines: &[crate::lint_context::LineInfo],
         current_line_idx: usize,
     ) -> usize {
-        // Look backwards to find the most recent list item
+        // Look backwards to find the most recent list item or separator.
         for i in (0..current_line_idx).rev() {
-            if let Some(line_info) = lines.get(i) {
-                if let Some(list_item) = &line_info.list_item {
-                    // Calculate minimum continuation indent for this list item
-                    return if list_item.is_ordered {
-                        list_item.marker_column + list_item.marker.len() + 1 // +1 for space after marker
-                    } else {
-                        list_item.marker_column + 2 // Unordered lists need marker + space (min 2)
-                    };
-                }
-
-                // Stop at structural separators that would break list context
-                if line_info.heading.is_some() || Self::is_structural_separator(line_info.content(content)) {
-                    break;
-                }
+            if let Some(line_info) = lines.get(i)
+                && let Some(indent) = Self::continuation_indent_boundary(content, line_info)
+            {
+                return indent;
             }
         }
+        0
+    }
 
-        0 // No list context found
+    /// A list marker sets the continuation indent; a structural separator
+    /// clears it. Other lines preserve the previous value. Marker precedence
+    /// matters for list lines whose content also resembles a separator.
+    pub(crate) fn continuation_indent_boundary(
+        content: &str,
+        line_info: &crate::lint_context::LineInfo,
+    ) -> Option<usize> {
+        if let Some(list_item) = &line_info.list_item {
+            Some(if list_item.is_ordered {
+                list_item.marker_column + list_item.marker.len() + 1
+            } else {
+                list_item.marker_column + 2
+            })
+        } else if line_info.heading.is_some() || Self::is_structural_separator(line_info.content(content)) {
+            Some(0)
+        } else {
+            None
+        }
     }
 
     /// Check if content is a structural separator (headings, horizontal rules, etc.)

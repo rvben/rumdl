@@ -767,6 +767,29 @@ fn bench_md087_suppressions(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_list_code_context(c: &mut Criterion) {
+    let mut group = c.benchmark_group("list_code_context");
+    group.sample_size(10);
+    for blank in [false, true] {
+        let unit = if blank {
+            "   ```\n   code\n   ```\n\n"
+        } else {
+            "   ```\n   code\n   ```\n"
+        };
+        for count in [128, 1024, 4096] {
+            let content = format!("- Item\n{}", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(ctx.code_block_details.len(), count);
+            assert_eq!(ctx.list_blocks.len(), 1);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(format!("blank-{blank}"), count), |b| {
+                b.iter(|| LintContext::new(black_box(&content), MarkdownFlavor::Standard, None));
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_md031_list_membership(c: &mut Criterion) {
     use rumdl_lib::rules::MD031BlanksAroundFences;
 
@@ -1456,6 +1479,7 @@ criterion_group!(
     bench_md077_fence_lookup,
     bench_spacing_fence_lookup,
     bench_md031_list_membership,
+    bench_list_code_context,
     bench_md087_suppressions,
     bench_directive_code_ranges,
     bench_lint,

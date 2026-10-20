@@ -650,6 +650,39 @@ fn test_md077_fence_lookup_linear_complexity() {
     }
 }
 
+/// Dense code blocks inside one list item must not rescan all earlier lines
+/// when determining the indentation needed to continue that list.
+#[test]
+fn test_list_code_context_linear_complexity() {
+    for blank in [false, true] {
+        let unit = if blank {
+            "   ```\n   code\n   ```\n\n"
+        } else {
+            "   ```\n   code\n   ```\n"
+        };
+        let times: Vec<_> = [512, 1024, 2048]
+            .into_iter()
+            .map(|count| {
+                let content = format!("- Item\n{}", unit.repeat(count));
+                let mut samples: Vec<_> = (0..7)
+                    .map(|_| {
+                        let start = MeasurementClock::now();
+                        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                        let elapsed = start.elapsed();
+                        assert_eq!(ctx.code_block_details.len(), count);
+                        assert_eq!(ctx.list_blocks.len(), 1);
+                        std::hint::black_box(ctx);
+                        elapsed
+                    })
+                    .collect();
+                samples.sort();
+                samples[3]
+            })
+            .collect();
+        assert_linear_complexity(&format!("list code context, blank={blank}"), &times, 3.0);
+    }
+}
+
 /// Opting lists out of MD031 must not rescan their preceding content per fence.
 #[test]
 fn test_md031_list_membership_linear_complexity() {
