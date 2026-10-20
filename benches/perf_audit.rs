@@ -767,6 +767,42 @@ fn bench_md087_suppressions(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_heading_anchor_lookup(c: &mut Criterion) {
+    use rumdl_lib::utils::header_id_utils::{extract_heading_text, extract_html_anchor_ids};
+
+    let mut group = c.benchmark_group("heading_anchor_lookup");
+    group.sample_size(10);
+    for (name, unit, has_anchors) in [
+        ("html-code", "<span>word</span> `code` ", false),
+        ("anchors", "<a id=\"live\"></a>`<a id=\"literal\"></a>` ", true),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = format!("# {}\n", unit.repeat(count));
+            assert_eq!(
+                extract_html_anchor_ids(&content).len(),
+                if has_anchors { count } else { 0 }
+            );
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            for stage in ["context", "text", "ids"] {
+                group.bench_function(BenchmarkId::new(format!("{name}-{stage}"), count), |b| {
+                    b.iter(|| match stage {
+                        "context" => {
+                            black_box(LintContext::new(black_box(&content), MarkdownFlavor::Standard, None));
+                        }
+                        "text" => {
+                            black_box(extract_heading_text(black_box(&content)));
+                        }
+                        _ => {
+                            black_box(extract_html_anchor_ids(black_box(&content)));
+                        }
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_md063_heading_regions(c: &mut Criterion) {
     use rumdl_lib::rules::MD063HeadingCapitalization;
 
@@ -1505,6 +1541,7 @@ criterion_group!(
     bench_md031_list_membership,
     bench_list_code_context,
     bench_md063_heading_regions,
+    bench_heading_anchor_lookup,
     bench_md087_suppressions,
     bench_directive_code_ranges,
     bench_lint,

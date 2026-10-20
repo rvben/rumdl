@@ -650,6 +650,50 @@ fn test_md077_fence_lookup_linear_complexity() {
     }
 }
 
+/// HTML tags in headings must not each search every opaque code/comment range.
+#[test]
+fn test_heading_anchor_lookup_linear_complexity() {
+    use rumdl_lib::utils::header_id_utils::{extract_heading_text, extract_html_anchor_ids};
+
+    for (name, unit, has_anchors) in [
+        ("html-code", "<span>word</span> `code` ", false),
+        ("anchors", "<a id=\"live\"></a>`<a id=\"literal\"></a>` ", true),
+    ] {
+        for stage in ["context", "text", "ids"] {
+            let times: Vec<_> = [2048, 4096, 8192]
+                .into_iter()
+                .map(|count| {
+                    let content = format!("# {}\n", unit.repeat(count));
+                    let ids = extract_html_anchor_ids(&content);
+                    assert_eq!(ids.len(), if has_anchors { count } else { 0 });
+                    assert!(ids.iter().all(|id| id == "live"));
+                    let run = || match stage {
+                        "context" => {
+                            std::hint::black_box(LintContext::new(&content, MarkdownFlavor::Standard, None));
+                        }
+                        "text" => {
+                            std::hint::black_box(extract_heading_text(&content));
+                        }
+                        _ => {
+                            std::hint::black_box(extract_html_anchor_ids(&content));
+                        }
+                    };
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            let start = MeasurementClock::now();
+                            run();
+                            start.elapsed()
+                        })
+                        .collect();
+                    samples.sort();
+                    samples[3]
+                })
+                .collect();
+            assert_linear_complexity(&format!("heading anchors {name}/{stage}"), &times, 3.0);
+        }
+    }
+}
+
 /// Each heading region must not scan every earlier region or code span.
 #[test]
 fn test_md063_heading_regions_linear_complexity() {

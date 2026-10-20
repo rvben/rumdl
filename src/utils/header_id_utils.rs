@@ -278,11 +278,23 @@ fn empty_anchor_elements(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
     }
 
     let opaque = opaque_ranges(text);
+    // Opaque ranges are disjoint and source-ordered, as are the tag matches.
+    let mut opaque_index = 0;
     let mut anchors = Vec::new();
     let mut pos = 0;
     while let Some(tag) = HTML_OPEN_TAG.captures_at(text, pos) {
         let open_tag = tag.get(0).unwrap();
-        if is_within(&opaque, open_tag.start()) || is_backslash_escaped(text, open_tag.start()) {
+        while opaque
+            .get(opaque_index)
+            .is_some_and(|&(_, end)| end <= open_tag.start())
+        {
+            opaque_index += 1;
+        }
+        if opaque
+            .get(opaque_index)
+            .is_some_and(|&(start, _)| start <= open_tag.start())
+            || is_backslash_escaped(text, open_tag.start())
+        {
             pos = open_tag.start() + 1;
             continue;
         }
@@ -400,10 +412,6 @@ fn closing_backtick_run(bytes: &[u8], from: usize, run_len: usize) -> Option<usi
         pos = run_end;
     }
     None
-}
-
-fn is_within(ranges: &[(usize, usize)], pos: usize) -> bool {
-    ranges.iter().any(|&(start, end)| start <= pos && pos < end)
 }
 
 /// Whether the character at byte `pos` of `text` is backslash-escaped.
