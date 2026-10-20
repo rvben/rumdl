@@ -37,6 +37,7 @@
 
 use regex::Regex;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// The name of an HTML tag: a letter, then letters, digits and hyphens.
@@ -346,6 +347,8 @@ fn empty_anchor_elements(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
 fn opaque_ranges(text: &str) -> Vec<(usize, usize)> {
     let bytes = text.as_bytes();
     let mut ranges = Vec::new();
+    let mut brackets = DelimiterLookup::default();
+    let mut parentheses = DelimiterLookup::default();
     let mut pos = 0;
 
     while pos < bytes.len() {
@@ -368,7 +371,7 @@ fn opaque_ranges(text: &str) -> Vec<(usize, usize)> {
         } else if bytes[pos..].starts_with(b"![")
             && !is_backslash_escaped(text, pos)
             && !is_backslash_escaped(text, pos + 1)
-            && let Some(end) = image_end(text, pos)
+            && let Some(end) = image_end(text, pos, &mut brackets, &mut parentheses)
         {
             ranges.push((pos, end));
             pos = end;
@@ -387,13 +390,59 @@ fn opaque_ranges(text: &str) -> Vec<(usize, usize)> {
 /// destination is `(...)` with balanced parentheses or a `[label]`. A bare
 /// `![text]` is a collapsed or shortcut reference image only if the document
 /// defines the label, which this text-level scan cannot see, so it stays text.
-fn image_end(text: &str, start: usize) -> Option<usize> {
+fn image_end(
+    text: &str,
+    start: usize,
+    brackets: &mut DelimiterLookup,
+    parentheses: &mut DelimiterLookup,
+) -> Option<usize> {
     let bytes = text.as_bytes();
-    let description_end = balanced_end(bytes, start + 2, b'[', b']')?;
+    let description_end = brackets.find(bytes, start + 2, b'[', b']')?;
     match bytes.get(description_end) {
-        Some(b'(') => balanced_end(bytes, description_end + 1, b'(', b')'),
-        Some(b'[') => balanced_end(bytes, description_end + 1, b'[', b']'),
+        Some(b'(') => parentheses.find(bytes, description_end + 1, b'(', b')'),
+        Some(b'[') => brackets.find(bytes, description_end + 1, b'[', b']'),
         _ => None,
+    }
+}
+
+/// Reuse one instance for one input and delimiter pair. Ordinary image ranges
+/// do not overlap, so they need no index. Malformed images can expose nested
+/// openers inside an already searched range, including successfully closed
+/// descriptions with no destination. Allow two input lengths of scanning before
+/// indexing: isolated malformed openers stay cheap, and total scanning is linear.
+#[derive(Default)]
+struct DelimiterLookup {
+    scanned_bytes: usize,
+    pairs: Option<HashMap<usize, usize>>,
+}
+
+impl DelimiterLookup {
+    fn find(&mut self, bytes: &[u8], from: usize, open: u8, close: u8) -> Option<usize> {
+        if self.pairs.is_none() && self.scanned_bytes >= bytes.len().saturating_mul(2) {
+            let mut pairs = HashMap::new();
+            let mut stack = Vec::new();
+            let mut pos = 0;
+            while pos < bytes.len() {
+                match bytes[pos] {
+                    b'\\' => pos += 1,
+                    byte if byte == open => stack.push(pos + 1),
+                    byte if byte == close => {
+                        if let Some(start) = stack.pop() {
+                            pairs.insert(start, pos + 1);
+                        }
+                    }
+                    _ => {}
+                }
+                pos += 1;
+            }
+            self.pairs = Some(pairs);
+        }
+        if let Some(pairs) = &self.pairs {
+            return pairs.get(&from).copied();
+        }
+        let end = balanced_end(bytes, from, open, close);
+        self.scanned_bytes = self.scanned_bytes.saturating_add(end.unwrap_or(bytes.len()) - from);
+        end
     }
 }
 
@@ -581,6 +630,54 @@ pub fn extract_standalone_attr_list_id(line: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delimiter_lookup_matches_independent_scans() {
+        let tokens = ["[", "]", "(", ")", "\\", "é"];
+        for pattern in 0..tokens.len().pow(6) {
+            let mut digits = pattern;
+            let mut text = String::new();
+            for _ in 0..6 {
+                text.push_str(tokens[digits % tokens.len()]);
+                digits /= tokens.len();
+            }
+            for (open, close) in [(b'[', b']'), (b'(', b')')] {
+                let offsets: Vec<_> = text
+                    .bytes()
+                    .enumerate()
+                    .filter(|&(pos, byte)| byte == open && !is_backslash_escaped(&text, pos))
+                    .map(|(pos, _)| pos + 1)
+                    .collect();
+                for reverse in [false, true] {
+                    let mut queries = offsets.clone();
+                    if reverse {
+                        queries.reverse();
+                    }
+                    let mut lookup = DelimiterLookup::default();
+                    for &from in queries.iter().cycle().take(queries.len() * 3) {
+                        assert_eq!(
+                            lookup.find(text.as_bytes(), from, open, close),
+                            balanced_end(text.as_bytes(), from, open, close),
+                            "{text:?}, {from}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_outer_images_preserve_inner_images_and_live_anchors() {
+        for text in [
+            "![![<a id=hidden></a>](image) <a id=live></a>",
+            "![outer]( ![<a id=hidden></a>](image) <a id=live></a>",
+            "![outer][ ![<a id=hidden></a>][label] <a id=live></a>",
+            "![![<a id=hidden></a>](image) <a id=live></a>]",
+            r"![outer\] ![<a id=hidden></a>](image) <a id=live></a>",
+        ] {
+            assert_eq!(extract_html_anchor_ids(text), ["live"], "{text:?}");
+        }
+    }
 
     #[test]
     fn display_text_matches_sequential_removal() {

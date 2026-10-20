@@ -720,6 +720,53 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// Malformed images must not search the same bracket/parenthesis ranges repeatedly.
+#[test]
+fn test_heading_image_delimiters_linear_complexity() {
+    use rumdl_lib::utils::header_id_utils::extract_heading_text;
+
+    for name in [
+        "description",
+        "destination",
+        "reference",
+        "closed",
+        "valid",
+        "recovered",
+    ] {
+        for stage in ["text", "context"] {
+            let times: Vec<_> = [2048, 4096, 8192]
+                .into_iter()
+                .map(|count| {
+                    let text = match name {
+                        "description" => "![ ".repeat(count),
+                        "destination" => "![a]( ".repeat(count),
+                        "reference" => "![a][ ".repeat(count),
+                        "closed" => format!("{}{}", "![ ".repeat(count), "]".repeat(count)),
+                        "recovered" => format!("![ {}", "![alt](image) ".repeat(count)),
+                        _ => "![alt](image) ".repeat(count),
+                    };
+                    let content = format!("# {text}<span>text</span>\n");
+                    assert_eq!(extract_heading_text(&content).text, content.trim());
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            let start = MeasurementClock::now();
+                            if stage == "text" {
+                                std::hint::black_box(extract_heading_text(&content));
+                            } else {
+                                std::hint::black_box(LintContext::new(&content, MarkdownFlavor::Standard, None));
+                            }
+                            start.elapsed()
+                        })
+                        .collect();
+                    samples.sort();
+                    samples[3]
+                })
+                .collect();
+            assert_linear_complexity(&format!("heading image delimiters {name}/{stage}"), &times, 3.0);
+        }
+    }
+}
+
 /// Removing blanks at anchor seams must not repeatedly shift the heading suffix.
 #[test]
 fn test_heading_anchor_spacing_linear_complexity() {

@@ -823,6 +823,46 @@ fn bench_heading_anchor_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_heading_image_delimiters(c: &mut Criterion) {
+    use rumdl_lib::utils::header_id_utils::extract_heading_text;
+
+    let mut group = c.benchmark_group("heading_image_delimiters");
+    group.sample_size(10);
+    for name in [
+        "description",
+        "destination",
+        "reference",
+        "closed",
+        "valid",
+        "recovered",
+    ] {
+        for count in [128, 1024, 4096] {
+            let text = match name {
+                "description" => "![ ".repeat(count),
+                "destination" => "![a]( ".repeat(count),
+                "reference" => "![a][ ".repeat(count),
+                "closed" => format!("{}{}", "![ ".repeat(count), "]".repeat(count)),
+                "recovered" => format!("![ {}", "![alt](image) ".repeat(count)),
+                _ => "![alt](image) ".repeat(count),
+            };
+            let content = format!("# {text}<span>text</span>\n");
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            for stage in ["text", "context"] {
+                group.bench_function(BenchmarkId::new(format!("{name}-{stage}"), count), |b| {
+                    b.iter(|| {
+                        if stage == "text" {
+                            black_box(extract_heading_text(black_box(&content)));
+                        } else {
+                            black_box(LintContext::new(black_box(&content), MarkdownFlavor::Standard, None));
+                        }
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_heading_anchor_spacing(c: &mut Criterion) {
     use rumdl_lib::utils::header_id_utils::extract_heading_text;
 
@@ -1674,6 +1714,7 @@ criterion_group!(
     bench_heading_anchor_lookup,
     bench_heading_trailing_anchors,
     bench_heading_anchor_spacing,
+    bench_heading_image_delimiters,
     bench_md030_indented_fallback,
     bench_md087_suppressions,
     bench_directive_code_ranges,
