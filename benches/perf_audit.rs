@@ -19,7 +19,7 @@ use rumdl_lib::rules::md013_line_length::md013_config::ReflowMode;
 use rumdl_lib::rules::{
     AbsoluteLinksOption, MD011NoReversedLinks, MD013Config, MD013LineLength, MD018NoMissingSpaceAtx,
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
-    MD051LinkFragments, MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks,
+    MD051LinkFragments, MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks, MD070NestedCodeFence,
 };
 use rumdl_lib::rules::{
     MD014CommandsShowOutput, MD024NoDuplicateHeading, MD037NoSpaceInEmphasis, MD039NoSpaceInLinks, MD044ProperNames,
@@ -597,6 +597,28 @@ fn bench_md057_positions(c: &mut Criterion) {
             group.throughput(Throughput::Bytes(content.len() as u64));
             group.bench_function(BenchmarkId::new(name, count), |b| {
                 b.iter(|| rule.check(black_box(&ctx)).unwrap())
+            });
+        }
+    }
+    group.finish();
+}
+
+fn bench_md070_fence_lookup(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md070_fence_lookup");
+    group.sample_size(10);
+    let rule = MD070NestedCodeFence::new();
+    for (name, unit) in [
+        ("closed", "```rust\nlet x = 1;\n```\n\n"),
+        ("container-ended", "- Item:\n\n  ```yaml\n  a: b\n\nEnd.\n\n"),
+    ] {
+        for count in [128, 1024, 4096, 8192] {
+            let content = unit.repeat(count);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(ctx.code_block_details.len(), count);
+            assert!(rule.check(&ctx).unwrap().is_empty());
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
             });
         }
     }
@@ -1194,6 +1216,7 @@ criterion_group!(
     bench_heading_link_ranges,
     bench_md084_fixes,
     bench_md093_positions,
+    bench_md070_fence_lookup,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,

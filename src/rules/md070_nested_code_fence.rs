@@ -211,20 +211,26 @@ impl MD070NestedCodeFence {
         None
     }
 
-    /// Whether the fence opened on `line_idx` is one the parser ended without a
-    /// closing fence line. Inside a list item or blockquote that happens when the
-    /// container ends: CommonMark ends the code block there, so the lines after
-    /// it are outside the block and a later fence cannot collide with it.
-    fn ends_without_closing_fence(ctx: &crate::lint_context::LintContext, line_idx: usize) -> bool {
-        let Some(info) = ctx.lines.get(line_idx) else {
-            return false;
-        };
-        let line_start = info.byte_offset;
-        let line_end = line_start + info.byte_len;
-        ctx.code_block_details
-            .iter()
-            .find(|detail| detail.is_fenced && detail.start >= line_start && detail.start <= line_end)
-            .is_some_and(|detail| !detail.closed)
+    /// Index whether each opening fence has a closing fence line. A list item
+    /// or blockquote can end a block first, in which case later fences cannot
+    /// collide with it. Build once instead of searching all blocks per opener.
+    fn fence_closures(ctx: &crate::lint_context::LintContext) -> std::collections::HashMap<usize, bool> {
+        let mut closures = std::collections::HashMap::new();
+        for detail in &ctx.code_block_details {
+            if !detail.is_fenced {
+                continue;
+            }
+            let line_idx = ctx.line_number_at_offset(detail.start).saturating_sub(1);
+            if let Some(info) = ctx.lines.get(line_idx)
+                && detail.start >= info.byte_offset
+                && detail.start <= info.byte_offset + info.byte_len
+            {
+                // Preserve the first matching detail even if callers supply
+                // overlapping or out-of-order entries in the public vector.
+                closures.entry(line_idx).or_insert(detail.closed);
+            }
+        }
+        closures
     }
 
     /// Check if a line is a valid closing fence for the given opening fence
@@ -267,6 +273,7 @@ impl Rule for MD070NestedCodeFence {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
+        let mut fence_closures = None;
 
         let mut i = 0;
         while i < lines.len() {
@@ -298,7 +305,11 @@ impl Rule for MD070NestedCodeFence {
 
             // Try to parse as opening fence
             if let Some((_indent, fence_char, fence_length, info_string)) = Self::parse_fence_line(line) {
-                if Self::ends_without_closing_fence(ctx, i) {
+                if fence_closures
+                    .get_or_insert_with(|| Self::fence_closures(ctx))
+                    .get(&i)
+                    .is_some_and(|closed| !closed)
+                {
                     i += 1;
                     continue;
                 }
@@ -441,6 +452,48 @@ impl Rule for MD070NestedCodeFence {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn fence_closures_match_first_detail_search() {
+        use crate::utils::code_block_utils::CodeBlockDetail;
+
+        for content in ["", "\n", "é日本🙂\r\n\n```rust\nx\n```", "```\r\nx\r\n", "```\nx\n"] {
+            let mut ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            // Include newline bytes, interior UTF-8 bytes, EOF and offsets past
+            // EOF, as well as duplicate starts with conflicting closure states.
+            ctx.code_block_details = (0..=content.len() + 1)
+                .chain(std::iter::once(usize::MAX))
+                .flat_map(|start| {
+                    [false, true].map(move |closed| CodeBlockDetail {
+                        start,
+                        end: start,
+                        is_fenced: start % 3 != 1 || closed,
+                        info_string: String::new(),
+                        content_column: None,
+                        closed,
+                    })
+                })
+                .collect();
+            for reversed in [false, true] {
+                if reversed {
+                    ctx.code_block_details.reverse();
+                }
+                let closures = MD070NestedCodeFence::fence_closures(&ctx);
+                for (line_idx, info) in ctx.lines.iter().enumerate() {
+                    let expected = ctx
+                        .code_block_details
+                        .iter()
+                        .find(|detail| {
+                            detail.is_fenced
+                                && detail.start >= info.byte_offset
+                                && detail.start <= info.byte_offset + info.byte_len
+                        })
+                        .map(|detail| detail.closed);
+                    assert_eq!(closures.get(&line_idx).copied(), expected, "{content:?}, {line_idx}");
+                }
+            }
+        }
+    }
 
     fn run_check(content: &str) -> LintResult {
         let rule = MD070NestedCodeFence::new();

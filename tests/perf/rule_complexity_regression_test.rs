@@ -437,6 +437,29 @@ fn test_md057_warning_columns_linear_complexity() {
     }
 }
 
+/// Opening fences must not each search the document's entire block list.
+#[test]
+fn test_md070_fence_lookup_linear_complexity() {
+    let rule = MD070NestedCodeFence::new();
+    for (name, unit) in [
+        ("closed", "```rust\nlet x = 1;\n```\n\n"),
+        ("container-ended", "- Item:\n\n  ```yaml\n  a: b\n\nEnd.\n\n"),
+    ] {
+        let times: Vec<_> = [2048, 4096, 8192]
+            .into_iter()
+            .map(|count| {
+                let content = unit.repeat(count);
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert!(!rule.should_skip(&ctx));
+                assert_eq!(ctx.code_block_details.len(), count);
+                assert!(rule.check(&ctx).unwrap().is_empty());
+                measure_rule_time_with_context(&rule, &ctx, 7)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD070 {name}"), &times, 3.0);
+    }
+}
+
 /// Warning positions must not rescan every preceding construct on a heading.
 #[test]
 fn test_md093_warning_columns_linear_complexity() {
