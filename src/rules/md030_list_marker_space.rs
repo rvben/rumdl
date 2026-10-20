@@ -94,6 +94,11 @@ impl Rule for MD030ListMarkerSpace {
 
     crate::impl_rule_config_methods!(MD030Config);
 
+    fn fix_capability(&self) -> crate::rule::FixCapability {
+        // Warnings for lines the parser does not read as list items are advisory only.
+        crate::rule::FixCapability::ConditionallyFixable
+    }
+
     fn fixes_from_diagnostics(&self) -> bool {
         true
     }
@@ -337,7 +342,7 @@ impl MD030ListMarkerSpace {
             }
 
             // Try to detect list-like patterns using regex-based detection
-            if let Some(warning) = self.check_unrecognized_list_marker(ctx, line, line_num, lines) {
+            if let Some(warning) = self.check_unrecognized_list_marker(line, line_num) {
                 warnings.push(warning);
             }
         }
@@ -498,13 +503,7 @@ impl MD030ListMarkerSpace {
 
     /// Detect list-like patterns that the parser didn't recognize (e.g., "1.Text" with no space)
     /// This implements user-intention-based detection: if it looks like a list item, flag it
-    fn check_unrecognized_list_marker(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        line: &str,
-        line_num: usize,
-        lines: &[&str],
-    ) -> Option<LintWarning> {
+    fn check_unrecognized_list_marker(&self, line: &str, line_num: usize) -> Option<LintWarning> {
         // Strip blockquote prefix to analyze the content.
         // Track the prefix length so fix positions are relative to the original line.
         let (bq_prefix_len, content) = match parse_blockquote_prefix(line) {
@@ -536,10 +535,6 @@ impl MD030ListMarkerSpace {
                     let is_clear_intent = first_char.is_ascii_uppercase() || first_char == '[' || first_char == '(';
 
                     if is_clear_intent {
-                        let is_multi_line = self.is_multi_line_for_unrecognized(line_num, lines);
-                        // Ordered marker `<digits>.` has width `before_dot.len() + 1`.
-                        let expected_spaces = self.config.expected_spaces(true, is_multi_line, before_dot.len() + 1);
-
                         let marker = format!("{before_dot}.");
                         let marker_pos = indent_len;
                         let marker_end = marker_pos + marker.len();
@@ -549,10 +544,6 @@ impl MD030ListMarkerSpace {
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num, line, offset_in_line, 0);
 
-                        let correct_spaces = " ".repeat(expected_spaces);
-                        let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                        let fix_position = line_start_byte + offset_in_line;
-
                         return Some(LintWarning {
                             rule_name: Some("MD030".to_string()),
                             severity: Severity::Warning,
@@ -560,8 +551,11 @@ impl MD030ListMarkerSpace {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Spaces after list markers (Expected: {expected_spaces}; Actual: 0)"),
-                            fix: Some(crate::rule::Fix::new(fix_position..fix_position, correct_spaces)),
+                            message: "Possible missing space after ordered list marker; this line is paragraph text, not a list item"
+                                .to_string(),
+                            // The parser does not read this line as a list item, so inserting
+                            // a space would change its meaning (and could turn it into a list).
+                            fix: None,
                         });
                     }
                 }
@@ -569,21 +563,6 @@ impl MD030ListMarkerSpace {
         }
 
         None
-    }
-
-    /// Simplified multi-line check for unrecognized list items
-    fn is_multi_line_for_unrecognized(&self, line_num: usize, lines: &[&str]) -> bool {
-        // For unrecognized list items, we can't rely on parser info
-        // Check if the next line exists and appears to be a continuation
-        if line_num < lines.len() {
-            let next_line = lines[line_num]; // line_num is 1-based, so this is the next line
-            let next_trimmed = next_line.trim();
-            // If next line is non-empty and indented, it might be a continuation
-            if !next_trimmed.is_empty() && next_line.starts_with(' ') {
-                return true;
-            }
-        }
-        false
     }
 
     /// Check if a line is part of an indented code block (4+ columns with blank line before)

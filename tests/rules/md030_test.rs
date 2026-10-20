@@ -1049,10 +1049,11 @@ mod tests {
         let rule = MD030ListMarkerSpace::default();
         let content = "1.First item\n2.Second item";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 2, "both lines are still reported");
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(
-            fixed, "1. First item\n2. Second item",
-            "Fix should add space after ordered markers"
+            fixed, content,
+            "Lines the parser reads as paragraph text must not be rewritten"
         );
     }
 
@@ -1671,15 +1672,13 @@ $$
         // not before the digit), so applying the fix twice gives the same result.
         assert_idempotent("> 0.A");
 
-        // Also verify the fix produces the correct output (space inserted after period)
+        // The heuristic warning carries no fix, so the bytes are unchanged
         let rule = MD030ListMarkerSpace::default();
         let ctx = LintContext::new("> 0.A", rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap_or_default();
+        assert_eq!(warnings.len(), 1);
         let fixed = apply_fixes("> 0.A", &warnings);
-        assert_eq!(
-            fixed, "> 0. A",
-            "Fix should insert space after period, not before digit"
-        );
+        assert_eq!(fixed, "> 0.A", "Heuristic warning must not rewrite paragraph text");
     }
 
     #[test]
@@ -1715,18 +1714,17 @@ $$
     }
 
     #[test]
-    fn test_blockquote_ordered_marker_fix_position() {
-        // "> 0.A" — ordered marker inside blockquote, no space after marker.
-        // The fix must insert the space after `0.` (byte 4 in the original line),
-        // NOT before `0` (byte 2). The blockquote prefix `"> "` must be included
-        // in the byte offset calculation.
+    fn test_blockquote_ordered_marker_not_fixed() {
+        // "> 0.A" — not a list item for the parser, so the warning is advisory
+        // and must not carry a fix.
         let rule = MD030ListMarkerSpace::default();
         let content = "> 0.A";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap_or_default();
         assert_eq!(warnings.len(), 1, "should flag '0.A' inside blockquote");
         let fixed = apply_fixes(content, &warnings);
-        assert_eq!(fixed, "> 0. A", "fix must insert space after dot, not before digit");
+        assert!(warnings[0].fix.is_none(), "heuristic warning must not carry a fix");
+        assert_eq!(fixed, content, "paragraph text must not be rewritten");
         assert_idempotent(content);
     }
 
@@ -1739,10 +1737,8 @@ $$
         let warnings = rule.check(&ctx).unwrap_or_default();
         assert_eq!(warnings.len(), 1, "should flag '1.Item' inside nested blockquote");
         let fixed = apply_fixes(content, &warnings);
-        assert_eq!(
-            fixed, ">> 1. Item",
-            "fix must insert space after dot in nested blockquote"
-        );
+        assert!(warnings[0].fix.is_none(), "heuristic warning must not carry a fix");
+        assert_eq!(fixed, content, "paragraph text must not be rewritten");
         assert_idempotent(content);
     }
 
@@ -1941,7 +1937,7 @@ mod template_literals {
         let rule = MD030ListMarkerSpace::default();
         for (source, expected) in [
             ("1.  {{ title }}\n", "1. {{ title }}\n"),
-            ("1.[{{ title }}](url)\n", "1. [{{ title }}](url)\n"),
+            ("1.  [{{ title }}](url)\n", "1. [{{ title }}](url)\n"),
         ] {
             let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
             assert_eq!(rule.check(&ctx).unwrap().len(), 1);
@@ -2001,7 +1997,7 @@ mod native_mdx_literals {
         let rule = MD030ListMarkerSpace::default();
         for (source, expected) in [
             ("1.  {title}\n", "1. {title}\n"),
-            ("1.[{title}](url)\n", "1. [{title}](url)\n"),
+            ("1.  [{title}](url)\n", "1. [{title}](url)\n"),
             (
                 "1.  <span title={title}>Child</span>\n",
                 "1. <span title={title}>Child</span>\n",
@@ -2023,5 +2019,66 @@ mod native_mdx_literals {
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].fix.is_some());
         assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+}
+
+/// `<digits>.` directly followed by text is paragraph text to the CommonMark parser, so
+/// the heuristic warning is advisory: it never carries a fix.
+mod heuristic_warning_has_no_fix {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD030ListMarkerSpace;
+
+    const PARAGRAPH_TEXT: &[&str] = &[
+        "0.A",
+        "1.Foo bar",
+        "1.RC1 is out",
+        "See section\n1.Introduction for details.",
+        "See:\n1.Foo",
+        "1234567890.Foo",
+        "> 1.Foo",
+        "> See:\n> 1.Foo",
+    ];
+
+    #[test]
+    fn test_warns_but_never_rewrites_paragraph_text() {
+        let rule = MD030ListMarkerSpace::default();
+        for source in PARAGRAPH_TEXT {
+            let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "positive control, warning expected for {source:?}");
+            assert!(warnings[0].fix.is_none(), "no fix expected for {source:?}");
+            assert!(
+                warnings[0].message.contains("paragraph text"),
+                "message must say the line is not a list item: {}",
+                warnings[0].message
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), *source, "bytes changed for {source:?}");
+        }
+    }
+
+    #[test]
+    fn test_real_list_item_with_wrong_spacing_is_still_fixed() {
+        let rule = MD030ListMarkerSpace::default();
+        for (source, expected) in [
+            ("1.  Foo\n", "1. Foo\n"),
+            ("-  item\n", "- item\n"),
+            ("> 1.  Foo\n", "> 1. Foo\n"),
+        ] {
+            let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{source:?}");
+            assert!(warnings[0].fix.is_some(), "{source:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_fix_capability_is_conditional() {
+        assert_eq!(
+            MD030ListMarkerSpace::default().fix_capability(),
+            rumdl_lib::rule::FixCapability::ConditionallyFixable
+        );
     }
 }

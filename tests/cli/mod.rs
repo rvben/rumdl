@@ -37,6 +37,7 @@ mod cli_md013_parenthetical_reflow_test;
 mod cli_md013_terminal_link_punctuation_test;
 mod cli_md026_container_heading_test;
 mod cli_md027_quoted_list_test;
+mod cli_md030_paragraph_text_test;
 mod cli_md031_bare_marker_fix_test;
 mod cli_md035_setext_test;
 mod cli_md051_repo_absolute_links_issue_862_test;
