@@ -279,6 +279,27 @@ fn bench_md054_fix_planning(c: &mut Criterion) {
     group.finish();
 }
 
+/// Repeated diagnostics on one line must reuse the parser's character columns.
+fn bench_md054_long_lines(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md054_long_lines");
+    group.sample_size(10);
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
+    for count in [128, 1024, 4096, 16384] {
+        for (name, unit) in [
+            ("ascii", "[label](target) ![alt](image.png) "),
+            ("unicode", "é日本🙂 [标签](target) ![图](image.png) "),
+        ] {
+            let content = format!("{}\n", unit.repeat(count));
+            let ctx = make_ctx(&content);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count * 2);
+            group.bench_function(format!("{name}/{count}"), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_md034_scaling,
@@ -287,6 +308,7 @@ criterion_group!(
     bench_md033_scaling,
     bench_md033_allowed_inside,
     bench_md054_fix_planning,
+    bench_md054_long_lines,
     bench_md037,
     bench_md044,
     bench_md051,

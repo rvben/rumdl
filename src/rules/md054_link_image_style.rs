@@ -108,14 +108,6 @@ impl MD054LinkImageStyle {
         Self { config }
     }
 
-    /// Convert a byte offset to a 1-indexed character column within its line.
-    /// Only called for disallowed links (cold path), so O(line_length) is fine.
-    fn byte_to_char_col(content: &str, byte_offset: usize) -> usize {
-        let before = &content[..byte_offset];
-        let last_newline = before.rfind('\n').map_or(0, |i| i + 1);
-        before[last_newline..].chars().count() + 1
-    }
-
     /// Check if a style is allowed based on configuration
     fn is_style_allowed(&self, style: &str) -> bool {
         match style {
@@ -219,16 +211,12 @@ impl Rule for MD054LinkImageStyle {
             }
 
             if !self.is_style_allowed(style) {
-                let start_col = Self::byte_to_char_col(content, link.byte_offset);
-                let (end_line, _) = ctx.offset_to_line_col(link.byte_end);
-                let end_col = Self::byte_to_char_col(content, link.byte_end);
-
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: link.line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
+                    column: link.start_col + 1,
+                    end_line: link.end_line,
+                    end_column: link.end_col + 1,
                     message: format!("Link/image style '{style}' is not allowed"),
                     severity: Severity::Warning,
                     fix: build_fix(link.byte_offset),
@@ -267,16 +255,12 @@ impl Rule for MD054LinkImageStyle {
             }
 
             if !self.is_style_allowed(style) {
-                let start_col = Self::byte_to_char_col(content, image.byte_offset);
-                let (end_line, _) = ctx.offset_to_line_col(image.byte_end);
-                let end_col = Self::byte_to_char_col(content, image.byte_end);
-
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: image.line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
+                    column: image.start_col + 1,
+                    end_line: image.end_line,
+                    end_column: image.end_col + 1,
                     message: format!("Link/image style '{style}' is not allowed"),
                     severity: Severity::Warning,
                     fix: build_fix(image.byte_offset),
@@ -325,6 +309,46 @@ impl Rule for MD054LinkImageStyle {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn diagnostic_positions_match_source_spans() {
+        // Every style is disallowed so the oracle covers links and images,
+        // including collapsed-reference suffixes and multiline endpoints.
+        let rule = MD054LinkImageStyle::new(false, false, false, false, false, false);
+        let prefix = "é日本🙂e\u{301}\t".repeat(100);
+        let source = format!(
+            "{prefix}[标签](target) ![图](image.png) <https://example.com> <user@example.com>\n\n\
+             {prefix}[ref][] ![ref][] [ref] ![ref] [full][ref] ![full][ref]\n\n\
+             {prefix}[multi\n{prefix}line](target) ![multi\n{prefix}image](image.png)\n\n\
+             [![nested](image.png)](target) [target](target)\n\n[ref]: target\n"
+        );
+        for flavor in crate::format_proof::ALL_FLAVORS {
+            for newline in ["\n", "\r\n"] {
+                let content = source.replace('\n', newline);
+                let ctx = LintContext::new(&content, flavor, None);
+                let warnings = rule.check(&ctx).unwrap();
+                let spans: Vec<_> = ctx
+                    .links()
+                    .iter()
+                    .map(|link| (link.byte_offset, link.byte_end))
+                    .chain(ctx.images().iter().map(|image| (image.byte_offset, image.byte_end)))
+                    .collect();
+                assert_eq!(warnings.len(), 15, "{flavor:?}");
+                assert_eq!(warnings.len(), spans.len());
+                for (warning, (start, end)) in warnings.iter().zip(spans) {
+                    // Independent source scan, without using cached positions.
+                    let position = |offset| {
+                        let before = &content[..offset];
+                        let line = before.bytes().filter(|&b| b == b'\n').count() + 1;
+                        let column = before.rsplit('\n').next().unwrap().chars().count() + 1;
+                        (line, column)
+                    };
+                    assert_eq!((warning.line, warning.column), position(start), "{flavor:?}");
+                    assert_eq!((warning.end_line, warning.end_column), position(end), "{flavor:?}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_all_styles_allowed_by_default() {

@@ -1357,6 +1357,21 @@ fn test_md050_linear_complexity() {
 // =============================================================================
 
 #[test]
+fn test_md054_long_line_linear_complexity() {
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
+    for unit in [
+        "[label](target) ![alt](image.png) ",
+        "é日本🙂 [标签](target) ![图](image.png) ",
+    ] {
+        let durations: Vec<_> = [4096, 8192, 16384]
+            .into_iter()
+            .map(|size| measure_rule_time(&rule, &format!("{}\n", unit.repeat(size)), 5))
+            .collect();
+        assert_linear_complexity("MD054 long line", &durations, 3.0);
+    }
+}
+
+#[test]
 fn test_md054_fix_planning_linear_complexity() {
     let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
     for unit in [
