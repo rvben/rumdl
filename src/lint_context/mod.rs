@@ -2394,6 +2394,12 @@ impl<'a> LintContext<'a> {
         native_structure::offset_to_line_col(self.content, &self.line_offsets, offset)
     }
 
+    /// The line component of `offset_to_line_col`, without counting a character
+    /// column. This also preserves its empty-input and trailing-newline behavior.
+    pub(crate) fn line_number_at_offset(&self, offset: usize) -> usize {
+        self.line_offsets.partition_point(|&start| start <= offset)
+    }
+
     /// Position conversions borrow the context's existing source table. Building
     /// a full index here would clone every offset and hash all code-block lines,
     /// even though membership is already available from this context.

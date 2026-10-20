@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, SourcePositions};
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::html_elements::{extract_attribute_with_range, is_html_whitespace, start_tag_end};
 use crate::utils::regex_cache::URL_SIMPLE_REGEX;
@@ -602,7 +602,7 @@ fn html_source_tags<'a>(
         while let Some(relative) = content[offset..region.end].find('<') {
             let start = offset + relative;
             offset = start + 1;
-            let (line, _) = ctx.offset_to_line_col(start);
+            let line = ctx.line_number_at_offset(start);
             if ctx.is_in_html_comment(start)
                 || ctx.is_byte_offset_in_code_span(start)
                 || ctx.line_info(line).is_some_and(|info| {
@@ -720,6 +720,7 @@ impl Rule for MD095LinkConfusables {
     fn check(&self, ctx: &LintContext) -> LintResult {
         let mut warnings = Vec::new();
         let mut reported = HashSet::new();
+        let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
 
         let mut report = |offset: usize, source: &str, kind: &str, syntax: DestinationSyntax| {
             let Some((character_range, character)) = first_source_confusable(source, syntax) else {
@@ -729,7 +730,7 @@ impl Rule for MD095LinkConfusables {
             if !reported.insert(character_byte) {
                 return;
             }
-            let (line, column) = ctx.offset_to_line_col(character_byte);
+            let (_, line, column) = positions.position(character_byte);
             if ctx.is_byte_offset_in_code_span(character_byte)
                 || ctx.is_in_html_comment(character_byte)
                 || ctx.line_info(line).is_some_and(|info| {
@@ -742,13 +743,13 @@ impl Rule for MD095LinkConfusables {
             {
                 return;
             }
-            let (end_line, end_column) = ctx.offset_to_line_col(offset + character_range.end);
+            let (_, end_line, end_column) = positions.position(offset + character_range.end);
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line,
-                column,
+                column: column + 1,
                 end_line,
-                end_column,
+                end_column: end_column + 1,
                 message: format!(
                     "{kind} contains confusable non-ASCII character U+{:04X} ({character:?})",
                     character as u32
@@ -800,7 +801,7 @@ impl Rule for MD095LinkConfusables {
             after > 0
                 && offset < html_spans[after - 1].end
                 && !ctx
-                    .line_info(ctx.offset_to_line_col(offset).0)
+                    .line_info(ctx.line_number_at_offset(offset))
                     .is_some_and(crate::lint_context::types::LineInfo::in_mkdocs_container)
         };
 
@@ -1180,6 +1181,47 @@ mod tests {
 
         assert_eq!(warnings.len(), 5);
         assert!(warnings.iter().all(|warning| warning.fix.is_none()));
+    }
+
+    #[test]
+    fn indexed_positions_preserve_mixed_destination_source_spans() {
+        let unit = "é日本🙂 https://еxample.com <a href=\"https://&#x435;xample.com\">x</a> [x](https://еxample.com) ";
+        for count in [1, 96] {
+            for ending in ["", "\n", "\r\n"] {
+                let content = format!("{}https://example.com/е{ending}", unit.repeat(count));
+                let mut ranges: Vec<_> = content
+                    .match_indices('е')
+                    .map(|(start, value)| start..start + value.len())
+                    .chain(
+                        content
+                            .match_indices("&#x435;")
+                            .map(|(start, value)| start..start + value.len()),
+                    )
+                    .collect();
+                ranges.sort_by_key(|range| range.start);
+                assert_eq!(ranges.len(), count * 3 + 1);
+                for flavor in crate::format_proof::ALL_FLAVORS {
+                    let ctx = LintContext::new(&content, flavor, None);
+                    let warnings = MD095LinkConfusables.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), ranges.len(), "{flavor:?}");
+                    for (warning, range) in warnings.iter().zip(&ranges) {
+                        assert_eq!(
+                            (warning.line, warning.column),
+                            ctx.offset_to_line_col(range.start),
+                            "{flavor:?}, start={}",
+                            range.start,
+                        );
+                        assert_eq!(
+                            (warning.end_line, warning.end_column),
+                            ctx.offset_to_line_col(range.end),
+                            "{flavor:?}, end={}",
+                            range.end,
+                        );
+                        assert!(warning.fix.is_none());
+                    }
+                }
+            }
+        }
     }
 
     #[test]

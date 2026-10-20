@@ -101,7 +101,7 @@ mod tests {
     use crate::lint_context::LintContext;
 
     #[test]
-    fn line_only_lookup_matches_full_position_at_all_byte_boundaries() {
+    fn line_index_matches_legacy_lookup_at_all_byte_boundaries() {
         for content in ["", "\n", "\r\n", "é日本🙂", "é日本🙂\n\n", "é日本🙂\r\n\r\nlast\r"] {
             let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
             for offset in (0..=content.len() + 3).chain([usize::MAX]) {
@@ -112,6 +112,21 @@ mod tests {
                     } else {
                         LintContext::find_line_for_offset(&ctx.lines, content, offset).1
                     },
+                    "{content:?}, offset={offset}",
+                );
+            }
+        }
+    }
+
+
+    #[test]
+    fn line_only_lookup_matches_full_position_at_all_byte_boundaries() {
+        for content in ["", "\n", "\r\n", "é日本🙂", "é日本🙂\n\n", "é日本🙂\r\n\r\nlast\r"] {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            for offset in (0..=content.len() + 3).chain([usize::MAX]) {
+                assert_eq!(
+                    ctx.line_number_at_offset(offset),
+                    ctx.offset_to_line_col(offset).0,
                     "{content:?}, offset={offset}",
                 );
             }

@@ -353,6 +353,31 @@ fn test_md049_warning_filter_linear_complexity() {
     }
 }
 
+/// Source positions must scale with input size on long Unicode lines.
+#[test]
+fn test_md095_source_positions_linear_complexity() {
+    for (unit, expected) in [
+        ("é日本🙂 &amp; <span>text</span> ", 0),
+        ("é日本🙂 [x](https://еxample.com) ", 1),
+        ("é日本🙂 <a href=\"https://&#x435;xample.com\">x</a> ", 1),
+        ("é日本🙂 https://еxample.com ", 1),
+        ("<div> é日本🙂 [x](https://еxample.com) </div> ", 0),
+    ] {
+        let rule = MD095LinkConfusables;
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("{}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert!(!rule.should_skip(&ctx));
+                assert_eq!(rule.check(&ctx).unwrap().len(), count * expected);
+                measure_rule_time(&rule, &content, 5)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD095 positions {unit:?}"), &times, 3.0);
+    }
+}
+
 /// Assert linear complexity by checking growth ratios
 fn assert_linear_complexity(name: &str, durations: &[Duration], threshold: f64) {
     assert!(durations.len() >= 3, "Need at least 3 measurements for ratio check");
