@@ -650,6 +650,29 @@ fn test_md077_fence_lookup_linear_complexity() {
     }
 }
 
+/// Opting lists out of MD031 must not rescan their preceding content per fence.
+#[test]
+fn test_md031_list_membership_linear_complexity() {
+    let rule = MD031BlanksAroundFences::new(false);
+    for (name, flavor, unit) in [
+        ("fences", MarkdownFlavor::Standard, "   ```\n   code\n   ```\n"),
+        ("admonitions", MarkdownFlavor::MkDocs, "   !!! note\n       contents\n"),
+    ] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("- Item\n{}", unit.repeat(count));
+                let ctx = LintContext::new(&content, flavor, None);
+                assert!(!rule.should_skip(&ctx));
+                assert!(rule.check(&ctx).unwrap().is_empty());
+                assert_eq!(rule.fix(&ctx).unwrap(), content);
+                measure_rule_time_with_context(&rule, &ctx, 7)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD031 list membership {name}"), &times, 3.0);
+    }
+}
+
 /// Spacing checks must not search every fence for each source line or list gap.
 #[test]
 fn test_spacing_fence_lookup_linear_complexity() {

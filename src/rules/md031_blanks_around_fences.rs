@@ -42,6 +42,52 @@ pub struct MD031BlanksAroundFences {
     config: MD031Config,
 }
 
+/// Memoized answers to the rule's textual list-membership check. A backward
+/// scan stops at either a decisive line or an earlier answer, then shares that
+/// answer with every continuation it crossed. Each source line is read at most
+/// once even when fence ranges arrive out of order.
+#[derive(Default)]
+struct ListMembership {
+    lines: Vec<Option<bool>>,
+}
+
+impl ListMembership {
+    fn contains(&mut self, line_index: usize, lines: &[&str]) -> bool {
+        if self.lines.len() <= line_index {
+            self.lines.resize(line_index + 1, None);
+        }
+        let mut first = line_index;
+        let in_list = loop {
+            if let Some(in_list) = self.lines[first] {
+                break in_list;
+            }
+            let line = lines[first];
+            let trimmed = line.trim_start();
+            if trimmed.is_empty() {
+                break false;
+            }
+            if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                let mut chars = trimmed.chars().skip_while(char::is_ascii_digit);
+                if let Some(next) = chars.next()
+                    && (next == '.' || next == ')')
+                    && chars.next() == Some(' ')
+                {
+                    break true;
+                }
+            }
+            if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+                break true;
+            }
+            if calculate_indentation_width_default(line) < 3 || first == 0 {
+                break false;
+            }
+            first -= 1;
+        };
+        self.lines[first..=line_index].fill(Some(in_list));
+        in_list
+    }
+}
+
 impl MD031BlanksAroundFences {
     pub fn new(list_items: bool) -> Self {
         Self {
@@ -73,59 +119,6 @@ impl MD031BlanksAroundFences {
         }
 
         false
-    }
-
-    /// Check if a line is inside a list item
-    fn is_in_list(&self, line_index: usize, lines: &[&str]) -> bool {
-        // Look backwards to find if we're in a list item
-        for i in (0..=line_index).rev() {
-            let line = lines[i];
-            let trimmed = line.trim_start();
-
-            // If we hit a blank line, we're no longer in a list
-            if trimmed.is_empty() {
-                return false;
-            }
-
-            // Check for ordered list (number followed by . or ))
-            if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-                let mut chars = trimmed.chars().skip_while(char::is_ascii_digit);
-                if let Some(next) = chars.next()
-                    && (next == '.' || next == ')')
-                    && chars.next() == Some(' ')
-                {
-                    return true;
-                }
-            }
-
-            // Check for unordered list
-            if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
-                return true;
-            }
-
-            // If this line is indented (3+ columns), it might be a continuation of a list item
-            let is_indented = calculate_indentation_width_default(line) >= 3;
-            if is_indented {
-                continue; // Keep looking backwards for the list marker
-            }
-
-            // If we reach here and haven't found a list marker, and we're not at an indented line,
-            // then we're not in a list
-            return false;
-        }
-
-        false
-    }
-
-    /// Check if blank line should be required based on configuration
-    fn should_require_blank_line(&self, line_index: usize, lines: &[&str]) -> bool {
-        if self.config.list_items {
-            // Always require blank lines when list_items is true
-            true
-        } else {
-            // Don't require blank lines inside lists when list_items is false
-            !self.is_in_list(line_index, lines)
-        }
     }
 
     /// Check if the current line is immediately after frontmatter (prev line is closing delimiter)
@@ -280,6 +273,8 @@ impl Rule for MD031BlanksAroundFences {
         let fenced_blocks = Self::fenced_block_line_ranges(ctx);
         // Built on first use: see `begins_bare_item`.
         let bare_items = std::cell::OnceCell::new();
+        let mut list_membership = ListMembership::default();
+        let mut should_require_blank_line = |line| self.config.list_items || !list_membership.contains(line, lines);
 
         // Helper to check if a line is a Pandoc/Quarto div marker (opening or closing)
         let is_pandoc_div_marker =
@@ -309,7 +304,7 @@ impl Rule for MD031BlanksAroundFences {
                 && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
                 && !prev_line_is_pandoc_marker
-                && self.should_require_blank_line(*opening_line, lines)
+                && should_require_blank_line(*opening_line)
                 && !Self::begins_bare_item(ctx, &bare_items, *opening_line)
             {
                 let (start_line, start_col, end_line, end_col) =
@@ -343,7 +338,7 @@ impl Rule for MD031BlanksAroundFences {
                 && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
                 && !is_block_attribute_line(lines[*closing_line + 1], ctx.flavor)
                 && !next_line_is_pandoc_marker
-                && self.should_require_blank_line(*closing_line, lines)
+                && should_require_blank_line(*closing_line)
             {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_line_range(*closing_line + 1, lines[*closing_line]);
@@ -373,7 +368,7 @@ impl Rule for MD031BlanksAroundFences {
                 if *opening_line > 0
                     && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
                     && !Self::is_right_after_frontmatter(*opening_line, ctx)
-                    && self.should_require_blank_line(*opening_line, lines)
+                    && should_require_blank_line(*opening_line)
                     && !Self::begins_bare_item(ctx, &bare_items, *opening_line)
                 {
                     let (start_line, start_col, end_line, end_col) =
@@ -397,7 +392,7 @@ impl Rule for MD031BlanksAroundFences {
                 // Check for blank line after closer
                 if *closing_line + 1 < lines.len()
                     && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
-                    && self.should_require_blank_line(*closing_line, lines)
+                    && should_require_blank_line(*closing_line)
                 {
                     let (start_line, start_col, end_line, end_col) =
                         calculate_line_range(*closing_line + 1, lines[*closing_line]);
@@ -427,7 +422,7 @@ impl Rule for MD031BlanksAroundFences {
                 if *opening_line > 0
                     && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
                     && !Self::is_right_after_frontmatter(*opening_line, ctx)
-                    && self.should_require_blank_line(*opening_line, lines)
+                    && should_require_blank_line(*opening_line)
                     && !Self::begins_bare_item(ctx, &bare_items, *opening_line)
                 {
                     let (start_line, start_col, end_line, end_col) =
@@ -451,7 +446,7 @@ impl Rule for MD031BlanksAroundFences {
                 // Check for blank line after closer
                 if *closing_line + 1 < lines.len()
                     && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
-                    && self.should_require_blank_line(*closing_line, lines)
+                    && should_require_blank_line(*closing_line)
                 {
                     let (start_line, start_col, end_line, end_col) =
                         calculate_line_range(*closing_line + 1, lines[*closing_line]);
@@ -514,7 +509,7 @@ impl Rule for MD031BlanksAroundFences {
                     if i > 0
                         && !Self::is_effectively_empty_line(i - 1, lines, ctx)
                         && !Self::is_right_after_frontmatter(i, ctx)
-                        && self.should_require_blank_line(i, lines)
+                        && should_require_blank_line(i)
                         && !Self::begins_bare_item(ctx, &bare_items, i)
                     {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
@@ -551,9 +546,7 @@ impl Rule for MD031BlanksAroundFences {
                     // Check for blank line after admonition
                     // We need a blank line between the admonition content and the current line
                     // Check if the previous line (i-1) is a blank line separator
-                    if i > 0
-                        && !Self::is_effectively_empty_line(i - 1, lines, ctx)
-                        && self.should_require_blank_line(i - 1, lines)
+                    if i > 0 && !Self::is_effectively_empty_line(i - 1, lines, ctx) && should_require_blank_line(i - 1)
                     {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
@@ -629,6 +622,41 @@ impl Rule for MD031BlanksAroundFences {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn list_membership_preserves_textual_boundaries_in_any_query_order() {
+        let cases = [
+            ("   orphan", false),
+            ("- item", true),
+            ("   continuation", true),
+            ("\tcontinued", true),
+            ("", false),
+            ("   after blank", false),
+            ("1. ordered", true),
+            ("   2)\tcontinuation", true),
+            ("2)\tnot a marker", false),
+            ("   after non-marker", false),
+            ("22) marker", true),
+            ("  two-space indent", false),
+            ("* bullet", true),
+            ("\u{a0}", false),
+            ("\u{a0}+ bullet", true),
+            ("   continuation", true),
+            ("> - quoted marker", false),
+            ("   tail", false),
+        ];
+        let lines: Vec<_> = cases.iter().map(|&(line, _)| line).collect();
+        for order in [
+            (0..cases.len()).collect::<Vec<_>>(),
+            (0..cases.len()).rev().collect(),
+            (0..cases.len()).map(|i| i * 7 % cases.len()).collect(),
+        ] {
+            let mut membership = ListMembership::default();
+            for line in order.iter().chain(order.iter()) {
+                assert_eq!(membership.contains(*line, &lines), cases[*line].1, "line {line}");
+            }
+        }
+    }
 
     #[test]
     fn test_basic_functionality() {
