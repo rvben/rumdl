@@ -767,6 +767,30 @@ fn bench_md087_suppressions(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_md063_heading_regions(c: &mut Criterion) {
+    use rumdl_lib::rules::MD063HeadingCapitalization;
+
+    let mut group = c.benchmark_group("md063_heading_regions");
+    group.sample_size(10);
+    let rule = MD063HeadingCapitalization::default();
+    for (name, unit, count_warnings) in [
+        ("formatting", "é日本🙂 **strong** *emphasis* `code` ", 1),
+        ("html-code", "<span>word</span> `code` ", 0),
+        ("links", "[word](target) `code` ", 1),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = format!("# {}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count_warnings);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_list_code_context(c: &mut Criterion) {
     let mut group = c.benchmark_group("list_code_context");
     group.sample_size(10);
@@ -1480,6 +1504,7 @@ criterion_group!(
     bench_spacing_fence_lookup,
     bench_md031_list_membership,
     bench_list_code_context,
+    bench_md063_heading_regions,
     bench_md087_suppressions,
     bench_directive_code_ranges,
     bench_lint,

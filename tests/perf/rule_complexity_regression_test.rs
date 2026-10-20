@@ -650,6 +650,29 @@ fn test_md077_fence_lookup_linear_complexity() {
     }
 }
 
+/// Each heading region must not scan every earlier region or code span.
+#[test]
+fn test_md063_heading_regions_linear_complexity() {
+    let rule = MD063HeadingCapitalization::default();
+    for (name, unit, count_warnings) in [
+        ("formatting", "é日本🙂 **strong** *emphasis* `code` ", 1),
+        ("html-code", "<span>word</span> `code` ", 0),
+        ("links", "[word](target) `code` ", 1),
+    ] {
+        let times: Vec<_> = [2048, 4096, 8192]
+            .into_iter()
+            .map(|count| {
+                let content = format!("# {}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert!(!rule.should_skip(&ctx));
+                assert_eq!(rule.check(&ctx).unwrap().len(), count_warnings);
+                measure_rule_time_with_context(&rule, &ctx, 7)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD063 heading regions {name}"), &times, 3.0);
+    }
+}
+
 /// Dense code blocks inside one list item must not rescan all earlier lines
 /// when determining the indentation needed to continue that list.
 #[test]

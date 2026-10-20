@@ -960,10 +960,11 @@ impl MD063HeadingCapitalization {
         special_regions.sort_by_key(|(start, _, _)| *start);
 
         // Drop regions that overlap one already kept. After sorting by start
-        // position, the earliest-starting region wins a conflict.
+        // position, the earliest-starting region wins a conflict. Kept regions
+        // are nonempty and disjoint, so only the last one can overlap the next.
         let mut filtered_regions: Vec<(usize, usize, HeadingSegment)> = Vec::new();
         for region in special_regions {
-            let overlaps = filtered_regions.iter().any(|(s, e, _)| region.0 < *e && region.1 > *s);
+            let overlaps = filtered_regions.last().is_some_and(|(_, end, _)| region.0 < *end);
             if !overlaps {
                 filtered_regions.push(region);
             }
@@ -1015,12 +1016,20 @@ impl MD063HeadingCapitalization {
         let mut regions: Vec<(usize, usize)> = Vec::new();
         let mut open_elements: Vec<(String, usize)> = Vec::new();
 
+        // Both regex streams advance in source order; code ranges are disjoint.
+        let mut code_index = 0;
         let mut pos = 0;
         while let Some(token) = HTML_TOKEN_REGEX.captures_at(text, pos) {
             let whole = token.get(0).unwrap();
+            while code_ranges
+                .get(code_index)
+                .is_some_and(|&(_, end)| end <= whole.start())
+            {
+                code_index += 1;
+            }
             if code_ranges
-                .iter()
-                .any(|&(start, end)| start <= whole.start() && whole.start() < end)
+                .get(code_index)
+                .is_some_and(|&(start, _)| start <= whole.start())
                 || is_backslash_escaped(text, whole.start())
             {
                 // The token is text, and text may hold a tag of its own past its `<`.
@@ -1034,7 +1043,11 @@ impl MD063HeadingCapitalization {
                 if let Some(depth) = open_elements.iter().rposition(|(open_name, _)| *open_name == name) {
                     let element_start = open_elements[depth].1;
                     open_elements.truncate(depth);
-                    regions.retain(|&(start, _)| start < element_start);
+                    // Regions stay ordered by start. A completed element
+                    // replaces only the suffix beginning at its opening tag.
+                    while regions.last().is_some_and(|&(start, _)| start >= element_start) {
+                        regions.pop();
+                    }
                     regions.push((element_start, whole.end()));
                     continue;
                 }
