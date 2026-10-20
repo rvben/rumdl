@@ -175,3 +175,46 @@ fn a_long_span_is_shortened_in_the_message() {
         warnings[0].message
     );
 }
+
+/// Code spans are visited before emphasis, so cached queries must support going
+/// backwards across checkpoints and preserve Unicode and line-ending columns.
+#[test]
+fn cached_warning_ranges_match_scalar_positions() {
+    use super::Construct;
+    use crate::lint_context::SourcePositions;
+
+    for newline in ["\n", "\r\n"] {
+        let text = format!("{}**日本🙂** `écode`", "é日本🙂 ".repeat(150));
+        for content in [format!("# {text}{newline}"), format!("{text}{newline}===")] {
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let warnings = rule().check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 2);
+            let mut positions = SourcePositions::new(&content, &ctx.lines);
+            let spans = ctx
+                .source_code_spans()
+                .iter()
+                .map(|s| (s.byte_offset, s.byte_end, Construct::Code))
+                .chain(
+                    ctx.source_emphasis_spans()
+                        .iter()
+                        .map(|s| (s.byte_offset, s.byte_end, Construct::Strong)),
+                );
+            for (start, end, construct) in spans {
+                let warning = rule().warning(&ctx, &mut positions, (start, end), construct);
+                let (line, column) = ctx.offset_to_line_col(start);
+                assert_eq!(
+                    (warning.line, warning.column, warning.end_line, warning.end_column),
+                    (line, column, line, column + content[start..end].chars().count())
+                );
+            }
+            // Pin the helper's existing multiline end-column convention too.
+            let start = content.find("**").unwrap();
+            let warning = rule().warning(&ctx, &mut positions, (start, content.len()), Construct::Strong);
+            let (line, column) = ctx.offset_to_line_col(start);
+            assert_eq!(
+                (warning.end_line, warning.end_column),
+                (line, column + content[start..].chars().count())
+            );
+        }
+    }
+}

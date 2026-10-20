@@ -353,6 +353,32 @@ fn test_md049_warning_filter_linear_complexity() {
     }
 }
 
+/// Warning positions must not rescan every preceding construct on a heading.
+#[test]
+fn test_md093_warning_columns_linear_complexity() {
+    let rule = MD093NoFormattingInHeadings::default();
+    for (name, prefix, suffix) in [
+        ("atx", "# ", "\n"),
+        ("setext", "", "\n===\n"),
+        ("quoted", "> # ", "\r\n"),
+    ] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!(
+                    "{prefix}{}{suffix}",
+                    "é日本🙂 **strong** *emphasis* `code` ".repeat(count)
+                );
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert!(!rule.should_skip(&ctx));
+                assert_eq!(rule.check(&ctx).unwrap().len(), count * 3);
+                measure_rule_time(&rule, &content, 5)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD093 {name}"), &times, 3.0);
+    }
+}
+
 /// Building fixes must not rescan a Unicode line for every warning.
 #[test]
 fn test_md084_fix_ranges_linear_complexity() {

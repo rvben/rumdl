@@ -23,7 +23,7 @@ use rumdl_lib::rules::{
 };
 use rumdl_lib::rules::{
     MD014CommandsShowOutput, MD024NoDuplicateHeading, MD037NoSpaceInEmphasis, MD039NoSpaceInLinks, MD044ProperNames,
-    MD049EmphasisStyle, MD084InvisibleCharacters, MD089CjkSpacing, MD095LinkConfusables,
+    MD049EmphasisStyle, MD084InvisibleCharacters, MD089CjkSpacing, MD093NoFormattingInHeadings, MD095LinkConfusables,
 };
 use rumdl_lib::utils::emphasis_utils::{
     find_emphasis_markers, find_emphasis_spans, find_single_emphasis_spans, find_valid_emphasis_ranges,
@@ -534,6 +534,31 @@ fn link_document(padded: bool, escaped: bool) -> String {
         ));
     }
     content
+}
+
+fn bench_md093_positions(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md093_positions");
+    group.sample_size(10);
+    let rule = MD093NoFormattingInHeadings::default();
+    for (name, prefix, suffix) in [
+        ("atx", "# ", "\n"),
+        ("setext", "", "\n===\n"),
+        ("quoted", "> # ", "\r\n"),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = format!(
+                "{prefix}{}{suffix}",
+                "é日本🙂 **strong** *emphasis* `code` ".repeat(count)
+            );
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count * 3);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
 }
 
 fn bench_md084_fixes(c: &mut Criterion) {
@@ -1099,6 +1124,7 @@ criterion_group!(
     bench_md089_indexes,
     bench_heading_link_ranges,
     bench_md084_fixes,
+    bench_md093_positions,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,

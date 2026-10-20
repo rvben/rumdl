@@ -38,7 +38,7 @@ mod tests;
 
 use std::collections::HashSet;
 
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, SourcePositions};
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use md093_config::MD093Config;
 
@@ -80,16 +80,31 @@ impl MD093NoFormattingInHeadings {
         ctx.headings().map(|heading| heading.line_num).collect()
     }
 
-    fn warning(&self, ctx: &LintContext, span: (usize, usize), construct: Construct) -> LintWarning {
-        let (line, column) = ctx.offset_to_line_col(span.0);
+    fn warning(
+        &self,
+        ctx: &LintContext,
+        positions: &mut SourcePositions<'_>,
+        span: (usize, usize),
+        construct: Construct,
+    ) -> LintWarning {
+        let (line_idx, line, column) = positions.position(span.0);
+        let column = column + 1;
         let source = &ctx.content[span.0..span.1];
+        // Cache both endpoints so nested spans do not repeatedly count their
+        // contents. Preserve the existing single-line range for multiline spans.
+        let source_line = &ctx.lines[line_idx];
+        let end_column = if span.1 <= source_line.byte_offset + source_line.byte_len {
+            positions.column_on_line(line_idx, span.1) + 1
+        } else {
+            column + source.chars().count()
+        };
         LintWarning {
             rule_name: Some(self.name().to_string()),
             severity: Severity::Warning,
             line,
             column,
             end_line: line,
-            end_column: column + source.chars().count(),
+            end_column,
             message: format!("{} in heading: {}", construct.noun(), excerpt(source)),
             fix: None,
         }
@@ -131,11 +146,17 @@ impl Rule for MD093NoFormattingInHeadings {
         }
 
         let mut warnings = Vec::new();
+        let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
 
         if self.config.code {
             for span in ctx.source_code_spans() {
                 if heading_lines.contains(&span.line) {
-                    warnings.push(self.warning(ctx, (span.byte_offset, span.byte_end), Construct::Code));
+                    warnings.push(self.warning(
+                        ctx,
+                        &mut positions,
+                        (span.byte_offset, span.byte_end),
+                        Construct::Code,
+                    ));
                 }
             }
         }
@@ -152,7 +173,7 @@ impl Rule for MD093NoFormattingInHeadings {
                 self.config.emphasis
             };
             if wanted && heading_lines.contains(&span.line) {
-                warnings.push(self.warning(ctx, (span.byte_offset, span.byte_end), construct));
+                warnings.push(self.warning(ctx, &mut positions, (span.byte_offset, span.byte_end), construct));
             }
         }
 
