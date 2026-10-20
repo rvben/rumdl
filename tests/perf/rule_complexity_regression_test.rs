@@ -171,6 +171,77 @@ fn measure_context_time(content: &str, iterations: usize) -> Duration {
 }
 
 #[test]
+fn test_comment_code_range_queries_linear_complexity() {
+    for (unit, block) in [
+        ("`literal <!-- -->` <!-- real --> text\n\n", false),
+        ("```\n<!-- literal -->\n```\n\n<!-- real -->\n\n", true),
+    ] {
+        let durations: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = unit.repeat(count);
+                let code_end = if block {
+                    unit.find("\n\n").unwrap() + 1
+                } else {
+                    unit[1..].find('`').unwrap() + 2
+                };
+                let ranges: Vec<_> = (0..count)
+                    .map(|i| (i * unit.len(), i * unit.len() + code_end))
+                    .collect();
+                let (spans, blocks) = if block {
+                    (&[][..], ranges.as_slice())
+                } else {
+                    (ranges.as_slice(), &[][..])
+                };
+                let scan = rumdl_lib::utils::skip_context::scan_html_comments(&content, spans, blocks, 0);
+                assert_eq!(scan.ranges.len(), count);
+                assert!(scan.unterminated.is_none());
+                let mut samples: Vec<_> = (0..5)
+                    .map(|_| {
+                        let start = MeasurementClock::now();
+                        for _ in 0..8 {
+                            std::hint::black_box(rumdl_lib::utils::skip_context::scan_html_comments(
+                                std::hint::black_box(&content),
+                                spans,
+                                blocks,
+                                0,
+                            ));
+                        }
+                        start.elapsed() / 8
+                    })
+                    .collect();
+                samples.sort();
+                samples[2]
+            })
+            .collect();
+        assert_linear_complexity(&format!("HTML comment exclusions block={block}"), &durations, 3.0);
+    }
+}
+
+#[test]
+fn test_comment_line_classification_linear_complexity() {
+    for (unit, block) in [
+        ("`literal <!-- -->` <!-- real --> text\n\n", false),
+        ("```\n<!-- literal -->\n```\n\n<!-- real -->\n\n", true),
+    ] {
+        let durations: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = unit.repeat(count);
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert_eq!(ctx.html_comment_ranges().len(), count);
+                assert_eq!(
+                    ctx.lines.iter().filter(|line| line.in_html_comment).count(),
+                    if block { count } else { 0 }
+                );
+                measure_context_time(&content, 5)
+            })
+            .collect();
+        assert_linear_complexity(&format!("HTML comment line flags block={block}"), &durations, 3.0);
+    }
+}
+
+#[test]
 fn test_mdx_jsx_positions_linear_complexity() {
     let durations: Vec<_> = [1024, 2048, 4096]
         .into_iter()

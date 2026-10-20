@@ -138,7 +138,11 @@ impl MD082NoEmptySections {
         if li.blockquote.is_some() {
             let start = li.byte_offset + content_start;
             let end = li.byte_offset + text.trim_end().len();
-            if crate::utils::skip_context::is_line_entirely_in_html_comment(ctx.html_comment_ranges(), start, end) {
+            if crate::utils::skip_context::is_line_entirely_in_sorted_html_comment(
+                ctx.html_comment_ranges(),
+                start,
+                end,
+            ) {
                 return false;
             }
         }

@@ -1280,7 +1280,7 @@ impl<'a> LintContext<'a> {
                 let text = line.content(content);
                 let content_start = line.byte_offset + line.indent;
                 let content_end = line.byte_offset + text.trim_end().len();
-                line.in_html_comment = crate::utils::skip_context::is_line_entirely_in_html_comment(
+                line.in_html_comment = crate::utils::skip_context::is_line_entirely_in_sorted_html_comment(
                     &html_comment_ranges,
                     content_start,
                     content_end,

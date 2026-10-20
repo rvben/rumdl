@@ -94,9 +94,14 @@ pub fn scan_html_comments(
     code_block_ranges: &[(usize, usize)],
     scan_from: usize,
 ) -> HtmlCommentScan {
+    // Build the union only if a delimiter is queried. Callers may supply
+    // overlapping or unordered ranges (including appended hidden comments).
+    // Documents without comment openers never allocate or sort this index.
+    let code_ranges = OnceCell::new();
     let in_code = |pos: usize| {
-        code_span_ranges.iter().any(|&(start, end)| pos >= start && pos < end)
-            || code_block_ranges.iter().any(|&(start, end)| pos >= start && pos < end)
+        code_ranges
+            .get_or_init(|| SkipRegions::new(code_span_ranges.iter().chain(code_block_ranges).copied().collect()))
+            .contains(pos)
     };
 
     let mut ranges = Vec::new();
@@ -144,6 +149,9 @@ pub fn scan_html_comments(
         unterminated: None,
     }
 }
+
+#[cfg(test)]
+mod comment_tests;
 
 /// Re-resolve an unterminated `<!--` that an Obsidian comment hides.
 ///
@@ -237,6 +245,18 @@ pub fn is_line_entirely_in_html_comment(ranges: &[ByteRange], content_start: usi
         }
     }
     false
+}
+
+/// The same containment check for the scanner's sorted, non-overlapping
+/// comment ranges. Keep the public scalar helper's first-match semantics for
+/// callers supplying arbitrary ranges.
+pub(crate) fn is_line_entirely_in_sorted_html_comment(
+    ranges: &[ByteRange],
+    content_start: usize,
+    content_end: usize,
+) -> bool {
+    let index = ranges.partition_point(|range| range.start <= content_start);
+    index > 0 && content_start < ranges[index - 1].end && content_end <= ranges[index - 1].end
 }
 
 /// Check if a byte position is within a JSX expression (MDX: {expression})

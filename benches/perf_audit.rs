@@ -232,6 +232,48 @@ fn bench_lint_context_new(c: &mut Criterion) {
     });
 }
 
+/// Comment delimiters interleaved with code must not rescan every code range.
+fn bench_comment_code_ranges(c: &mut Criterion) {
+    let mut group = c.benchmark_group("comment_code_ranges");
+    group.sample_size(10);
+    for (name, unit, block) in [
+        ("inline", "`literal <!-- -->` <!-- real --> text\n\n", false),
+        ("fenced", "```\n<!-- literal -->\n```\n\n<!-- real -->\n\n", true),
+        ("no-comment", "`literal` text\n\n", false),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = unit.repeat(count);
+            let code_end = if block {
+                unit.find("\n\n").unwrap() + 1
+            } else {
+                unit[1..].find('`').unwrap() + 2
+            };
+            let ranges: Vec<_> = (0..count)
+                .map(|i| (i * unit.len(), i * unit.len() + code_end))
+                .collect();
+            let (spans, blocks) = if block {
+                (&[][..], ranges.as_slice())
+            } else {
+                (ranges.as_slice(), &[][..])
+            };
+            let expected = if name == "no-comment" { 0 } else { count };
+            let scan = rumdl_lib::utils::skip_context::scan_html_comments(&content, spans, blocks, 0);
+            assert_eq!(scan.ranges.len(), expected);
+            assert!(scan.unterminated.is_none());
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(ctx.html_comment_ranges().len(), expected);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(format!("scan/{name}"), count), |b| {
+                b.iter(|| rumdl_lib::utils::skip_context::scan_html_comments(black_box(&content), spans, blocks, 0));
+            });
+            group.bench_function(BenchmarkId::new(format!("context/{name}"), count), |b| {
+                b.iter(|| LintContext::new(black_box(&content), MarkdownFlavor::Standard, None));
+            });
+        }
+    }
+    group.finish();
+}
+
 /// Many links on one source line expose repeated prefix-to-column scans.
 fn bench_context_long_line(c: &mut Criterion) {
     let mut group = c.benchmark_group("context_long_line");
@@ -900,6 +942,7 @@ criterion_group!(
     bench_link_analysis,
     bench_input_preparation,
     bench_lint_context_new,
+    bench_comment_code_ranges,
     bench_context_long_line,
     bench_context_mdx_columns,
     bench_context_inline_elements,

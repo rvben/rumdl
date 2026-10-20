@@ -116,7 +116,7 @@ pub(super) fn compute_basic_line_info(
         // still recognised as being inside the comment range.
         let content_start = byte_offset + indent;
         let content_end = byte_offset + line.trim_end().len();
-        let in_html_comment = crate::utils::skip_context::is_line_entirely_in_html_comment(
+        let in_html_comment = crate::utils::skip_context::is_line_entirely_in_sorted_html_comment(
             skip_ranges.html_comment_ranges,
             content_start,
             content_end,
