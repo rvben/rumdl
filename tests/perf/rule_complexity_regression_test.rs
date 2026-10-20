@@ -109,7 +109,16 @@ fn measurement_clock_excludes_other_test_threads() {
 
 /// Run with warm-up and multiple iterations for stable measurements
 fn measure_rule_time<R: Rule>(rule: &R, content: &str, iterations: usize) -> Duration {
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    measure_rule_time_for_flavor(rule, content, MarkdownFlavor::Standard, iterations)
+}
+
+fn measure_rule_time_for_flavor<R: Rule>(
+    rule: &R,
+    content: &str,
+    flavor: MarkdownFlavor,
+    iterations: usize,
+) -> Duration {
+    let ctx = LintContext::new(content, flavor, None);
 
     // Warm-up run (discard - avoids cold cache artifacts)
     let _ = rule.check(&ctx);
@@ -1333,6 +1342,25 @@ fn test_md049_linear_complexity() {
         .collect();
 
     assert_linear_complexity("MD049", &durations, 6.0);
+}
+
+#[test]
+fn test_md050_long_line_linear_complexity() {
+    let rule = MD050StrongStyle::default();
+    for (unit, flavor) in [
+        ("é日本🙂 **good** __other__ ", MarkdownFlavor::Standard),
+        ("`**code**` :smile: $x$ **good** __other__ ", MarkdownFlavor::Standard),
+        (
+            "++ctrl+alt++ ^^insert^^ ~sub~ ==mark== :smile: `**code**` **good** __other__ ",
+            MarkdownFlavor::MkDocs,
+        ),
+    ] {
+        let durations: Vec<_> = [2048, 4096, 8192]
+            .into_iter()
+            .map(|size| measure_rule_time_for_flavor(&rule, &format!("{}\n", unit.repeat(size)), flavor, 5))
+            .collect();
+        assert_linear_complexity("MD050 long line", &durations, 3.0);
+    }
 }
 
 #[test]

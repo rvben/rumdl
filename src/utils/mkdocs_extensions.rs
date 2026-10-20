@@ -31,19 +31,12 @@ use std::sync::LazyLock;
 // Core span utilities
 // ============================================================================
 
-/// Check if a byte position falls within any span.
-/// Assumes spans are sorted by start position for early-exit optimization.
+/// Check a position in the sorted, non-overlapping spans returned by the
+/// regex finders and single-delimiter scanner below.
 #[inline]
 fn position_in_spans(position: usize, spans: &[(usize, usize)]) -> bool {
-    for &(start, end) in spans {
-        if position < start {
-            return false;
-        }
-        if position < end {
-            return true;
-        }
-    }
-    false
+    let index = spans.partition_point(|&(start, _)| start <= position);
+    index > 0 && position < spans[index - 1].1
 }
 
 /// Find all regex matches as (start, end) byte spans.
@@ -209,7 +202,7 @@ fn is_in_tilde_markup(line: &str, position: usize) -> bool {
 static MARK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"==([^=]+)==").unwrap());
 
 /// Find all mark (==text==) spans
-fn find_mark_spans(line: &str) -> Vec<(usize, usize)> {
+pub(crate) fn find_mark_spans(line: &str) -> Vec<(usize, usize)> {
     if !line.contains("==") {
         return Vec::new();
     }
@@ -260,6 +253,24 @@ fn is_in_smart_symbol(line: &str, position: usize) -> bool {
 // Combined utilities
 // ============================================================================
 
+/// Collect the same markup spans once for callers querying many positions.
+pub(crate) fn pymdown_spans(line: &str) -> Vec<(usize, usize)> {
+    let mut spans = find_keys_spans(line);
+    if line.contains('^') {
+        let insert = find_insert_spans(line);
+        spans.extend(find_single_delim_spans(line, '^', &insert));
+        spans.extend(insert);
+    }
+    if line.contains('~') {
+        let strike = find_strikethrough_spans(line);
+        spans.extend(find_single_delim_spans(line, '~', &strike));
+        spans.extend(strike);
+    }
+    spans.extend(find_mark_spans(line));
+    spans.extend(find_smart_symbol_spans(line));
+    spans
+}
+
 /// Check if a position is within any PyMdown extension markup
 pub fn is_in_pymdown_markup(line: &str, position: usize) -> bool {
     is_in_keys(line, position)
@@ -272,6 +283,19 @@ pub fn is_in_pymdown_markup(line: &str, position: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    proptest::proptest! {
+        #[test]
+        fn disjoint_span_lookup_matches_linear_search(lengths in proptest::collection::vec((0usize..20, 1usize..20), 0..40), position in 0usize..1600) {
+            let mut end = 0;
+            let spans: Vec<_> = lengths.into_iter().map(|(gap, length)| {
+                let start = end + gap;
+                end = start + length;
+                (start, end)
+            }).collect();
+            proptest::prop_assert_eq!(position_in_spans(position, &spans), spans.iter().any(|&(start, end)| start <= position && position < end));
+        }
+    }
 
     // =========================================================================
     // Core utility tests

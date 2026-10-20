@@ -28,7 +28,7 @@ pub(crate) use native_structure::{NativeListSource, NativePreparedStructure};
 mod scratch;
 mod source_positions;
 pub(crate) use mdx::{leaf_block_ranges as mdx_leaf_block_ranges, structure_signature as mdx_structure_signature};
-use source_positions::SourcePositions;
+pub(crate) use source_positions::SourcePositions;
 mod table_confirm;
 #[cfg(test)]
 mod tests;

@@ -1,9 +1,7 @@
-use crate::utils::range_utils::calculate_match_range;
-
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::strong_style::StrongStyle;
 use crate::utils::code_block_utils::StrongSpanDetail;
-use crate::utils::skip_context::{compute_html_code_ranges, should_skip_emphasis_span};
+use crate::utils::skip_context::EmphasisContext;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -64,23 +62,19 @@ impl MD050StrongStyle {
 
     #[cfg(test)]
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
-        let html_tags = ctx.html_tags();
-        let html_code_ranges = compute_html_code_ranges(&html_tags);
-        self.detect_style_from_spans(ctx, &html_tags, &html_code_ranges, &ctx.strong_spans)
+        self.detect_style_from_spans(&mut EmphasisContext::new(ctx), &ctx.strong_spans)
     }
 
     fn detect_style_from_spans(
         &self,
-        ctx: &crate::lint_context::LintContext,
-        html_tags: &[crate::lint_context::HtmlTag],
-        html_code_ranges: &[(usize, usize)],
+        context: &mut EmphasisContext<'_, '_>,
         spans: &[StrongSpanDetail],
     ) -> Option<StrongStyle> {
         let mut asterisk_count = 0;
         let mut underscore_count = 0;
 
         for span in spans {
-            if should_skip_emphasis_span(ctx, html_tags, html_code_ranges, span.start, span.end) {
+            if context.should_skip(span.start, span.end) {
                 continue;
             }
 
@@ -126,17 +120,15 @@ impl Rule for MD050StrongStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let lines = ctx.raw_lines();
 
         let mut warnings = Vec::new();
 
         let spans = &ctx.strong_spans;
-        let html_tags = ctx.html_tags();
-        let html_code_ranges = compute_html_code_ranges(&html_tags);
+        let mut context = EmphasisContext::new(ctx);
 
         let target_style = match self.config.style {
             StrongStyle::Consistent => self
-                .detect_style_from_spans(ctx, &html_tags, &html_code_ranges, spans)
+                .detect_style_from_spans(&mut context, spans)
                 .unwrap_or(StrongStyle::Asterisk),
             _ => self.config.style,
         };
@@ -153,15 +145,9 @@ impl Rule for MD050StrongStyle {
             }
 
             // Only check skip context for wrong-style spans (the minority)
-            if should_skip_emphasis_span(ctx, &html_tags, &html_code_ranges, span.start, span.end) {
+            if context.should_skip(span.start, span.end) {
                 continue;
             }
-
-            let (line_num, _col) = ctx.offset_to_line_col(span.start);
-            let line_start = ctx.line_start_byte(line_num).unwrap_or(0);
-            let line_content = lines.get(line_num - 1).unwrap_or(&"");
-            let match_start_in_line = span.start - line_start;
-            let match_len = span.end - span.start;
 
             let inner_text = &content[span.start + 2..span.end - 2];
 
@@ -177,8 +163,7 @@ impl Rule for MD050StrongStyle {
                 StrongStyle::Consistent => "Strong emphasis should use ** instead of __",
             };
 
-            let (start_line, start_col, end_line, end_col) =
-                calculate_match_range(line_num, line_content, match_start_in_line, match_len);
+            let (start_line, start_col, end_line, end_col) = context.single_line_range(span.start, span.end);
 
             let fix = if target_style == StrongStyle::Underscore
                 && !can_use_underscore_strong(content, span.start, span.end)

@@ -4,7 +4,7 @@
 //! that should typically be skipped when processing rules.
 
 use crate::config::MarkdownFlavor;
-use crate::lint_context::{HtmlTag, LintContext};
+use crate::lint_context::{HtmlTag, LintContext, SourcePositions};
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_critic;
 use crate::utils::mkdocs_extensions;
@@ -13,7 +13,9 @@ use crate::utils::mkdocs_icons;
 use crate::utils::mkdocs_snippets;
 use crate::utils::mkdocs_tabs;
 use regex::Regex;
-use std::sync::LazyLock;
+use std::cell::OnceCell;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 
 /// Enhanced inline math pattern that handles both single $ and double $$ delimiters.
 /// Matches:
@@ -537,6 +539,11 @@ pub fn is_in_mkdocs_markup(line: &str, position: usize, flavor: MarkdownFlavor) 
 /// misses spans due to table parsing interference (e.g., pipes inside code spans
 /// in table rows cause pulldown-cmark to misidentify cell boundaries).
 fn is_in_inline_code_on_line(line: &str, byte_pos: usize) -> bool {
+    visit_inline_code_ranges(line, |start, end| start <= byte_pos && byte_pos < end)
+}
+
+/// Visit the fallback's non-overlapping code ranges, stopping when requested.
+fn visit_inline_code_ranges(line: &str, mut visit: impl FnMut(usize, usize) -> bool) -> bool {
     let bytes = line.as_bytes();
     let mut i = 0;
 
@@ -560,7 +567,7 @@ fn is_in_inline_code_on_line(line: &str, byte_pos: usize) -> bool {
                     }
                     if close_count == backtick_count {
                         // Found matching pair: code span covers open_start..j
-                        if byte_pos >= open_start && byte_pos < j {
+                        if visit(open_start, j) {
                             return true;
                         }
                         i = j;
@@ -640,62 +647,256 @@ pub(crate) fn mask_mdx_inline_code<'a>(ctx: &LintContext, source: &'a str, start
     std::borrow::Cow::Owned(String::from_utf8(bytes).expect("ASCII masking preserves UTF-8"))
 }
 
-/// Determine whether an emphasis or strong span starting at `span_start` should be
-/// skipped because it falls inside a non-prose context: code blocks/spans, inline
-/// code, links, HTML tags or `<code>` content, MkDocs/PyMdown markup, math, JSX
-/// expressions, MDX comments or module code, MyST comments, front matter, or mkdocstrings blocks.
-/// Either delimiter inside a quoted Jinja value or shortcode tag also makes the span non-prose.
-///
-/// `html_tags` and `html_code_ranges` are passed in so callers iterating many spans
-/// can compute them once via [`compute_html_code_ranges`].
-pub(crate) fn should_skip_emphasis_span(
-    ctx: &LintContext,
-    html_tags: &[HtmlTag],
-    html_code_ranges: &[(usize, usize)],
-    span_start: usize,
-    span_end: usize,
-) -> bool {
-    let lines = ctx.raw_lines();
-    let (line_num, col) = ctx.offset_to_line_col(span_start);
+/// Point membership in possibly overlapping regions. Sorted starts and prefix
+/// maximum ends preserve the union while allowing predecessor queries.
+#[derive(Default)]
+struct SkipRegions(Vec<(usize, usize)>);
 
-    // Skip matches in front matter, mkdocstrings blocks, MDX module code, or MyST comments
-    if ctx
-        .line_info(line_num)
-        .is_some_and(|info| info.in_front_matter || info.in_mkdocstrings || info.in_esm_block || info.is_myst_comment)
-    {
-        return true;
+impl SkipRegions {
+    fn new(mut ranges: Vec<(usize, usize)>) -> Self {
+        ranges.sort_unstable_by_key(|&(start, _)| start);
+        let mut end = 0;
+        for range in &mut ranges {
+            end = end.max(range.1);
+            range.1 = end;
+        }
+        Self(ranges)
     }
 
-    // Check MkDocs markup
-    let in_mkdocs_markup = lines
-        .get(line_num.saturating_sub(1))
-        .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
+    fn contains(&self, position: usize) -> bool {
+        let index = self.0.partition_point(|&(start, _)| start <= position);
+        index > 0 && position < self.0[index - 1].1
+    }
 
-    // Line-level inline code fallback for cases pulldown-cmark misses
-    let in_inline_code = lines
-        .get(line_num.saturating_sub(1))
-        .is_some_and(|line| is_in_inline_code_on_line(line, col.saturating_sub(1)));
+    fn on_line(line: &str, flavor: MarkdownFlavor) -> Self {
+        let mut ranges = Vec::new();
+        visit_inline_code_ranges(line, |start, end| {
+            ranges.push((start, end));
+            false
+        });
+        ranges.extend(mkdocs_icons::shortcode_spans(line));
+        match flavor {
+            MarkdownFlavor::MkDocs => ranges.extend(mkdocs_extensions::pymdown_spans(line)),
+            MarkdownFlavor::Obsidian => ranges.extend(mkdocs_extensions::find_mark_spans(line)),
+            _ => {}
+        }
+        Self::new(ranges)
+    }
+}
 
-    ctx.is_in_jinja_string(span_start)
-        || ctx.is_in_jinja_string(span_end.saturating_sub(1))
-        || ctx.is_in_shortcode(span_start)
-        || ctx.is_in_shortcode(span_end.saturating_sub(1))
-        || ctx.is_in_code_block_or_span(span_start)
-        || in_inline_code
-        || ctx.is_in_link(span_start)
-        || is_byte_in_html_tag(html_tags, span_start)
-        || ctx.is_in_jsx_component_tag(span_start)
-        || ctx.is_in_jsx_component_tag(span_end.saturating_sub(1))
-        || is_byte_in_html_code_content(html_code_ranges, span_start)
-        || in_mkdocs_markup
-        || is_in_math_context(ctx, span_start)
-        || is_in_jsx_expression(ctx, span_start)
-        || is_in_mdx_comment(ctx, span_start)
+/// Per-check skip facts and source columns shared by emphasis-style passes.
+/// Short lines retain direct checks; only queried long lines allocate indexes.
+pub(crate) struct EmphasisContext<'ctx, 'src> {
+    ctx: &'ctx LintContext<'src>,
+    positions: SourcePositions<'ctx>,
+    html_tags: Arc<Vec<HtmlTag>>,
+    html_code_ranges: Vec<(usize, usize)>,
+    long_lines: HashMap<usize, SkipRegions>,
+    math: OnceCell<SkipRegions>,
+}
+
+impl<'ctx, 'src> EmphasisContext<'ctx, 'src> {
+    pub(crate) fn new(ctx: &'ctx LintContext<'src>) -> Self {
+        let html_tags = ctx.html_tags();
+        let html_code_ranges = compute_html_code_ranges(&html_tags);
+        Self {
+            ctx,
+            positions: SourcePositions::new(ctx.content, &ctx.lines),
+            html_tags,
+            html_code_ranges,
+            long_lines: HashMap::new(),
+            math: OnceCell::new(),
+        }
+    }
+
+    /// Match MD050's diagnostic convention: clip a multiline span to its
+    /// starting line, while fixes continue to use the full source byte range.
+    pub(crate) fn single_line_range(&mut self, start: usize, end: usize) -> (usize, usize, usize, usize) {
+        let (index, line, column) = self.positions.position(start);
+        (line, column + 1, line, self.positions.column_on_line(index, end) + 1)
+    }
+
+    /// Preserve the existing code, link, markup, math and flavor exclusions.
+    pub(crate) fn should_skip(&mut self, span_start: usize, span_end: usize) -> bool {
+        let ctx = self.ctx;
+        let (line_index, line_num, column) = self.positions.position(span_start);
+        if ctx.line_info(line_num).is_some_and(|info| {
+            info.in_front_matter || info.in_mkdocstrings || info.in_esm_block || info.is_myst_comment
+        }) {
+            return true;
+        }
+        // The legacy helpers receive a character column even though their
+        // ranges are byte-based. Keep that behavior here; changing Unicode
+        // eligibility is separate from indexing the existing predicates.
+        let in_line_markup = ctx.raw_lines().get(line_index).is_some_and(|line| {
+            if line.len() < 256 {
+                is_in_mkdocs_markup(line, column, ctx.flavor) || is_in_inline_code_on_line(line, column)
+            } else {
+                self.long_lines
+                    .entry(line_index)
+                    .or_insert_with(|| SkipRegions::on_line(line, ctx.flavor))
+                    .contains(column)
+            }
+        });
+        ctx.is_in_jinja_string(span_start)
+            || ctx.is_in_jinja_string(span_end.saturating_sub(1))
+            || ctx.is_in_shortcode(span_start)
+            || ctx.is_in_shortcode(span_end.saturating_sub(1))
+            || ctx.is_in_code_block_or_span(span_start)
+            || in_line_markup
+            || ctx.is_in_link(span_start)
+            || is_byte_in_html_tag(&self.html_tags, span_start)
+            || ctx.is_in_jsx_component_tag(span_start)
+            || ctx.is_in_jsx_component_tag(span_end.saturating_sub(1))
+            || is_byte_in_html_code_content(&self.html_code_ranges, span_start)
+            || self
+                .math
+                .get_or_init(|| SkipRegions::new(ctx.math_byte_ranges().to_vec()))
+                .contains(span_start)
+            || is_in_jsx_expression(ctx, span_start)
+            || is_in_mdx_comment(ctx, span_start)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Frozen scalar reference for EmphasisContext::should_skip. Changes to
+    // eligibility must explicitly update this oracle as well as the index.
+    fn legacy_should_skip_emphasis_span(
+        ctx: &LintContext,
+        html_tags: &[HtmlTag],
+        html_code_ranges: &[(usize, usize)],
+        span_start: usize,
+        span_end: usize,
+    ) -> bool {
+        let lines = ctx.raw_lines();
+        let (line_num, col) = ctx.offset_to_line_col(span_start);
+
+        // Skip matches in front matter, mkdocstrings blocks, MDX module code, or MyST comments
+        if ctx.line_info(line_num).is_some_and(|info| {
+            info.in_front_matter || info.in_mkdocstrings || info.in_esm_block || info.is_myst_comment
+        }) {
+            return true;
+        }
+
+        // Check MkDocs markup
+        let in_mkdocs_markup = lines
+            .get(line_num.saturating_sub(1))
+            .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
+
+        // Line-level inline code fallback for cases pulldown-cmark misses
+        let in_inline_code = lines
+            .get(line_num.saturating_sub(1))
+            .is_some_and(|line| is_in_inline_code_on_line(line, col.saturating_sub(1)));
+
+        ctx.is_in_jinja_string(span_start)
+            || ctx.is_in_jinja_string(span_end.saturating_sub(1))
+            || ctx.is_in_shortcode(span_start)
+            || ctx.is_in_shortcode(span_end.saturating_sub(1))
+            || ctx.is_in_code_block_or_span(span_start)
+            || in_inline_code
+            || ctx.is_in_link(span_start)
+            || is_byte_in_html_tag(html_tags, span_start)
+            || ctx.is_in_jsx_component_tag(span_start)
+            || ctx.is_in_jsx_component_tag(span_end.saturating_sub(1))
+            || is_byte_in_html_code_content(html_code_ranges, span_start)
+            || in_mkdocs_markup
+            || is_in_math_context(ctx, span_start)
+            || is_in_jsx_expression(ctx, span_start)
+            || is_in_mdx_comment(ctx, span_start)
+    }
+
+    #[test]
+    fn inline_code_range_visitor_preserves_boundaries() {
+        for (line, expected) in [
+            ("plain", vec![]),
+            ("`x`", vec![(0, 3)]),
+            ("a `x` b ``y``", vec![(2, 5), (8, 13)]),
+            ("`x `` y` z", vec![(0, 8)]),
+            // The legacy fallback stops at the first unmatched opener.
+            ("```unclosed `paired`", vec![]),
+            ("`x` ``unclosed", vec![(0, 3)]),
+            ("é `日`", vec![(3, 8)]),
+        ] {
+            let mut ranges = Vec::new();
+            visit_inline_code_ranges(line, |start, end| {
+                ranges.push((start, end));
+                false
+            });
+            assert_eq!(ranges, expected, "{line:?}");
+            for pos in 0..=line.len() + 1 {
+                assert_eq!(
+                    is_in_inline_code_on_line(line, pos),
+                    expected.iter().any(|&(a, b)| a <= pos && pos < b)
+                );
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(64))]
+        #[test]
+        fn indexed_line_regions_match_legacy_predicates(
+            tokens in proptest::collection::vec(0usize..18, 0..80),
+            queries in proptest::collection::vec(0usize..10000, 1..40),
+        ) {
+            let choices = ["plain ", "é日本🙂 ", "`code` ", "``x ` y`` ", "`", ":smile:", ":material-check:",
+                "++ctrl+alt++", "^^insert^^", "^super^", "~~strike~~", "~sub~", "==mark==", "...", "(c)", "**bold**", "{>>comment<<}", "{~~a~>b~~}"];
+            let line: String = tokens.into_iter().map(|i| choices[i]).collect();
+            for flavor in crate::format_proof::ALL_FLAVORS {
+                let index = SkipRegions::on_line(&line, flavor);
+                for pos in queries.iter().map(|q| q % (line.len() + 2)).chain([0, line.len()]) {
+                    proptest::prop_assert_eq!(index.contains(pos),
+                        is_in_inline_code_on_line(&line, pos) || is_in_mkdocs_markup(&line, pos, flavor));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn emphasis_context_preserves_skip_decisions_and_clipped_ranges() {
+        let prefix = "é日本🙂e\u{301} ".repeat(40);
+        let source = format!(
+            "---\ntitle: '**frontmatter**'\n---\n\n\
+             {prefix}**good** __other__ `**literal**` :icon_with_underscore: $x$ **end**\n\n\
+             {prefix}^^insert^^ ^super^ ++ctrl+alt++ ==mark== ~~strike~~ ~sub~ ... __visible__\n\n\
+             {prefix}**multi\nline** __multi\nline__ [**link**](target) <code>__code__</code>\n\n\
+             | a | b |\n| - | - |\n| `x|__code__` | **text** |\n\n\
+             !!! note\n\n    **note** __note__\n\n\
+             {{/* **comment** */}}\n\n{{{{< note title=\"**literal**\" >}}}} __last__\n"
+        );
+        for flavor in crate::format_proof::ALL_FLAVORS {
+            for newline in ["\n", "\r\n"] {
+                let content = source.replace('\n', newline);
+                let ctx = LintContext::new(&content, flavor, None);
+                let mut indexed = EmphasisContext::new(&ctx);
+                let html_tags = ctx.html_tags();
+                let html_code_ranges = compute_html_code_ranges(&html_tags);
+                let mut spans: Vec<_> = ctx.strong_spans.iter().map(|s| (s.start, s.end)).collect();
+                spans.extend(ctx.source_emphasis_spans().iter().map(|s| (s.byte_offset, s.byte_end)));
+                assert!(!spans.is_empty());
+                // Multiple passes and reverse order exercise cache reuse and
+                // out-of-order source positions, including nested spans.
+                for (start, end) in spans.iter().copied().chain(spans.iter().copied().rev()) {
+                    assert_eq!(
+                        indexed.should_skip(start, end),
+                        legacy_should_skip_emphasis_span(&ctx, &html_tags, &html_code_ranges, start, end),
+                        "{flavor:?} at {start}..{end}"
+                    );
+                    let (line, _) = ctx.offset_to_line_col(start);
+                    let line_start = ctx.line_start_byte(line).unwrap();
+                    let text = ctx.raw_lines()[line - 1];
+                    assert_eq!(
+                        indexed.single_line_range(start, end),
+                        crate::utils::range_utils::calculate_match_range(line, text, start - line_start, end - start),
+                        "{flavor:?} at {start}..{end}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_html_comment_detection() {

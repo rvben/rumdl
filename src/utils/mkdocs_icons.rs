@@ -19,6 +19,14 @@ static ICON_SHORTCODE_PATTERN: LazyLock<Regex> =
 /// Pattern to match standard emoji shortcodes like `:smile:` or `:+1:`.
 static EMOJI_SHORTCODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r":([a-zA-Z0-9_+-]+):").unwrap());
 
+/// Collect the same icon/emoji matches for repeated position queries.
+pub(crate) fn shortcode_spans(line: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
+    ICON_SHORTCODE_PATTERN
+        .find_iter(line)
+        .chain(EMOJI_SHORTCODE_PATTERN.find_iter(line))
+        .map(|m| (m.start(), m.end()))
+}
+
 /// Check if a position in a line is within any emoji/icon shortcode.
 pub fn is_in_any_shortcode(line: &str, position: usize) -> bool {
     if !line.contains(':') {

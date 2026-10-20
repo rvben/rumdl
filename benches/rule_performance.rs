@@ -3,8 +3,8 @@ use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{
-    MD013LineLength, MD033NoInlineHtml, MD034NoBareUrls, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
-    MD053LinkImageReferenceDefinitions, MD054LinkImageStyle,
+    MD013LineLength, MD033NoInlineHtml, MD034NoBareUrls, MD037NoSpaceInEmphasis, MD044ProperNames, MD050StrongStyle,
+    MD051LinkFragments, MD053LinkImageReferenceDefinitions, MD054LinkImageStyle,
 };
 use std::hint::black_box;
 
@@ -300,6 +300,38 @@ fn bench_md054_long_lines(c: &mut Criterion) {
     group.finish();
 }
 
+/// Consistency detection and diagnostics share indexed skip/position facts.
+fn bench_md050_long_lines(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md050_long_lines");
+    group.sample_size(10);
+    let rule = MD050StrongStyle::default();
+    for count in [128, 1024, 4096] {
+        for (name, unit, flavor) in [
+            ("ascii", "**good** __other__ ", MarkdownFlavor::Standard),
+            ("unicode", "é日本🙂 **good** __other__ ", MarkdownFlavor::Standard),
+            (
+                "code_markup",
+                "`**code**` :smile: **good** __other__ ",
+                MarkdownFlavor::Standard,
+            ),
+            (
+                "mkdocs",
+                "++ctrl+alt++ ^^insert^^ ~sub~ ==mark== :smile: `**code**` **good** __other__ ",
+                MarkdownFlavor::MkDocs,
+            ),
+            ("math", "$x$ **good** __other__ ", MarkdownFlavor::Standard),
+        ] {
+            let content = format!("{}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count);
+            group.bench_function(format!("{name}/{count}"), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_md034_scaling,
@@ -309,6 +341,7 @@ criterion_group!(
     bench_md033_allowed_inside,
     bench_md054_fix_planning,
     bench_md054_long_lines,
+    bench_md050_long_lines,
     bench_md037,
     bench_md044,
     bench_md051,

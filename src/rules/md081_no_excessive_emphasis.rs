@@ -21,7 +21,7 @@ use crate::lint_context::{LintContext, ParsedHeading, is_setext_underline_conten
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_match_range;
-use crate::utils::skip_context::{compute_html_code_ranges, should_skip_emphasis_span};
+use crate::utils::skip_context::EmphasisContext;
 use serde::{Deserialize, Serialize};
 
 /// A counted emphasis span: byte range plus its 1-indexed line.
@@ -100,8 +100,7 @@ impl MD081NoExcessiveEmphasis {
     /// for `targets = all` - deduplicated so a nested `***bold italic***`
     /// region counts once rather than as overlapping strong + emphasis spans.
     fn counted_spans(&self, ctx: &LintContext) -> Vec<CountedSpan> {
-        let html_tags = ctx.html_tags();
-        let html_code_ranges = compute_html_code_ranges(&html_tags);
+        let mut context = EmphasisContext::new(ctx);
 
         let mut spans: Vec<CountedSpan> = ctx
             .source_emphasis_spans()
@@ -111,7 +110,7 @@ impl MD081NoExcessiveEmphasis {
                 EmphasisTarget::Emphasis => !s.is_strong,
                 EmphasisTarget::All => true,
             })
-            .filter(|s| !should_skip_emphasis_span(ctx, &html_tags, &html_code_ranges, s.byte_offset, s.byte_end))
+            .filter(|s| !context.should_skip(s.byte_offset, s.byte_end))
             .map(|s| CountedSpan {
                 start: s.byte_offset,
                 end: s.byte_end,
