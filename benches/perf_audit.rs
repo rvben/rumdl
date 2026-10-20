@@ -1582,6 +1582,36 @@ fn bench_md044_name_lookup(c: &mut Criterion) {
     }
 }
 
+fn bench_md044_long_lines(c: &mut Criterion) {
+    let mut group = c.benchmark_group("MD044_long_lines");
+    group.sample_size(10);
+    for (name, unit) in [
+        ("ascii", "javascript text "),
+        ("unicode", "日本🙂 javascript text "),
+        ("angles", "<custom:data> javascript "),
+        ("comments", "<!-- javascript text --> "),
+    ] {
+        for count in [1024, 4096, 8192] {
+            let content = format!("{}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let rule = MD044ProperNames::new(vec!["JavaScript".into()], false);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(format!("{name}-cached"), count), |b| {
+                b.iter(|| black_box(rule.check(black_box(&ctx)).unwrap()));
+            });
+            group.bench_function(BenchmarkId::new(format!("{name}-fresh"), count), |b| {
+                b.iter_batched(
+                    || MD044ProperNames::new(vec!["JavaScript".into()], false),
+                    |rule| black_box(rule.check(black_box(&ctx)).unwrap()),
+                    BatchSize::SmallInput,
+                );
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_dynamic_regex_cache(c: &mut Criterion) {
     let pattern = format!(
         "(?i)({})",
@@ -1805,6 +1835,7 @@ criterion_group!(
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,
+    bench_md044_long_lines,
     bench_dynamic_regex_cache,
     bench_md024_duplicate_headings,
 );

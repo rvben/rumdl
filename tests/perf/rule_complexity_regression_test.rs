@@ -720,6 +720,39 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// Name matches must not repeatedly scan a plain line for URLs or character columns.
+#[test]
+fn test_md044_long_lines_linear_complexity() {
+    for (name, unit) in [("ascii", "javascript text "), ("unicode", "日本🙂 javascript text ")] {
+        for stage in ["fresh", "cached"] {
+            let times: Vec<_> = [2048, 4096, 8192]
+                .into_iter()
+                .map(|count| {
+                    let content = format!("{}\n", unit.repeat(count));
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    let cached = MD044ProperNames::new(vec!["JavaScript".into()], false);
+                    assert_eq!(cached.check(&ctx).unwrap().len(), count);
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            // Clones share the content cache; construct a new rule for cold scans.
+                            let fresh = MD044ProperNames::new(vec!["JavaScript".into()], false);
+                            let rule = if stage == "fresh" { &fresh } else { &cached };
+                            let start = MeasurementClock::now();
+                            let warnings = std::hint::black_box(rule.check(&ctx).unwrap());
+                            let elapsed = start.elapsed();
+                            assert_eq!(warnings.len(), count);
+                            elapsed
+                        })
+                        .collect();
+                    samples.sort();
+                    samples[3]
+                })
+                .collect();
+            assert_linear_complexity(&format!("MD044 long lines {name}/{stage}"), &times, 3.0);
+        }
+    }
+}
+
 /// Plain attribute lists between anchors must not force a fresh anchor scan.
 #[test]
 fn test_heading_anchor_attributes_linear_complexity() {

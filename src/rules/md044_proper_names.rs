@@ -1,9 +1,9 @@
 use crate::utils::fast_hash;
 use crate::utils::regex_cache::{escape_regex, get_cached_regex};
 
+use crate::lint_context::SourcePositions;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::frontmatter_values;
-use crate::utils::range_utils::byte_to_char_count;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -304,6 +304,10 @@ impl MD044ProperNames {
                 continue;
             }
 
+            // Compute fallback URL ranges only if a match reaches this check.
+            // Each line is scanned once, even when it mentions many names.
+            let mut angle_urls = None;
+
             // Use the combined regex to find all matches in one pass
             for cap in combined_regex.find_iter(line) {
                 let found_name = &line[cap.start()..cap.end()];
@@ -377,7 +381,10 @@ impl MD044ProperNames {
                 // Skip if inside an angle-bracket URL (e.g., <https://...>)
                 // The link parser skips autolinks inside HTML comments,
                 // so we detect them directly in the line text.
-                if Self::is_in_angle_bracket_url(line, start_pos) {
+                if crate::inline_config::offset_in_ranges(
+                    angle_urls.get_or_insert_with(|| Self::angle_bracket_url_ranges(line)),
+                    start_pos,
+                ) {
                     continue;
                 }
 
@@ -556,12 +563,13 @@ impl MD044ProperNames {
             )
     }
 
-    /// Check if a position within a line falls inside an angle-bracket URL (`<scheme://...>`).
+    /// Collect disjoint, source-ordered angle-bracket URL ranges (`<scheme://...>`).
     ///
     /// The link parser skips autolinks inside HTML comments, so `ctx.links()` won't
     /// contain them. This function detects angle-bracket URLs directly in the line
     /// text, covering both HTML comments and regular text as a safety net.
-    fn is_in_angle_bracket_url(line: &str, pos: usize) -> bool {
+    fn angle_bracket_url_ranges(line: &str) -> Vec<std::ops::Range<usize>> {
+        let mut ranges = Vec::new();
         let bytes = line.as_bytes();
         let len = bytes.len();
         let mut i = 0;
@@ -596,10 +604,8 @@ impl MD044ProperNames {
                                 _ => j += 1,
                             }
                         }
-                        if found_close && pos >= i && pos <= j {
-                            return true;
-                        }
                         if found_close {
+                            ranges.push(i..j + 1);
                             i = j + 1;
                             continue;
                         }
@@ -608,7 +614,12 @@ impl MD044ProperNames {
             }
             i += 1;
         }
-        false
+        ranges
+    }
+
+    #[cfg(test)]
+    fn is_in_angle_bracket_url(line: &str, pos: usize) -> bool {
+        crate::inline_config::offset_in_ranges(&Self::angle_bracket_url_ranges(line), pos)
     }
 
     /// Check if `byte_pos` falls inside the URL of a `[[text]](url)` construct.
@@ -1047,6 +1058,7 @@ impl Rule for MD044ProperNames {
         }
         let violations = self.find_name_violations(ctx);
 
+        let mut positions = SourcePositions::new(content, &ctx.lines);
         let warnings = violations
             .into_iter()
             .map(|(line, column, found_name, proper_name_index)| {
@@ -1060,8 +1072,7 @@ impl Rule for MD044ProperNames {
                 let byte_end = byte_start + found_name.len();
                 // The displayed columns are character offsets; convert from the byte
                 // offset within the line so they are correct on multi-byte lines.
-                let line_text = ctx.line_info(line).map_or("", |li| li.content(ctx.content));
-                let char_col = byte_to_char_count(line_text, column - 1);
+                let char_col = positions.column_on_line(line - 1, byte_start) + 1;
                 LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line,
@@ -3244,6 +3255,63 @@ Visit [github documentation](https://github.com/docs) for details.
             fixed.contains("Test text"),
             "Fix should correct prose 'test' to 'Test': {fixed}"
         );
+    }
+
+    #[test]
+    fn test_repeated_name_columns_and_fixes_with_unicode() {
+        for ending in ["\n", "\r\n"] {
+            let line = "é日本🙂 javascript CAFÉ JavaScript <custom:javascript> ".repeat(64);
+            let content = format!("{line}{ending}{ending}{line}");
+            let ctx = create_context(&content);
+            let rule = MD044ProperNames::new(vec!["JavaScript".into(), "Café".into()], false);
+            let warnings = rule.check(&ctx).unwrap();
+            let mut expected = Vec::new();
+            for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+                let text = line_info.content(ctx.content);
+                for (byte, _) in text.match_indices("javascript CAFÉ") {
+                    for (offset, found, replacement) in [(0, "javascript", "JavaScript"), (11, "CAFÉ", "Café")] {
+                        let start = byte + offset;
+                        let column = text[..start].chars().count() + 1;
+                        expected.push((
+                            line_idx + 1,
+                            column,
+                            column + found.chars().count(),
+                            line_info.byte_offset + start..line_info.byte_offset + start + found.len(),
+                            replacement,
+                        ));
+                    }
+                }
+            }
+            assert_eq!(warnings.len(), 256);
+            assert_eq!(warnings.len(), expected.len());
+            for (warning, (line, column, end_column, range, replacement)) in warnings.iter().zip(expected) {
+                assert_eq!(
+                    (warning.line, warning.column, warning.end_line, warning.end_column),
+                    (line, column, line, end_column)
+                );
+                assert_eq!(warning.fix, Some(Fix::new(range, replacement.to_owned())));
+            }
+            assert_eq!(rule.check(&ctx).unwrap(), warnings, "cached diagnostics");
+            assert_eq!(rule.clone().check(&ctx).unwrap(), warnings, "shared cache");
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content.replace("javascript CAFÉ", "JavaScript Café")
+            );
+        }
+    }
+
+    #[test]
+    fn test_angle_url_ranges_preserve_boundaries() {
+        let line = "<bad space> <x:one> <y:two\tthree> <z:unclosed <good:last> tail";
+        let ranges = MD044ProperNames::angle_bracket_url_ranges(line);
+        let expected = ["<x:one>", "<y:two\tthree>", "<good:last>"];
+        assert_eq!(ranges.len(), expected.len());
+        for (range, text) in ranges.iter().zip(expected) {
+            assert_eq!(&line[range.clone()], text);
+            assert!(MD044ProperNames::is_in_angle_bracket_url(line, range.start));
+            assert!(MD044ProperNames::is_in_angle_bracket_url(line, range.end - 1));
+            assert!(!MD044ProperNames::is_in_angle_bracket_url(line, range.end));
+        }
     }
 
     #[test]
