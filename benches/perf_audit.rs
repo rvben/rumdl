@@ -20,7 +20,7 @@ use rumdl_lib::rules::{
     AbsoluteLinksOption, MD011NoReversedLinks, MD013Config, MD013LineLength, MD018NoMissingSpaceAtx,
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
     MD051LinkFragments, MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks, MD070NestedCodeFence,
-    MD077ListContinuationIndent,
+    MD077ListContinuationIndent, MD087UnusedDisableComment,
 };
 use rumdl_lib::rules::{
     MD014CommandsShowOutput, MD024NoDuplicateHeading, MD037NoSpaceInEmphasis, MD039NoSpaceInLinks, MD044ProperNames,
@@ -600,6 +600,93 @@ fn bench_md057_positions(c: &mut Criterion) {
                 b.iter(|| rule.check(black_box(&ctx)).unwrap())
             });
         }
+    }
+    group.finish();
+}
+
+fn bench_md087_suppressions(c: &mut Criterion) {
+    use rumdl_lib::inline_config::{DisableLayer, validate_inline_config_rules};
+    use rumdl_lib::rule::{SuppressedWarning, SuppressionReport};
+
+    let mut group = c.benchmark_group("md087_suppressions");
+    group.sample_size(10);
+    let rule = MD087UnusedDisableComment::new();
+    for (name, unit, layer, line_step) in [
+        ("unused-line", "é日本🙂 <!-- rumdl-disable-line MD013 --> ", None, 1),
+        (
+            "used-lines",
+            "text <!-- rumdl-disable-line MD013 -->\n",
+            Some(DisableLayer::Line),
+            1,
+        ),
+        (
+            "used-blocks",
+            "<!-- rumdl-disable MD013 -->\ntext\n",
+            Some(DisableLayer::Block),
+            2,
+        ),
+        (
+            "config-line",
+            "é日本🙂 <!-- rumdl-configure-file {\"MD013\":false} --> ",
+            None,
+            1,
+        ),
+        (
+            "config-lines",
+            "<!-- rumdl-configure-file {\"MD013\":false} -->\n",
+            None,
+            1,
+        ),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = unit.repeat(count);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let mut report = SuppressionReport::default();
+            report.judged_rules.insert("MD013".into());
+            if let Some(layer) = layer {
+                report.suppressed = (1..=count)
+                    .map(|line| SuppressedWarning {
+                        rule_name: "MD013".into(),
+                        line: line * line_step,
+                        layer,
+                    })
+                    .collect();
+            }
+            assert_eq!(
+                rule.check_suppressions(&ctx, &report).unwrap().len(),
+                if layer.is_some() { 0 } else { count }
+            );
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| rule.check_suppressions(black_box(&ctx), black_box(&report)).unwrap());
+            });
+            if name.starts_with("config-") {
+                assert!(validate_inline_config_rules(&content, MarkdownFlavor::Standard).is_empty());
+                group.bench_function(BenchmarkId::new(format!("validate-{name}"), count), |b| {
+                    b.iter(|| validate_inline_config_rules(black_box(&content), MarkdownFlavor::Standard));
+                });
+            }
+        }
+    }
+    // A broad disable can match the first finding even in a large report.
+    // Constructing an index eagerly would turn this constant-time query linear.
+    let content = "<!-- rumdl-disable-file MD013 -->\ntext\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    for count in [128, 4096, 65536] {
+        let mut report = SuppressionReport::default();
+        report.judged_rules.insert("MD013".into());
+        report.suppressed = (1..=count)
+            .map(|line| SuppressedWarning {
+                rule_name: "MD013".into(),
+                line,
+                layer: DisableLayer::File,
+            })
+            .collect();
+        assert!(rule.check_suppressions(&ctx, &report).unwrap().is_empty());
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_function(BenchmarkId::new("broad-disable", count), |b| {
+            b.iter(|| rule.check_suppressions(black_box(&ctx), black_box(&report)).unwrap());
+        });
     }
     group.finish();
 }
@@ -1246,6 +1333,7 @@ criterion_group!(
     bench_md093_positions,
     bench_md070_fence_lookup,
     bench_md077_fence_lookup,
+    bench_md087_suppressions,
     bench_lint,
     bench_heading_utilities,
     bench_md044_name_lookup,

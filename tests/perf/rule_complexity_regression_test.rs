@@ -437,6 +437,108 @@ fn test_md057_warning_columns_linear_complexity() {
     }
 }
 
+/// Suppression observers run after rule checks, so measure their actual entry
+/// point with a report rather than MD087's deliberately empty `check`.
+#[test]
+fn test_md087_suppressions_linear_complexity() {
+    use rumdl_lib::inline_config::DisableLayer;
+    use rumdl_lib::rule::{SuppressedWarning, SuppressionReport};
+
+    let rule = MD087UnusedDisableComment::new();
+    for (name, unit, layer, line_step) in [
+        ("unused-line", "é日本🙂 <!-- rumdl-disable-line MD013 --> ", None, 1),
+        (
+            "used-lines",
+            "text <!-- rumdl-disable-line MD013 -->\n",
+            Some(DisableLayer::Line),
+            1,
+        ),
+        (
+            "used-blocks",
+            "<!-- rumdl-disable MD013 -->\ntext\n",
+            Some(DisableLayer::Block),
+            2,
+        ),
+        (
+            "config-line",
+            "é日本🙂 <!-- rumdl-configure-file {\"MD013\":false} --> ",
+            None,
+            1,
+        ),
+        (
+            "config-lines",
+            "<!-- rumdl-configure-file {\"MD013\":false} -->\n",
+            None,
+            1,
+        ),
+    ] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = unit.repeat(count);
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                let mut report = SuppressionReport::default();
+                report.judged_rules.insert("MD013".into());
+                if let Some(layer) = layer {
+                    report.suppressed = (1..=count)
+                        .map(|line| SuppressedWarning {
+                            rule_name: "MD013".into(),
+                            line: line * line_step,
+                            layer,
+                        })
+                        .collect();
+                }
+                assert!(!rule.should_skip(&ctx));
+                assert_eq!(
+                    rule.check_suppressions(&ctx, &report).unwrap().len(),
+                    if layer.is_some() { 0 } else { count }
+                );
+                let mut samples: Vec<_> = (0..7)
+                    .map(|_| {
+                        let start = MeasurementClock::now();
+                        std::hint::black_box(
+                            rule.check_suppressions(std::hint::black_box(&ctx), std::hint::black_box(&report))
+                                .unwrap(),
+                        );
+                        start.elapsed()
+                    })
+                    .collect();
+                samples.sort();
+                samples[3]
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD087 {name}"), &times, 3.0);
+    }
+}
+
+#[test]
+fn test_configure_file_validation_linear_complexity() {
+    use rumdl_lib::inline_config::validate_inline_config_rules;
+
+    for separator in [" ", "\n"] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("<!-- rumdl-configure-file {{\"MD013\":false}} -->{separator}").repeat(count);
+                assert!(validate_inline_config_rules(&content, MarkdownFlavor::Standard).is_empty());
+                let mut samples: Vec<_> = (0..7)
+                    .map(|_| {
+                        let start = MeasurementClock::now();
+                        std::hint::black_box(validate_inline_config_rules(
+                            std::hint::black_box(&content),
+                            MarkdownFlavor::Standard,
+                        ));
+                        start.elapsed()
+                    })
+                    .collect();
+                samples.sort();
+                samples[3]
+            })
+            .collect();
+        assert_linear_complexity(&format!("configure-file validation {separator:?}"), &times, 3.0);
+    }
+}
+
 /// Fence candidates in list continuations must share block lookups, including
 /// both delimiters and compound-fix endpoints.
 #[test]

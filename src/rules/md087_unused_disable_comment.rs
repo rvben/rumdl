@@ -23,9 +23,84 @@
 //! about to restore the line that needed it, and `rumdl fmt` must not delete
 //! authored comments on its own.
 
-use crate::inline_config::{DisableSite, collect_disable_sites, normalize_rule_name};
-use crate::lint_context::LintContext;
+use std::collections::{HashMap, HashSet};
+
+use crate::inline_config::{DisableLayer, DisableScope, DisableSite, collect_disable_sites, normalize_rule_name};
+use crate::lint_context::{LintContext, SourcePositions};
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity, SuppressionReport};
+
+#[derive(Default)]
+struct SuppressionUse {
+    file: bool,
+    last_block_line: usize,
+    lines: HashSet<usize>,
+}
+
+/// Keep each suppression layer separate: a file disable must not give a line
+/// comment credit. Block scopes reach every later line, so only their last
+/// suppressed line is needed to answer whether a block comment was used.
+struct SuppressionIndex<'a>(HashMap<&'a str, SuppressionUse>);
+
+impl<'a> SuppressionIndex<'a> {
+    fn new(report: &'a SuppressionReport) -> Self {
+        let mut uses: HashMap<&str, SuppressionUse> = HashMap::new();
+        for warning in &report.suppressed {
+            let usage = uses.entry(&warning.rule_name).or_default();
+            match warning.layer {
+                DisableLayer::File => usage.file = true,
+                DisableLayer::Block => usage.last_block_line = usage.last_block_line.max(warning.line),
+                DisableLayer::Line => {
+                    usage.lines.insert(warning.line);
+                }
+            }
+        }
+        Self(uses)
+    }
+
+    fn used(&self, rule: &str, scope: DisableScope) -> bool {
+        self.0.get(rule).is_some_and(|usage| match scope {
+            DisableScope::File => usage.file,
+            DisableScope::Block(start) => start < usage.last_block_line,
+            DisableScope::Line(line) => usage.lines.contains(&line),
+        })
+    }
+}
+
+/// Keep cheap early matches cheap. Across all queries, scan at most two reports'
+/// worth of entries before switching to indexed lookups. Cheap matches for
+/// broad disable comments do not need an index.
+struct SuppressionLookup<'a> {
+    report: &'a SuppressionReport,
+    scans_left: usize,
+    index: std::cell::OnceCell<SuppressionIndex<'a>>,
+}
+
+impl<'a> SuppressionLookup<'a> {
+    fn new(report: &'a SuppressionReport) -> Self {
+        Self {
+            report,
+            scans_left: report.suppressed.len(),
+            index: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn used(&mut self, rule: &str, scope: DisableScope) -> bool {
+        if self.scans_left > 0 {
+            let found = self
+                .report
+                .suppressed
+                .iter()
+                .position(|warning| warning.rule_name == rule && scope.carries(warning.layer, warning.line));
+            let scanned = found.map_or(self.report.suppressed.len(), |index| index + 1);
+            self.scans_left = self.scans_left.saturating_sub(scanned);
+            found.is_some()
+        } else {
+            self.index
+                .get_or_init(|| SuppressionIndex::new(self.report))
+                .used(rule, scope)
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct MD087UnusedDisableComment;
@@ -39,7 +114,7 @@ impl MD087UnusedDisableComment {
     ///
     /// A comment naming no rule returns nothing: it disables every rule, so the
     /// findings of one run cannot show that it silenced nothing.
-    fn unused_rules(&self, site: &DisableSite, report: &SuppressionReport) -> Vec<String> {
+    fn unused_rules(&self, site: &DisableSite, lookup: &mut SuppressionLookup<'_>) -> Vec<String> {
         let mut unused: Vec<String> = Vec::new();
 
         for written in &site.rules {
@@ -49,13 +124,10 @@ impl MD087UnusedDisableComment {
             let canonical = normalize_rule_name(written);
             // This rule's own findings are raised after the report is assembled,
             // so a comment silencing them cannot appear in it.
-            if canonical == self.name() || !report.judged_rules.contains(&canonical) {
+            if canonical == self.name() || !lookup.report.judged_rules.contains(&canonical) {
                 continue;
             }
-            let used = report
-                .suppressed
-                .iter()
-                .any(|warning| warning.rule_name == canonical && site.scope.carries(warning.layer, warning.line));
+            let used = lookup.used(&canonical, site.scope);
             if !used && !unused.contains(written) {
                 unused.push(written.clone());
             }
@@ -64,10 +136,29 @@ impl MD087UnusedDisableComment {
         unused
     }
 
-    fn warning(&self, ctx: &LintContext, site: &DisableSite, unused: &[String]) -> LintWarning {
+    fn diagnostic_position(ctx: &LintContext, positions: &mut SourcePositions<'_>, offset: usize) -> (usize, usize) {
+        let line = ctx.line_number_at_offset(offset);
+        if let Some(info) = ctx.line_info(line)
+            && offset <= info.byte_offset + info.byte_len
+        {
+            (line, positions.column_on_line(line - 1, offset) + 1)
+        } else {
+            // Multiline comments are clipped to split('\n') lines, which retain
+            // CR. Preserve scalar positions outside the content-only line table.
+            ctx.offset_to_line_col(offset)
+        }
+    }
+
+    fn warning(
+        &self,
+        ctx: &LintContext,
+        positions: &mut SourcePositions<'_>,
+        site: &DisableSite,
+        unused: &[String],
+    ) -> LintWarning {
         let line_offset = ctx.line_info(site.line).map_or(0, |info| info.byte_offset);
-        let (line, column) = ctx.offset_to_line_col(line_offset + site.span.start);
-        let (_, end_column) = ctx.offset_to_line_col(line_offset + site.span.end);
+        let (line, column) = Self::diagnostic_position(ctx, positions, line_offset + site.span.start);
+        let (_, end_column) = Self::diagnostic_position(ctx, positions, line_offset + site.span.end);
         let names = unused.join(", ");
         // A configure-file comment configures rules rather than disabling a span,
         // so it is named for what the entry does instead of what the comment is.
@@ -119,12 +210,18 @@ impl Rule for MD087UnusedDisableComment {
 
     fn check_suppressions(&self, ctx: &LintContext, report: &SuppressionReport) -> LintResult {
         let mut warnings = Vec::new();
-        for site in collect_disable_sites(ctx.content, &ctx.code_blocks, ctx.inline_code_ranges()) {
-            let unused = self.unused_rules(&site, report);
+        let sites = collect_disable_sites(ctx.content, &ctx.code_blocks, ctx.inline_code_ranges());
+        if sites.is_empty() {
+            return Ok(warnings);
+        }
+        let mut lookup = SuppressionLookup::new(report);
+        let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
+        for site in sites {
+            let unused = self.unused_rules(&site, &mut lookup);
             if unused.is_empty() {
                 continue;
             }
-            warnings.push(self.warning(ctx, &site, &unused));
+            warnings.push(self.warning(ctx, &mut positions, &site, &unused));
         }
         Ok(warnings)
     }
@@ -156,6 +253,84 @@ mod tests {
     use crate::inline_config::DisableLayer;
     use crate::rule::SuppressedWarning;
     use std::collections::HashSet;
+
+    #[test]
+    fn suppression_index_matches_layer_and_scope_scans() {
+        let suppressed = [
+            ("MD013", DisableLayer::Block, 0),
+            ("MD013", DisableLayer::Block, 30),
+            ("MD013", DisableLayer::Block, 10),
+            ("MD001", DisableLayer::Line, 7),
+            ("md013", DisableLayer::File, 0),
+            ("MD013", DisableLayer::Line, 0),
+            ("MD001", DisableLayer::Line, usize::MAX),
+            ("MD013", DisableLayer::Block, usize::MAX),
+            ("MD001", DisableLayer::File, 2),
+        ];
+        for count in 0..=suppressed.len() {
+            let report = report(&suppressed[..count], &["MD013", "MD001"]);
+            let index = SuppressionIndex::new(&report);
+            let mut lookup = SuppressionLookup::new(&report);
+            for rule in ["MD013", "md013", "MD001", "MD087", "unknown"] {
+                for scope in [0, 1, 7, 10, 20, 30, usize::MAX]
+                    .into_iter()
+                    .flat_map(|line| [DisableScope::Line(line), DisableScope::Block(line)])
+                    .chain(std::iter::once(DisableScope::File))
+                {
+                    let expected = report
+                        .suppressed
+                        .iter()
+                        .any(|warning| warning.rule_name == rule && scope.carries(warning.layer, warning.line));
+                    assert_eq!(index.used(rule, scope), expected, "{rule} {scope:?}, {count} entries");
+                    assert_eq!(lookup.used(rule, scope), expected, "{rule} {scope:?}, {count} entries");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn broad_disables_keep_cheap_early_matches() {
+        let report = report(&[("MD013", DisableLayer::File, 1); 100], &["MD013"]);
+        let mut lookup = SuppressionLookup::new(&report);
+        for _ in 0..10 {
+            assert!(lookup.used("MD013", DisableScope::File));
+        }
+        assert!(
+            lookup.index.get().is_none(),
+            "early matches should not index the whole report"
+        );
+        assert!(!lookup.used("MD001", DisableScope::File));
+        assert!(lookup.used("MD013", DisableScope::File));
+        assert!(
+            lookup.index.get().is_some(),
+            "repeated scans should switch to the index"
+        );
+    }
+
+    #[test]
+    fn cached_comment_positions_match_scalar_positions() {
+        for content in [
+            String::new(),
+            "\n".into(),
+            "é日本🙂\r\n<!-- rumdl-disable-line MD013 -->\r\n".into(),
+            format!("{}<!-- rumdl-disable\nMD013 -->\r\n", "é日本🙂 ".repeat(80)),
+        ] {
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let mut positions = SourcePositions::new(&content, &ctx.lines);
+            // Also exercise backwards queries and endpoints outside the parser's
+            // content-only line table, including CRLF and trailing EOF.
+            for offset in (0..=content.len() + 1)
+                .chain((0..=content.len() + 1).rev())
+                .chain(std::iter::once(usize::MAX))
+            {
+                assert_eq!(
+                    MD087UnusedDisableComment::diagnostic_position(&ctx, &mut positions, offset),
+                    ctx.offset_to_line_col(offset),
+                    "{content:?}, byte {offset}"
+                );
+            }
+        }
+    }
 
     fn report(suppressed: &[(&str, DisableLayer, usize)], judged: &[&str]) -> SuppressionReport {
         SuppressionReport {

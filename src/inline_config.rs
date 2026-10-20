@@ -1134,11 +1134,6 @@ fn line_in_code_block(line_start: usize, line: &str, code_blocks: &[(usize, usiz
     offset_in_code_block(probe, code_blocks)
 }
 
-/// The 1-indexed line a byte offset falls on.
-fn line_of_offset(text: &str, offset: usize) -> usize {
-    text[..offset].bytes().filter(|&b| b == b'\n').count() + 1
-}
-
 /// A warning together with the byte offset of the directive that raised it.
 ///
 /// The offset is what lets a warning be tested against inline code spans, which
@@ -1407,7 +1402,7 @@ pub fn collect_disable_sites(
         if rules.is_empty() {
             continue;
         }
-        let line_num = line_of_offset(content, offset);
+        let line_num = line_spans.partition_point(|&(start, _)| start <= offset);
         let Some(&(line_start, line)) = line_spans.get(line_num - 1) else {
             continue;
         };
@@ -1640,11 +1635,16 @@ fn collect_inline_config_warnings(
         ));
     };
 
+    // The scanner emits increasing offsets. Count only the new prefix between
+    // comments instead of recounting the document for every configuration.
+    let mut previous_offset = 0;
+    let mut line_number = 1;
     for (offset, json_config) in scan_configure_file_comments(content) {
         let Some(obj) = json_config.as_object() else {
             continue;
         };
-        let line_number = line_of_offset(content, offset);
+        line_number += content[previous_offset..offset].bytes().filter(|&b| b == b'\n').count();
+        previous_offset = offset;
         for (rule_name, rule_config) in obj {
             if validate_names {
                 if !is_valid_rule_name(rule_name) {
@@ -1749,6 +1749,36 @@ fn collect_inline_config_warnings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configure_file_positions_match_source_lines() {
+        for separator in [" ", "\n", "\r\n"] {
+            let source = [
+                "é日本🙂",
+                "<!-- rumdl-configure-file [] -->",
+                "<!-- rumdl-configure-file {\"MD013\":false,\"unknown-rule\":false} -->",
+                "<!-- rumdl-configure-file broken -->",
+                "<!-- rumdl-configure-file\n{\"MD013\":false,\"unknown-rule\":false}\n-->",
+                "<!-- rumdl-configure-file null -->",
+                "<!-- rumdl-configure-file {\"MD013\":false,\"unknown-rule\":false} -->",
+            ]
+            .join(if separator == "\r\n" { "\n" } else { separator })
+            .replace('\n', if separator == "\r\n" { "\r\n" } else { "\n" });
+            let expected: Vec<_> = scan_configure_file_comments(&source)
+                .into_iter()
+                .filter(|(_, value)| value.is_object())
+                .map(|(offset, _)| source[..offset].bytes().filter(|&byte| byte == b'\n').count() + 1)
+                .collect();
+            assert_eq!(expected.len(), 3);
+            let sites = collect_disable_sites(&source, &[], &[]);
+            assert_eq!(sites.iter().map(|site| site.line).collect::<Vec<_>>(), expected);
+            let warnings = validate_inline_config_rules(&source, MarkdownFlavor::Standard);
+            assert_eq!(
+                warnings.iter().map(|warning| warning.line_number).collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn combined_validation_preserves_warning_order_and_literal_code() {
