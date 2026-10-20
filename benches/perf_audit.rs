@@ -536,6 +536,43 @@ fn link_document(padded: bool, escaped: bool) -> String {
     content
 }
 
+fn bench_md057_positions(c: &mut Criterion) {
+    let mut group = c.benchmark_group("md057_positions");
+    group.sample_size(10);
+    let temp = tempfile::tempdir().unwrap();
+    let base = temp.path().join("sub");
+    std::fs::create_dir(&base).unwrap();
+    std::fs::write(base.join("target.md"), "target").unwrap();
+    let source = base.join("page.md");
+    std::fs::write(&source, "source").unwrap();
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::Warn,
+        compact_paths: true,
+        self_referential_links: true,
+        ..Default::default()
+    };
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&base);
+    for (name, unit, fixable) in [
+        ("missing", "é日本🙂 [missing](missing.md) ", false),
+        ("absolute", "é日本🙂 [absolute](/missing.md) ", false),
+        ("compact", "é日本🙂 [compact](../sub/target.md#part) ", true),
+        ("self", "é日本🙂 [self](page.md#part) ", true),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = format!("{}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, Some(source.clone()));
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), count);
+            assert!(warnings.iter().all(|warning| warning.fix.is_some() == fixable));
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap())
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_md093_positions(c: &mut Criterion) {
     let mut group = c.benchmark_group("md093_positions");
     group.sample_size(10);
@@ -1115,6 +1152,7 @@ criterion_group!(
     bench_md032,
     bench_md052,
     bench_md057,
+    bench_md057_positions,
     bench_workspace_build,
     bench_rules,
     bench_emphasis_pairing,

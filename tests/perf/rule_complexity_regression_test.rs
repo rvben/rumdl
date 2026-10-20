@@ -119,9 +119,12 @@ fn measure_rule_time_for_flavor<R: Rule + ?Sized>(
     iterations: usize,
 ) -> Duration {
     let ctx = LintContext::new(content, flavor, None);
+    measure_rule_time_with_context(rule, &ctx, iterations)
+}
 
+fn measure_rule_time_with_context<R: Rule + ?Sized>(rule: &R, ctx: &LintContext, iterations: usize) -> Duration {
     // Warm-up run (discard - avoids cold cache artifacts)
-    let _ = rule.check(&ctx);
+    let _ = rule.check(ctx);
 
     // Batch fast checks so the timer's resolution cannot produce zero samples.
     // Normalize by the batch size to compare the cost of one check.
@@ -129,7 +132,7 @@ fn measure_rule_time_for_flavor<R: Rule + ?Sized>(
     while repetitions < (1 << 20) {
         let start = MeasurementClock::now();
         for _ in 0..repetitions {
-            let _ = std::hint::black_box(rule.check(std::hint::black_box(&ctx)));
+            let _ = std::hint::black_box(rule.check(std::hint::black_box(ctx)));
         }
         if start.elapsed() >= Duration::from_millis(5) {
             break;
@@ -142,7 +145,7 @@ fn measure_rule_time_for_flavor<R: Rule + ?Sized>(
         .map(|_| {
             let start = MeasurementClock::now();
             for _ in 0..repetitions {
-                let _ = std::hint::black_box(rule.check(std::hint::black_box(&ctx)));
+                let _ = std::hint::black_box(rule.check(std::hint::black_box(ctx)));
             }
             start.elapsed() / repetitions
         })
@@ -350,6 +353,44 @@ fn test_md049_warning_filter_linear_complexity() {
             })
             .collect();
         assert_linear_complexity(&format!("MD049 filter {flavor:?} {unit:?}"), &times, 3.0);
+    }
+}
+
+/// A source path is essential: MD057 otherwise skips filesystem diagnostics.
+#[test]
+fn test_md057_warning_columns_linear_complexity() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = temp.path().join("sub");
+    std::fs::create_dir(&base).unwrap();
+    std::fs::write(base.join("target.md"), "target").unwrap();
+    let source = base.join("page.md");
+    std::fs::write(&source, "source").unwrap();
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::Warn,
+        compact_paths: true,
+        self_referential_links: true,
+        ..Default::default()
+    };
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&base);
+    for (name, unit, fixable) in [
+        ("missing", "é日本🙂 [missing](missing.md) ", false),
+        ("absolute", "é日本🙂 [absolute](/missing.md) ", false),
+        ("compact", "é日本🙂 [compact](../sub/target.md#part) ", true),
+        ("self", "é日本🙂 [self](page.md#part) ", true),
+    ] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("{}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, Some(source.clone()));
+                assert!(!rule.should_skip(&ctx));
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), count);
+                assert!(warnings.iter().all(|warning| warning.fix.is_some() == fixable));
+                measure_rule_time_with_context(&rule, &ctx, 5)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD057 {name}"), &times, 3.0);
     }
 }
 

@@ -3,6 +3,7 @@
 //!
 //! See [docs/md057.md](../../docs/md057.md) for full documentation, configuration, and examples.
 
+use crate::lint_context::{LintContext, SourcePositions};
 use crate::rule::{
     CrossFileScope, Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity,
 };
@@ -752,6 +753,20 @@ impl MD057ExistingRelativeLinks {
         match suffix.strip_prefix('#') {
             Some(fragment) if !fragment.is_empty() => Some(SelfReferentialLink::Fragment(suffix.to_string())),
             _ => Some(SelfReferentialLink::WholeFile),
+        }
+    }
+
+    /// Reuse character checkpoints for diagnostics on long source lines. The
+    /// scalar fallback preserves offsets inside CRLF and after a trailing LF,
+    /// which the parser's content-only line table does not represent.
+    fn diagnostic_position(ctx: &LintContext, positions: &mut SourcePositions<'_>, offset: usize) -> (usize, usize) {
+        let line = ctx.line_number_at_offset(offset);
+        if let Some(info) = ctx.line_info(line)
+            && offset <= info.byte_offset + info.byte_len
+        {
+            (line, positions.column_on_line(line - 1, offset) + 1)
+        } else {
+            ctx.offset_to_line_col(offset)
         }
     }
 
@@ -1536,6 +1551,9 @@ impl Rule for MD057ExistingRelativeLinks {
             self.document_anchor(ctx.flavor, source_file, explicit_base, &project_root)
         }));
 
+        let mut positions = SourcePositions::new(content, &ctx.lines);
+        let mut position = |offset| Self::diagnostic_position(ctx, &mut positions, offset);
+
         // Destinations come from the parse, so a link whose text wraps onto
         // another line is read the same as one written on a single line. Every
         // report on a link points at its destination, which sits on the line
@@ -1564,13 +1582,13 @@ impl Rule for MD057ExistingRelativeLinks {
             if Self::is_absolute_path(url) {
                 if let Some(message) = self.absolute_link_message(url, &anchor, &project_root, ctx.link_target_policy())
                 {
-                    let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+                    let (line, column) = position(destination.url_range.start);
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line,
                         column,
                         end_line: line,
-                        end_column: ctx.offset_to_line_col(destination.url_range.end).1,
+                        end_column: position(destination.url_range.end).1,
                         message,
                         severity: Severity::Warning,
                         fix: None,
@@ -1594,13 +1612,13 @@ impl Rule for MD057ExistingRelativeLinks {
                 anchor.self_path.as_deref(),
                 ctx.link_target_policy(),
             ) {
-                let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+                let (line, column) = position(destination.url_range.start);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line,
                     column,
                     end_line: line,
-                    end_column: ctx.offset_to_line_col(destination.fix_range.end).1,
+                    end_column: position(destination.fix_range.end).1,
                     message: Self::self_referential_message(&full_url, &self_link),
                     severity: Severity::Warning,
                     fix: match &self_link {
@@ -1614,13 +1632,13 @@ impl Rule for MD057ExistingRelativeLinks {
             }
 
             if let Some(suggestion) = self.compact_path_suggestion(&full_url, &anchor.base_path) {
-                let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+                let (line, column) = position(destination.url_range.start);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line,
                     column,
                     end_line: line,
-                    end_column: ctx.offset_to_line_col(destination.fix_range.end).1,
+                    end_column: position(destination.fix_range.end).1,
                     message: format!("Relative link '{full_url}' can be simplified to '{suggestion}'"),
                     severity: Severity::Warning,
                     fix: Some(Fix::new(destination.fix_range.clone(), suggestion)),
@@ -1632,13 +1650,13 @@ impl Rule for MD057ExistingRelativeLinks {
             }
 
             // File doesn't exist and no source file found
-            let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+            let (line, column) = position(destination.url_range.start);
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line,
                 column,
                 end_line: line,
-                end_column: ctx.offset_to_line_col(destination.url_range.end).1,
+                end_column: position(destination.url_range.end).1,
                 message: Self::missing_relative_message(url, ctx.link_target_policy()),
                 severity: Severity::Error,
                 fix: None,
@@ -1768,7 +1786,7 @@ impl Rule for MD057ExistingRelativeLinks {
             let url_range = Self::ref_def_url_range(ctx.content, ref_def);
             let (line, col) = url_range
                 .as_ref()
-                .map_or((ref_def.line, 1), |range| ctx.offset_to_line_col(range.start));
+                .map_or((ref_def.line, 1), |range| position(range.start));
             let end_col = col + url.chars().count();
 
             // Handle absolute paths based on config
@@ -6095,5 +6113,93 @@ mod exact_case_tests {
         let result = check_as_file(anchor, "test.md", "[a](README.md)\n", MD057Config::default());
 
         assert!(result.is_empty(), "Expected no warning. Got: {result:?}");
+    }
+}
+
+#[cfg(test)]
+mod cached_position_tests {
+    use super::*;
+    use crate::config::MarkdownFlavor;
+
+    #[test]
+    fn cached_positions_preserve_scalar_line_boundary_semantics() {
+        for content in [
+            String::new(),
+            "\r\n".to_string(),
+            format!("{}\r\n{}\n", "é日本🙂 ".repeat(130), "é\t".repeat(300)),
+            format!("{}\r", "é日本🙂 ".repeat(130)),
+        ] {
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let mut positions = SourcePositions::new(&content, &ctx.lines);
+            for offset in (0..=content.len() + 3).rev().chain([usize::MAX, 0]) {
+                assert_eq!(
+                    MD057ExistingRelativeLinks::diagnostic_position(&ctx, &mut positions, offset),
+                    ctx.offset_to_line_col(offset),
+                    "offset {offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn warning_and_fix_ranges_keep_unicode_source_coordinates() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().join("sub");
+        std::fs::create_dir(&base).unwrap();
+        std::fs::write(base.join("target.md"), "target").unwrap();
+        let source = base.join("page.md");
+        std::fs::write(&source, "source").unwrap();
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::Warn,
+            compact_paths: true,
+            self_referential_links: true,
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&base);
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs, MarkdownFlavor::MDX] {
+            for newline in ["\n", "\r\n"] {
+                let prefix = "é日本🙂 ".repeat(150);
+                let content = format!(
+                    "[{}]: missing.md{newline}{newline}{prefix}[missing](missing.md) [abs](/missing.md) [compact](../sub/target.md#part) [self](page.md#part){newline}[wrapped{newline}{prefix}label](missing.md)",
+                    "é".repeat(300)
+                );
+                let ctx = LintContext::new(&content, flavor, Some(source.clone()));
+                let warnings = rule.check(&ctx).unwrap();
+                let destinations: Vec<_> = ctx.body_link_destinations().collect();
+                assert_eq!(destinations.len(), 5);
+                assert_eq!(warnings.len(), 6);
+                for (warning, destination) in warnings.iter().zip(destinations) {
+                    let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+                    let end = if warning.fix.is_some() {
+                        destination.fix_range.end
+                    } else {
+                        destination.url_range.end
+                    };
+                    assert_eq!(
+                        (warning.line, warning.column, warning.end_line, warning.end_column),
+                        (line, column, line, ctx.offset_to_line_col(end).1)
+                    );
+                    if let Some(fix) = &warning.fix {
+                        assert_eq!(fix.range, destination.fix_range);
+                        assert_eq!(
+                            fix.replacement,
+                            if destination.url == "page.md" {
+                                "#part"
+                            } else {
+                                "target.md#part"
+                            }
+                        );
+                    }
+                }
+                let definition = &ctx.reference_definitions()[0];
+                let range = MD057ExistingRelativeLinks::ref_def_url_range(&content, definition).unwrap();
+                let (line, column) = ctx.offset_to_line_col(range.start);
+                let warning = warnings.last().unwrap();
+                assert_eq!(
+                    (warning.line, warning.column, warning.end_line, warning.end_column),
+                    (line, column, line, column + definition.url.chars().count())
+                );
+            }
+        }
     }
 }
