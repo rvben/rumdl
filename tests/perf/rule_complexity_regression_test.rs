@@ -256,6 +256,32 @@ fn test_md037_warning_filter_linear_complexity() {
     }
 }
 
+#[test]
+fn test_md049_warning_filter_linear_complexity() {
+    for (unit, flavor, expected) in [
+        ("é日本🙂 *good* _other_ ", MarkdownFlavor::Standard, 1),
+        ("*foo * bar* ", MarkdownFlavor::Standard, 0),
+        (
+            "é日本🙂 *good* _other_ ^^_insert_^^ ++ctrl+_key_++ :icon_name: ",
+            MarkdownFlavor::MkDocs,
+            1,
+        ),
+        ("é日本🙂 *good* _other_ ==_mark_== ", MarkdownFlavor::Obsidian, 1),
+    ] {
+        let rule = MD049EmphasisStyle::default();
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("{}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, flavor, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), count * expected);
+                measure_rule_time_for_flavor(&rule, &content, flavor, 5)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD049 filter {flavor:?} {unit:?}"), &times, 3.0);
+    }
+}
+
 /// Assert linear complexity by checking growth ratios
 fn assert_linear_complexity(name: &str, durations: &[Duration], threshold: f64) {
     assert!(durations.len() >= 3, "Need at least 3 measurements for ratio check");

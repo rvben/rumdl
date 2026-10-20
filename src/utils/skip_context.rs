@@ -698,6 +698,39 @@ fn append_markup_ranges(ranges: &mut Vec<(usize, usize)>, line: &str, flavor: Ma
     }
 }
 
+/// Per-check markup membership using the caller's line-relative byte positions.
+/// Only queried long lines allocate an index; short lines retain scalar checks.
+pub(crate) struct MarkupExclusions<'ctx, 'src> {
+    ctx: &'ctx LintContext<'src>,
+    lines: HashMap<usize, SkipRegions>,
+}
+
+impl<'ctx, 'src> MarkupExclusions<'ctx, 'src> {
+    pub(crate) fn new(ctx: &'ctx LintContext<'src>) -> Self {
+        Self {
+            ctx,
+            lines: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn contains(&mut self, index: usize, byte: usize) -> bool {
+        let Some(line) = self.ctx.raw_lines().get(index) else {
+            return false;
+        };
+        if line.len() < 256 {
+            return is_in_mkdocs_markup(line, byte, self.ctx.flavor);
+        }
+        self.lines
+            .entry(index)
+            .or_insert_with(|| {
+                let mut ranges = Vec::new();
+                append_markup_ranges(&mut ranges, line, self.ctx.flavor);
+                SkipRegions::new(ranges)
+            })
+            .contains(byte)
+    }
+}
+
 /// Cached equivalents of MD037's individual exclusion predicates. Code spans
 /// use character positions; inline HTML and markup use line-relative bytes.
 pub(crate) struct SpacingExclusions<'ctx, 'src> {
@@ -855,6 +888,37 @@ impl<'ctx, 'src> EmphasisContext<'ctx, 'src> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markup_exclusions_match_scalar_at_each_byte() {
+        for padding in [0, 40] {
+            let prefix = "é日本🙂e\u{301}\t".repeat(padding);
+            let source = format!(
+                "{prefix}:smile: :material-check: :icon_with_underscore: ^^insert^^ ^super^ ~sub~ ~~strike~~\n\
+                 {prefix}==mark== ++ctrl+alt++ {{--delete--}} {{++add++}} \\==escaped== ^unclosed\n"
+            );
+            for flavor in crate::format_proof::ALL_FLAVORS {
+                for ending in ["\n", "\r\n"] {
+                    let content = source.replace('\n', ending);
+                    let ctx = LintContext::new(&content, flavor, None);
+                    let mut index = MarkupExclusions::new(&ctx);
+                    for (line_index, line) in ctx.raw_lines().iter().enumerate().rev() {
+                        for byte in (0..=line.len() + 1).rev() {
+                            assert_eq!(
+                                index.contains(line_index, byte),
+                                is_in_mkdocs_markup(line, byte, flavor),
+                                "{flavor:?}, line={line_index}, byte={byte}",
+                            );
+                        }
+                    }
+                    assert!(!index.contains(ctx.raw_lines().len(), 0));
+                    if padding == 0 {
+                        assert!(index.lines.is_empty(), "short lines should not allocate indexes");
+                    }
+                }
+            }
+        }
+    }
 
     // Frozen scalar reference for EmphasisContext::should_skip. Changes to
     // eligibility must explicitly update this oracle as well as the index.

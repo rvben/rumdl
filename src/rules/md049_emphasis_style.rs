@@ -1,7 +1,8 @@
+use crate::lint_context::SourcePositions;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::emphasis_utils::find_single_emphasis_edges;
-use crate::utils::skip_context::is_in_mkdocs_markup;
+use crate::utils::skip_context::MarkupExclusions;
 
 mod md049_config;
 use md049_config::MD049Config;
@@ -99,7 +100,7 @@ impl Rule for MD049EmphasisStyle {
         }
 
         // Filter out emphasis markers that are inside links or MkDocs markup
-        let lines = ctx.raw_lines();
+        let mut markup = MarkupExclusions::new(ctx);
         // Math byte ranges, computed once for the whole document. The
         // line-level `skip_math_blocks` filter drops whole math-only lines,
         // but a line that mixes a display span with lintable prose (e.g.
@@ -200,15 +201,14 @@ impl Rule for MD049EmphasisStyle {
                 return false;
             }
             // Skip if inside MkDocs markup (Keys, Caret, Mark, icon shortcodes)
-            if let Some(line) = lines.get(*line_num - 1) {
-                let line_pos = col.saturating_sub(1); // Convert 1-indexed col to 0-indexed position
-                if is_in_mkdocs_markup(line, line_pos, ctx.flavor) {
-                    return false;
-                }
+            let line_pos = col.saturating_sub(1); // Convert 1-indexed col to 0-indexed position
+            if markup.contains(*line_num - 1, line_pos) {
+                return false;
             }
             true
         });
 
+        let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
         match self.config.style {
             EmphasisStyle::Consistent => {
                 // If we have less than 2 emphasis nodes, no need to check consistency
@@ -231,7 +231,7 @@ impl Rule for MD049EmphasisStyle {
                         // The byte length drives the Fix range; the character length
                         // drives the displayed end column.
                         let emphasis_len = 1 + content.len() + 1;
-                        let (_, char_col) = ctx.offset_to_line_col(*abs_pos);
+                        let char_col = positions.column_on_line(*line_num - 1, *abs_pos) + 1;
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
@@ -266,7 +266,7 @@ impl Rule for MD049EmphasisStyle {
                         // The byte length drives the Fix range; the character length
                         // drives the displayed end column.
                         let emphasis_len = 1 + content.len() + 1;
-                        let (_, char_col) = ctx.offset_to_line_col(*abs_pos);
+                        let char_col = positions.column_on_line(*line_num - 1, *abs_pos) + 1;
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
@@ -332,6 +332,38 @@ impl Rule for MD049EmphasisStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indexed_columns_preserve_unicode_locations_and_fix_ranges() {
+        for count in [1, 128] {
+            let line = format!(
+                "é日本🙂e\u{301}\t`é日本🙂` $é日$ {}\n",
+                "*first* _second_ ".repeat(count)
+            );
+            for ending in ["\n", "\r\n"] {
+                let content = line.repeat(2).replace('\n', ending);
+                for flavor in crate::format_proof::ALL_FLAVORS {
+                    let ctx = crate::lint_context::LintContext::new(&content, flavor, None);
+                    for style in [
+                        EmphasisStyle::Consistent,
+                        EmphasisStyle::Asterisk,
+                        EmphasisStyle::Underscore,
+                    ] {
+                        let warnings = MD049EmphasisStyle::new(style).check(&ctx).unwrap();
+                        assert_eq!(warnings.len(), count * 2, "{flavor:?}, {style:?}");
+                        for warning in warnings {
+                            let fix = warning.fix.unwrap();
+                            let (line, column) = ctx.offset_to_line_col(fix.range.start);
+                            assert_eq!((warning.line, warning.column), (line, column));
+                            assert_eq!(warning.end_line, line);
+                            assert_eq!(warning.end_column, column + content[fix.range.clone()].chars().count());
+                            assert!(matches!(&content[fix.range], "*first*" | "_second_"));
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_shortcode_markers_are_not_restyled() {
