@@ -720,6 +720,48 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// Plain attribute lists between anchors must not force a fresh anchor scan.
+#[test]
+fn test_heading_anchor_attributes_linear_complexity() {
+    let rule = MD024NoDuplicateHeading::default();
+    for name in ["id", "attributes"] {
+        for stage in ["range", "MD024"] {
+            let times: Vec<_> = [512, 1024, 2048]
+                .into_iter()
+                .map(|count| {
+                    let unit = if name == "id" {
+                        "<a></a> {#id} "
+                    } else {
+                        "<a id=x></a> {: #id .class data='value'} "
+                    };
+                    let content = format!("# Word {}\n\n", unit.repeat(count)).repeat(2);
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+                    for heading in ctx.headings() {
+                        assert_eq!(&content[heading.text_byte_range(&content)], "Word");
+                    }
+                    let mut samples: Vec<_> = (0..7)
+                        .map(|_| {
+                            let start = MeasurementClock::now();
+                            if stage == "range" {
+                                for heading in ctx.headings() {
+                                    std::hint::black_box(heading.text_byte_range(&content));
+                                }
+                            } else {
+                                std::hint::black_box(rule.check(&ctx).unwrap());
+                            }
+                            start.elapsed()
+                        })
+                        .collect();
+                    samples.sort();
+                    samples[3]
+                })
+                .collect();
+            assert_linear_complexity(&format!("heading anchor attributes {name}/{stage}"), &times, 3.0);
+        }
+    }
+}
+
 /// Distinct unmatched backtick lengths must not repeatedly scan the suffix.
 #[test]
 fn test_heading_backtick_lookup_linear_complexity() {

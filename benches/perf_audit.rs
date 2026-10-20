@@ -823,6 +823,41 @@ fn bench_heading_anchor_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_heading_anchor_attributes(c: &mut Criterion) {
+    use rumdl_lib::rules::MD024NoDuplicateHeading;
+
+    let mut group = c.benchmark_group("heading_anchor_attributes");
+    group.sample_size(10);
+    let rule = MD024NoDuplicateHeading::default();
+    for name in ["id", "attributes"] {
+        for count in [128, 512, 2048] {
+            let unit = if name == "id" {
+                "<a></a> {#id} "
+            } else {
+                "<a id=x></a> {: #id .class data='value'} "
+            };
+            let content = format!("# Word {}\n\n", unit.repeat(count)).repeat(2);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            for stage in ["range", "MD024"] {
+                group.bench_function(BenchmarkId::new(format!("{name}-{stage}"), count), |b| {
+                    b.iter(|| {
+                        if stage == "range" {
+                            for heading in ctx.headings() {
+                                black_box(heading.text_byte_range(black_box(&content)));
+                            }
+                        } else {
+                            black_box(rule.check(black_box(&ctx)).unwrap());
+                        }
+                    });
+                });
+            }
+        }
+    }
+    group.finish();
+}
+
 fn bench_heading_backtick_lookup(c: &mut Criterion) {
     use rumdl_lib::utils::header_id_utils::extract_heading_text;
 
@@ -1763,6 +1798,7 @@ criterion_group!(
     bench_heading_anchor_spacing,
     bench_heading_image_delimiters,
     bench_heading_backtick_lookup,
+    bench_heading_anchor_attributes,
     bench_md030_indented_fallback,
     bench_md087_suppressions,
     bench_directive_code_ranges,

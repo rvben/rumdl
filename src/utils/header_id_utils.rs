@@ -196,10 +196,17 @@ pub fn heading_text_end(line: &str) -> usize {
         if line[..end].ends_with('}')
             && let Some((attr_list_start, _)) = custom_id_at_end(&line[..end])
         {
+            // Removing a closer can expose anchors inside an earlier code span,
+            // image, comment or tag. Plain attribute lists cannot change those
+            // ranges, so keep the cache when no such delimiter was removed.
+            if anchors.is_some()
+                && line.as_bytes()[attr_list_start..end]
+                    .iter()
+                    .any(|byte| matches!(byte, b'`' | b'>' | b']' | b')'))
+            {
+                anchors = None;
+            }
             end = attr_list_start;
-            // An attribute list can contain a closing backtick or tag delimiter.
-            // Removing it can expose anchors that the previous scan ignored.
-            anchors = None;
         } else if let Some((range, _)) = anchors.get_or_insert_with(|| empty_anchor_elements(&line[..end])).pop()
             && range.end == end
         {
@@ -870,6 +877,14 @@ mod tests {
             "{#bad!}",
             "{#id x=`}",
             "{#id x=\">}",
+            "<a></a> {#id} <a></a>",
+            "{#id .class data='value'}",
+            "{#id x=(}",
+            "{#id x=[}",
+            "{#id x=]}",
+            "{#id x=)}",
+            "{#id x=-->}",
+            "{#id x='<'}",
         ];
         for first in tokens {
             for second in tokens {
