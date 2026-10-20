@@ -1651,6 +1651,45 @@ fn bench_md044_link_destinations(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_md044_fallback_ranges(c: &mut Criterion) {
+    let mut group = c.benchmark_group("MD044_fallback_ranges");
+    group.sample_size(10);
+    for (name, prefix, unit, suffix) in [
+        ("comment", "<!--\n", "javascript text ", "\n-->"),
+        ("html", "<div>\n", "javascript text ", "\n</div>"),
+        ("frontmatter", "---\ntitle: ", "javascript text ", "\n---\n"),
+        ("comment_links", "<!--\n", "[label](target) javascript ", "\n-->"),
+        ("comment_code", "<!--\n", "`literal` javascript ", "\n-->"),
+        ("html_code", "<div>\n", "`literal` javascript ", "\n</div>"),
+        ("malformed_tail", "<!--\n[label](javascript) ", "[", "\n-->"),
+        ("malformed_labels", "<!--\n", "[javascript ", "\n-->"),
+        ("malformed_destinations", "<!--\n", "[label](javascript ", "\n-->"),
+        ("malformed_references", "<!--\n", "[label][javascript ", "\n-->"),
+    ] {
+        for count in [512, 2048, 4096] {
+            let content = format!("{prefix}{}{suffix}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let expected = if name == "malformed_tail" { 0 } else { count };
+            assert_eq!(
+                MD044ProperNames::new(vec!["JavaScript".into()], false)
+                    .check(&ctx)
+                    .unwrap()
+                    .len(),
+                expected
+            );
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter_batched(
+                    || MD044ProperNames::new(vec!["JavaScript".into()], false),
+                    |rule| black_box(rule.check(black_box(&ctx)).unwrap()),
+                    BatchSize::SmallInput,
+                );
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_dynamic_regex_cache(c: &mut Criterion) {
     let pattern = format!(
         "(?i)({})",
@@ -1876,6 +1915,7 @@ criterion_group!(
     bench_md044_name_lookup,
     bench_md044_long_lines,
     bench_md044_link_destinations,
+    bench_md044_fallback_ranges,
     bench_dynamic_regex_cache,
     bench_md024_duplicate_headings,
 );

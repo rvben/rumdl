@@ -720,6 +720,54 @@ fn test_heading_anchor_lookup_linear_complexity() {
     }
 }
 
+/// Raw code/link fallbacks must not rescan a non-Markdown line for every name.
+#[test]
+fn test_md044_fallback_ranges_linear_complexity() {
+    for (name, prefix, unit, suffix) in [
+        ("comment", "<!--\n", "javascript text ", "\n-->"),
+        ("html", "<div>\n", "javascript text ", "\n</div>"),
+        ("frontmatter", "---\ntitle: ", "javascript text ", "\n---\n"),
+        ("comment_links", "<!--\n", "[label](target) javascript ", "\n-->"),
+        ("comment_code", "<!--\n", "`literal` javascript ", "\n-->"),
+        ("html_code", "<div>\n", "`literal` javascript ", "\n</div>"),
+        ("malformed_tail", "<!--\n[label](javascript) ", "[", "\n-->"),
+        ("malformed_labels", "<!--\n", "[javascript ", "\n-->"),
+        ("malformed_destinations", "<!--\n", "[label](javascript ", "\n-->"),
+        ("malformed_references", "<!--\n", "[label][javascript ", "\n-->"),
+    ] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let content = format!("{prefix}{}{suffix}\n", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                let expected = if name == "malformed_tail" { 0 } else { count };
+                let body = &ctx.lines[1];
+                assert!(body.in_html_comment || body.in_html_block || body.in_front_matter);
+                assert_eq!(
+                    MD044ProperNames::new(vec!["JavaScript".into()], false)
+                        .check(&ctx)
+                        .unwrap()
+                        .len(),
+                    expected
+                );
+                let mut samples: Vec<_> = (0..7)
+                    .map(|_| {
+                        let rule = MD044ProperNames::new(vec!["JavaScript".into()], false);
+                        let start = MeasurementClock::now();
+                        let warnings = std::hint::black_box(rule.check(&ctx).unwrap());
+                        let elapsed = start.elapsed();
+                        assert_eq!(warnings.len(), expected);
+                        elapsed
+                    })
+                    .collect();
+                samples.sort();
+                samples[3]
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD044 fallback ranges {name}"), &times, 3.0);
+    }
+}
+
 /// WikiLink fallback destinations must be scanned once across all name matches.
 #[test]
 fn test_md044_link_destinations_linear_complexity() {

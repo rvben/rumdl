@@ -12,6 +12,77 @@ pub(super) use md044_config::MD044Config;
 
 type WarningPosition = (usize, usize, String, usize); // (line, column, found_name, proper_name_index)
 
+/// Bound repeated delimiter scans in one line. Ordinary links need no index.
+/// Queries can start after an opening byte that was escaped in the full line,
+/// so the index also records those starts at their surrounding nesting depth.
+#[derive(Default)]
+struct FallbackDelimiters {
+    scanned_bytes: usize,
+    pairs: Option<HashMap<usize, usize>>,
+}
+
+impl FallbackDelimiters {
+    fn find(&mut self, bytes: &[u8], from: usize, open: u8, close: u8) -> Option<usize> {
+        debug_assert!(from > 0 && bytes.get(from - 1) == Some(&open));
+        if self.pairs.is_none() && self.scanned_bytes >= bytes.len().saturating_mul(2) {
+            let mut pairs = HashMap::new();
+            let mut pending = Vec::new();
+            let mut depth = 0usize;
+            let mut pos = 0;
+            while pos < bytes.len() {
+                match bytes[pos] {
+                    b'\\' => {
+                        if bytes.get(pos + 1) == Some(&open) {
+                            pending.push((depth, pos + 2));
+                        }
+                        pos += 1;
+                    }
+                    byte if byte == open => {
+                        depth += 1;
+                        pending.push((depth, pos + 1));
+                    }
+                    byte if byte == close => {
+                        while pending.last().is_some_and(|&(level, _)| level == depth) {
+                            let (_, start) = pending.pop().unwrap();
+                            pairs.insert(start, pos + 1);
+                        }
+                        depth = depth.saturating_sub(1);
+                    }
+                    _ => {}
+                }
+                pos += 1;
+            }
+            self.pairs = Some(pairs);
+        }
+        if let Some(pairs) = &self.pairs {
+            return pairs.get(&from).copied();
+        }
+        let end = Self::scan(bytes, from, open, close);
+        self.scanned_bytes = self.scanned_bytes.saturating_add(end.unwrap_or(bytes.len()) - from);
+        end
+    }
+
+    fn scan(bytes: &[u8], from: usize, open: u8, close: u8) -> Option<usize> {
+        let mut depth = 1usize;
+        let mut pos = from;
+        while pos < bytes.len() {
+            match bytes[pos] {
+                b'\\' => pos += 1,
+                byte if byte == open => depth += 1,
+                byte if byte == close => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(pos + 1);
+                    }
+                }
+                _ => {}
+            }
+            pos += 1;
+        }
+        None
+    }
+}
+
 /// Rule MD044: Proper names should be capitalized
 ///
 /// See [docs/md044.md](../../docs/md044.md) for full documentation, configuration, and examples.
@@ -306,9 +377,10 @@ impl MD044ProperNames {
                 continue;
             }
 
-            // Compute fallback URL ranges only if a match reaches this check.
-            // Each line is scanned once, even when it mentions many names.
+            // Reuse fallback ranges across all matches on this line.
             let mut angle_urls = None;
+            let mut fallback_code = None;
+            let mut fallback_urls = None;
 
             // Use the combined regex to find all matches in one pass
             for cap in combined_regex.find_iter(line) {
@@ -369,7 +441,10 @@ impl MD044ProperNames {
                     // comments, HTML blocks, or frontmatter, so backtick-wrapped
                     // text isn't detected by is_in_code_block_or_span. Check directly.
                     if (line_info.in_html_comment || line_info.in_html_block || line_info.in_front_matter)
-                        && Self::is_in_backtick_code_in_line(line, start_pos)
+                        && crate::inline_config::offset_in_ranges(
+                            fallback_code.get_or_insert_with(|| Self::backtick_code_ranges(line)),
+                            start_pos,
+                        )
                     {
                         continue;
                     }
@@ -394,7 +469,10 @@ impl MD044ProperNames {
                 // pulldown-cmark doesn't parse Markdown syntax (HTML comments,
                 // HTML blocks, frontmatter).
                 if (line_info.in_html_comment || line_info.in_html_block || line_info.in_front_matter)
-                    && Self::is_in_markdown_link_url(line, start_pos)
+                    && crate::inline_config::offset_in_ranges(
+                        fallback_urls.get_or_insert_with(|| Self::markdown_link_url_ranges(line)),
+                        start_pos,
+                    )
                 {
                     continue;
                 }
@@ -687,104 +765,50 @@ impl MD044ProperNames {
         ranges
     }
 
-    /// Check if a position within a line falls inside a Markdown link's
-    /// non-text portion (URL or reference label).
+    /// Collect a line's Markdown link destinations and reference labels.
     ///
     /// Used as a text-level fallback for HTML comments, HTML blocks, and
     /// frontmatter where pulldown-cmark skips link parsing entirely. Operates on
     /// raw line bytes and therefore cannot distinguish real links from text that
     /// merely resembles link syntax; do not call on regular markdown lines.
-    /// - `[text](url)` — returns true if `pos` is within `(...)`
-    /// - `[text][ref]` — returns true if `pos` is within the second `[...]`
-    fn is_in_markdown_link_url(line: &str, pos: usize) -> bool {
+    /// - `[text](url)` — bytes after `(` through the closing `)`.
+    /// - `[text][ref]` — bytes after the second `[` through its closing `]`.
+    fn markdown_link_url_ranges(line: &str) -> Vec<std::ops::Range<usize>> {
+        let mut ranges = Vec::new();
         let bytes = line.as_bytes();
-        let len = bytes.len();
+        let mut brackets = FallbackDelimiters::default();
+        let mut parentheses = FallbackDelimiters::default();
         let mut i = 0;
-
-        while i < len {
-            // Look for unescaped '[' (handle double-escaped \\[ as unescaped)
-            if bytes[i] == b'[' && (i == 0 || bytes[i - 1] != b'\\' || (i >= 2 && bytes[i - 2] == b'\\')) {
-                // Find matching ']' handling nested brackets
-                let mut depth: u32 = 1;
-                let mut j = i + 1;
-                while j < len && depth > 0 {
-                    match bytes[j] {
-                        b'\\' => {
-                            j += 1; // skip escaped char
-                        }
-                        b'[' => depth += 1,
-                        b']' => depth -= 1,
-                        _ => {}
-                    }
-                    j += 1;
-                }
-
-                // j is now one past the ']'
-                if depth == 0 && j < len {
-                    if bytes[j] == b'(' {
-                        // Inline link: [text](url)
-                        let url_start = j;
-                        let mut paren_depth: u32 = 1;
-                        let mut k = j + 1;
-                        while k < len && paren_depth > 0 {
-                            match bytes[k] {
-                                b'\\' => {
-                                    k += 1; // skip escaped char
-                                }
-                                b'(' => paren_depth += 1,
-                                b')' => paren_depth -= 1,
-                                _ => {}
-                            }
-                            k += 1;
-                        }
-
-                        if paren_depth == 0 {
-                            if pos > url_start && pos < k {
-                                return true;
-                            }
-                            i = k;
-                            continue;
-                        }
-                    } else if bytes[j] == b'[' {
-                        // Reference link: [text][ref]
-                        let ref_start = j;
-                        let mut ref_depth: u32 = 1;
-                        let mut k = j + 1;
-                        while k < len && ref_depth > 0 {
-                            match bytes[k] {
-                                b'\\' => {
-                                    k += 1;
-                                }
-                                b'[' => ref_depth += 1,
-                                b']' => ref_depth -= 1,
-                                _ => {}
-                            }
-                            k += 1;
-                        }
-
-                        if ref_depth == 0 {
-                            if pos > ref_start && pos < k {
-                                return true;
-                            }
-                            i = k;
-                            continue;
-                        }
-                    }
+        while i < bytes.len() {
+            // Preserve the fallback's existing treatment of double escapes.
+            if bytes[i] == b'['
+                && (i == 0 || bytes[i - 1] != b'\\' || (i >= 2 && bytes[i - 2] == b'\\'))
+                && let Some(j) = brackets.find(bytes, i + 1, b'[', b']')
+            {
+                let end = match bytes.get(j) {
+                    Some(b'(') => parentheses.find(bytes, j + 1, b'(', b')'),
+                    Some(b'[') => brackets.find(bytes, j + 1, b'[', b']'),
+                    _ => None,
+                };
+                if let Some(end) = end {
+                    ranges.push(j + 1..end);
+                    i = end;
+                    continue;
                 }
             }
             i += 1;
         }
-        false
+        ranges
     }
 
-    /// Check if a position within a line falls inside backtick-delimited code.
+    /// Collect content ranges of backtick-delimited code on a line.
     ///
     /// pulldown-cmark does not parse markdown syntax inside HTML comments, so
     /// `ctx.is_in_code_block_or_span` returns false for backtick-wrapped text
     /// within comments. This function detects backtick code spans directly in
-    /// the line text following CommonMark rules: a code span starts with N
-    /// backticks and ends with exactly N backticks.
-    fn is_in_backtick_code_in_line(line: &str, pos: usize) -> bool {
+    /// the line text, looking for matching runs of exactly the same length.
+    fn backtick_code_ranges(line: &str) -> Vec<std::ops::Range<usize>> {
+        let mut ranges = Vec::new();
         let bytes = line.as_bytes();
         let len = bytes.len();
         let mut i = 0;
@@ -810,9 +834,7 @@ impl MD044ProperNames {
                             // closing backticks (exclusive of the backticks themselves).
                             let content_start = open_start + tick_len;
                             let content_end = close_start;
-                            if pos >= content_start && pos < content_end {
-                                return true;
-                            }
+                            ranges.push(content_start..content_end);
                             // Continue scanning after this pair
                             break;
                         }
@@ -825,7 +847,12 @@ impl MD044ProperNames {
                 i += 1;
             }
         }
-        false
+        ranges
+    }
+
+    #[cfg(test)]
+    fn is_in_backtick_code_in_line(line: &str, pos: usize) -> bool {
+        crate::inline_config::offset_in_ranges(&Self::backtick_code_ranges(line), pos)
     }
 
     // Check if a character is a word boundary (handles Unicode)
@@ -3267,6 +3294,239 @@ Visit [github documentation](https://github.com/docs) for details.
     }
 
     #[test]
+    fn test_fallback_delimiter_index_matches_direct_scans() {
+        let alphabet = [b'a', b'\\', b'[', b']', b'(', b')'];
+        for mut value in 0..alphabet.len().pow(6) {
+            let mut bytes = [0; 6];
+            for byte in &mut bytes {
+                *byte = alphabet[value % alphabet.len()];
+                value /= alphabet.len();
+            }
+            for (open, close) in [(b'[', b']'), (b'(', b')')] {
+                let mut lookup = FallbackDelimiters {
+                    scanned_bytes: bytes.len() * 2,
+                    ..Default::default()
+                };
+                for from in (1..=bytes.len()).chain((1..=bytes.len()).rev()) {
+                    if bytes[from - 1] == open {
+                        assert_eq!(
+                            lookup.find(&bytes, from, open, close),
+                            FallbackDelimiters::scan(&bytes, from, open, close),
+                            "{bytes:?}, {from}, {open}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_fallback_ranges_match_scalar_queries() {
+        fn scalar_links(line: &str, pos: usize) -> bool {
+            let bytes = line.as_bytes();
+            let len = bytes.len();
+            let mut i = 0;
+
+            while i < len {
+                // Look for unescaped '[' (handle double-escaped \\[ as unescaped)
+                if bytes[i] == b'[' && (i == 0 || bytes[i - 1] != b'\\' || (i >= 2 && bytes[i - 2] == b'\\')) {
+                    // Find matching ']' handling nested brackets
+                    let mut depth: u32 = 1;
+                    let mut j = i + 1;
+                    while j < len && depth > 0 {
+                        match bytes[j] {
+                            b'\\' => {
+                                j += 1; // skip escaped char
+                            }
+                            b'[' => depth += 1,
+                            b']' => depth -= 1,
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+
+                    // j is now one past the ']'
+                    if depth == 0 && j < len {
+                        if bytes[j] == b'(' {
+                            // Inline link: [text](url)
+                            let url_start = j;
+                            let mut paren_depth: u32 = 1;
+                            let mut k = j + 1;
+                            while k < len && paren_depth > 0 {
+                                match bytes[k] {
+                                    b'\\' => {
+                                        k += 1; // skip escaped char
+                                    }
+                                    b'(' => paren_depth += 1,
+                                    b')' => paren_depth -= 1,
+                                    _ => {}
+                                }
+                                k += 1;
+                            }
+
+                            if paren_depth == 0 {
+                                if pos > url_start && pos < k {
+                                    return true;
+                                }
+                                i = k;
+                                continue;
+                            }
+                        } else if bytes[j] == b'[' {
+                            // Reference link: [text][ref]
+                            let ref_start = j;
+                            let mut ref_depth: u32 = 1;
+                            let mut k = j + 1;
+                            while k < len && ref_depth > 0 {
+                                match bytes[k] {
+                                    b'\\' => {
+                                        k += 1;
+                                    }
+                                    b'[' => ref_depth += 1,
+                                    b']' => ref_depth -= 1,
+                                    _ => {}
+                                }
+                                k += 1;
+                            }
+
+                            if ref_depth == 0 {
+                                if pos > ref_start && pos < k {
+                                    return true;
+                                }
+                                i = k;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                i += 1;
+            }
+            false
+        }
+
+        fn scalar_code(line: &str, pos: usize) -> bool {
+            let bytes = line.as_bytes();
+            let len = bytes.len();
+            let mut i = 0;
+            while i < len {
+                if bytes[i] == b'`' {
+                    // Count the opening backtick sequence length
+                    let open_start = i;
+                    while i < len && bytes[i] == b'`' {
+                        i += 1;
+                    }
+                    let tick_len = i - open_start;
+
+                    // Scan forward for a closing sequence of exactly tick_len backticks
+                    while i < len {
+                        if bytes[i] == b'`' {
+                            let close_start = i;
+                            while i < len && bytes[i] == b'`' {
+                                i += 1;
+                            }
+                            if i - close_start == tick_len {
+                                // Matched pair found; the code span content is between
+                                // the end of the opening backticks and the start of the
+                                // closing backticks (exclusive of the backticks themselves).
+                                let content_start = open_start + tick_len;
+                                let content_end = close_start;
+                                if pos >= content_start && pos < content_end {
+                                    return true;
+                                }
+                                // Continue scanning after this pair
+                                break;
+                            }
+                            // Not the right length; keep scanning
+                        } else {
+                            i += 1;
+                        }
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            false
+        }
+
+        let tokens = [
+            "javascript",
+            "`",
+            "``",
+            "```",
+            "`javascript`",
+            "``javascript``",
+            "`javascript``",
+            "\\`",
+            "[javascript](url)",
+            "[text][javascript]",
+            "[[x]](url)",
+            "[a [b] c](x(y)z)",
+            "[a](x\\)y)",
+            "[a][x\\]y]",
+            "[a](x y)",
+            "[a](x",
+            "[a][x",
+            "[[",
+            "[",
+            "]",
+            "(",
+            ")",
+            "\\[",
+            "\\\\[",
+            "\\\\\\[",
+            "\\\\",
+            "é日本🙂",
+            "<!--",
+            "-->",
+        ];
+        for first in tokens {
+            for second in tokens {
+                let text = format!("{first}{second}");
+                let urls = MD044ProperNames::markdown_link_url_ranges(&text);
+                let code = MD044ProperNames::backtick_code_ranges(&text);
+                for ranges in [&urls, &code] {
+                    assert!(ranges.windows(2).all(|pair| pair[0].end <= pair[1].start));
+                }
+                for byte in 0..=text.len() + 1 {
+                    assert_eq!(
+                        crate::inline_config::offset_in_ranges(&urls, byte),
+                        scalar_links(&text, byte),
+                        "links {text:?} at {byte}: {urls:?}"
+                    );
+                    assert_eq!(
+                        crate::inline_config::offset_in_ranges(&code, byte),
+                        scalar_code(&text, byte),
+                        "code {text:?} at {byte}: {code:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_fallback_ranges_preserve_code_and_link_fixes() {
+        let body =
+            "javascript `javascript` [javascript](javascript) [javascript][javascript] <custom:javascript> CAFÉ ";
+        let fixed =
+            "JavaScript `javascript` [JavaScript](javascript) [JavaScript][javascript] <custom:javascript> Café ";
+        for (prefix, suffix) in [
+            ("<!--\n", "\n-->"),
+            ("<div>\n", "\n</div>"),
+            ("---\ntitle: ", "\n---\n"),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let content = format!("{prefix}{}{suffix}", body.repeat(32)).replace('\n', ending);
+                let expected = format!("{prefix}{}{suffix}", fixed.repeat(32)).replace('\n', ending);
+                let ctx = create_context(&content);
+                let rule = MD044ProperNames::new(vec!["JavaScript".into(), "Café".into()], false);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 128, "{prefix:?} {ending:?}");
+                assert_eq!(rule.check(&ctx).unwrap(), warnings);
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
     fn test_wikilink_url_ranges_match_scalar_queries() {
         fn scalar(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
             use pulldown_cmark::LinkType;
@@ -3755,7 +4015,7 @@ Some javascript text.
     // Double-bracket WikiLink + URL: [[text]](url)
     // pulldown-cmark parses [[text]] as a WikiLink but leaves the (url)
     // as plain text, so ctx.links() does not cover the URL portion.
-    // MD044 must fall back to is_in_markdown_link_url for all lines.
+    // MD044 must fall back to markdown_link_url_ranges for all lines.
 
     #[test]
     fn test_double_bracket_link_url_not_flagged() {
@@ -3834,7 +4094,7 @@ Some javascript text.
     fn test_link_like_text_in_code_span_still_flagged_when_code_blocks_enabled() {
         // When code-blocks = true the user explicitly opts into checking code spans.
         // A code span containing link-like text (`[foo](https://github.com)`) must
-        // NOT be silently suppressed by is_in_markdown_link_url: the content is
+        // NOT be silently suppressed by markdown_link_url_ranges: the content is
         // literal characters, not a real Markdown link.
         let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
         let content = "`[foo](https://github.com/org/repo)`";
