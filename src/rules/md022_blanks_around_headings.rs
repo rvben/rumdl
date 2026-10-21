@@ -11,7 +11,7 @@ use crate::utils::range_utils::calculate_heading_range;
 use toml;
 
 pub(crate) mod md022_config;
-use md022_config::MD022Config;
+use md022_config::{HeadingBlankMode, MD022Config};
 
 /// Whether a trimmed line begins with a list marker: `-`, `*`, or `+`, or one or more
 /// digits followed by `.` or `)`, in each case followed by a space or the end of the line.
@@ -407,6 +407,14 @@ struct Violation {
     blank_line: String,
 }
 
+/// Actual blank source lines to remove above a heading; comments are never edits.
+struct ExcessBlanks {
+    heading_line: usize,
+    first_line: usize,
+    required: usize,
+    lines: Vec<usize>,
+}
+
 impl MD022BlanksAroundHeadings {
     /// Create a new instance of the rule with default values:
     /// lines_above = 1, lines_below = 1
@@ -424,12 +432,137 @@ impl MD022BlanksAroundHeadings {
                 lines_above: HeadingLevelConfig::scalar(lines_above),
                 lines_below: HeadingLevelConfig::scalar(lines_below),
                 allowed_at_start: true,
+                lines_above_mode: HeadingBlankMode::Minimum,
             },
         }
     }
 
     pub fn from_config_struct(config: MD022Config) -> Self {
         Self { config }
+    }
+
+    /// Exact mode caps actual blank lines. Comment-only lines still satisfy the
+    /// existing minimum requirement, but are never removed or charged against this cap.
+    fn excess_blank_lines(&self, ctx: &crate::lint_context::LintContext) -> Vec<ExcessBlanks> {
+        if self.config.lines_above_mode != HeadingBlankMode::Exact {
+            return Vec::new();
+        }
+        let is_pandoc = ctx.flavor.is_pandoc_compatible();
+        let at_start = heading_at_start_idx(ctx, is_pandoc);
+        // A gap shared by two headings must also satisfy the earlier heading's
+        // minimum below it, including any attached attribute lines.
+        let mut below_requirements = std::collections::HashMap::new();
+        for parsed in ctx.headings() {
+            let heading_line = parsed.line_num - 1;
+            let last = heading_line + usize::from(parsed.is_setext());
+            if parsed.line_info.in_pymdown_block
+                || heading_is_in_template_code(ctx, heading_line, parsed.heading)
+                || (parsed.first_line_num() - 1..=last).any(|idx| ctx.is_rule_disabled("MD022", idx + 1))
+            {
+                continue;
+            }
+            let Some(required) = self
+                .config
+                .lines_below
+                .get_for_level(parsed.heading.level as usize)
+                .required_count()
+            else {
+                continue;
+            };
+            let mut end = last;
+            while end + 1 < ctx.lines.len()
+                && is_block_attribute_line(neighbour_text(ctx, end + 1, parsed.is_blockquote()).trim(), ctx.flavor)
+            {
+                end += 1;
+            }
+            below_requirements.insert(end, required);
+        }
+        let mut excess = Vec::new();
+        for parsed in ctx.headings() {
+            let first = parsed.first_line_num() - 1;
+            let heading_line = parsed.line_num - 1;
+            let heading = parsed.heading;
+            let Some(mut required) = self
+                .config
+                .lines_above
+                .get_for_level(heading.level as usize)
+                .required_count()
+            else {
+                continue;
+            };
+            let last = heading_line + usize::from(parsed.is_setext());
+            if first == 0
+                || (Some(first) == at_start && self.config.allowed_at_start)
+                || parsed.line_info.in_pymdown_block
+                || heading_is_in_template_code(ctx, heading_line, heading)
+                || (first..=last).any(|idx| ctx.is_rule_disabled("MD022", idx + 1))
+                || starts_item_under_bare_marker(ctx, first)
+                || opens_item_on_marker_line(ctx, first, heading)
+                || (ctx.flavor == crate::config::MarkdownFlavor::MDG && follows_mdg_tag_line(ctx, first, heading))
+            {
+                continue;
+            }
+            let quoted = parsed.is_blockquote();
+            let depth = quote_depth(ctx.lines[first].content(ctx.content));
+            let mut blanks = Vec::new();
+            // A Setext heading needs a separator to avoid absorbing preceding text.
+            if required == 0 && parsed.is_setext() {
+                required = 1;
+            }
+            for idx in (0..first).rev() {
+                let info = &ctx.lines[idx];
+                let line = info.content(ctx.content);
+                let trimmed = neighbour_text(ctx, idx, quoted).trim();
+                if info.in_front_matter {
+                    blanks.clear();
+                    break;
+                }
+                if info.in_code_block || quote_depth(line) != depth {
+                    break;
+                }
+                let in_comment = info.in_html_comment || info.in_mdx_comment;
+                if trimmed.is_empty() && !in_comment {
+                    blanks.push(idx);
+                    continue;
+                }
+                // Only one blank run belongs to this heading. Crossing an earlier
+                // comment, attribute or div could remove another block's separator.
+                if !blanks.is_empty() {
+                    if let Some(below) = below_requirements.get(&idx) {
+                        required = required.max(*below);
+                    }
+                    if required == 0 && info.in_html_block {
+                        required = 1;
+                    }
+                    break;
+                }
+                // Comments attached directly to the heading stay attached. Walk
+                // through their interiors, but stop if an opener/closer shares text.
+                if is_blank_or_comment_only(line) {
+                    continue;
+                }
+                if info.in_html_comment && !line.contains("<!--") && !line.contains("-->") {
+                    continue;
+                }
+                if info.in_mdx_comment
+                    && (!trimmed.contains("{/*") || trimmed.starts_with("{/*"))
+                    && (!trimmed.contains("*/}") || trimmed.ends_with("*/}"))
+                {
+                    continue;
+                }
+                break;
+            }
+            let lines: Vec<_> = blanks.into_iter().skip(required).collect();
+            if !lines.is_empty() && !lines.iter().any(|&idx| ctx.is_rule_disabled("MD022", idx + 1)) {
+                excess.push(ExcessBlanks {
+                    heading_line,
+                    first_line: first,
+                    required,
+                    lines,
+                });
+            }
+        }
+        excess
     }
 
     /// Fix a document by adding appropriate blank lines around headings
@@ -441,6 +574,11 @@ impl MD022BlanksAroundHeadings {
         let is_pandoc = ctx.flavor.is_pandoc_compatible();
         let is_mdg = ctx.flavor == crate::config::MarkdownFlavor::MDG;
         let mut result = Vec::new();
+        let removed: std::collections::HashSet<usize> = self
+            .excess_blank_lines(ctx)
+            .into_iter()
+            .flat_map(|excess| excess.lines)
+            .collect();
         let mut skip_count: usize = 0;
 
         let heading_at_start_idx = heading_at_start_idx(ctx, is_pandoc);
@@ -456,6 +594,9 @@ impl MD022BlanksAroundHeadings {
         for (i, line_info) in ctx.lines.iter().enumerate() {
             if skip_count > 0 {
                 skip_count -= 1;
+                continue;
+            }
+            if removed.contains(&i) {
                 continue;
             }
             let line = line_info.content(ctx.content);
@@ -984,6 +1125,38 @@ impl Rule for MD022BlanksAroundHeadings {
             });
         }
 
+        for excess in self.excess_blank_lines(ctx) {
+            let line = ctx.lines[excess.heading_line].content(ctx.content);
+            let (start_line, start_col, end_line, end_col) =
+                calculate_heading_range(excess.first_line + 1, excess.heading_line + 1, line);
+            let mut edits = excess.lines.iter().map(|&idx| {
+                Fix::new(
+                    ctx.lines[idx].byte_offset..ctx.lines[idx + 1].byte_offset,
+                    String::new(),
+                )
+            });
+            let first = edits.next().expect("an excess contains blank lines");
+            result.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                message: format!(
+                    "Expected exactly {} blank {} above heading, found {}",
+                    excess.required,
+                    if excess.required == 1 { "line" } else { "lines" },
+                    excess.required + excess.lines.len()
+                ),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                severity: Severity::Warning,
+                fix: Some(Fix::with_additional_edits(
+                    first.range,
+                    first.replacement,
+                    edits.collect(),
+                )),
+            });
+        }
+        result.sort_by_key(|warning| (warning.line, warning.column));
         Ok(result)
     }
 
@@ -1380,6 +1553,7 @@ Final content.";
             lines_above: HeadingLevelConfig::per_level([0, 1, 1, 1, 1, 1]),
             lines_below: HeadingLevelConfig::scalar(1),
             allowed_at_start: false, // Disable special handling for first heading
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         // H1 without blank above should be OK
@@ -1407,6 +1581,7 @@ Final content.";
             lines_above: HeadingLevelConfig::scalar_requirement(HeadingBlankRequirement::Unlimited),
             lines_below: HeadingLevelConfig::scalar(1),
             allowed_at_start: false,
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         // "## Banana" has no blank line below it, so a "below" violation fires.
@@ -1435,6 +1610,7 @@ Final content.";
             lines_above: HeadingLevelConfig::scalar(1),
             lines_below: HeadingLevelConfig::scalar_requirement(HeadingBlankRequirement::Unlimited),
             allowed_at_start: false,
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         // "## Banana" has no blank line above it, so an "above" violation fires.
@@ -1464,6 +1640,7 @@ Final content.";
             lines_above: HeadingLevelConfig::per_level([0, 1, 1, 2, 2, 2]),
             lines_below: HeadingLevelConfig::scalar(1),
             allowed_at_start: false,
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         let content = "Text\n# H1\n\nText\n\n## H2\n\nText\n\n### H3\n\nText\n\n\n#### H4\n\nText";
@@ -1487,6 +1664,7 @@ Final content.";
             lines_above: HeadingLevelConfig::per_level([1, 1, 1, 2, 1, 1]),
             lines_below: HeadingLevelConfig::scalar(1),
             allowed_at_start: false,
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         // H4 with only 1 blank above should trigger warning
@@ -1507,6 +1685,7 @@ Final content.";
             lines_above: HeadingLevelConfig::per_level([0, 1, 2, 2, 2, 2]),
             lines_below: HeadingLevelConfig::scalar(1),
             allowed_at_start: false,
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         let content = "Text\n# H1\nContent\n## H2\nContent\n### H3\nContent";
@@ -1528,6 +1707,7 @@ Final content.";
             lines_above: HeadingLevelConfig::scalar(1),
             lines_below: HeadingLevelConfig::per_level([2, 1, 1, 1, 1, 1]), // H1 needs 2 blanks below
             allowed_at_start: true,
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         // H1 with only 1 blank below should trigger warning
@@ -1552,6 +1732,7 @@ Final content.";
             lines_above: HeadingLevelConfig::scalar(2),
             lines_below: HeadingLevelConfig::scalar(2),
             allowed_at_start: false,
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         let content = "Text\n# H1\nContent\n## H2\nContent";
@@ -1585,6 +1766,7 @@ Final content.";
                 HeadingBlankRequirement::limited(1),
             ]),
             allowed_at_start: false,
+            lines_above_mode: HeadingBlankMode::Minimum,
         });
 
         let content = "# H1\nParagraph\n## H2\nParagraph";
@@ -2616,5 +2798,31 @@ mod list_item_tests {
         }
         let ctx = LintContext::new("-\n ## a\n", MarkdownFlavor::Standard, None);
         assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod exact_spacing_tests {
+    use super::*;
+    use crate::{config::MarkdownFlavor, lint_context::LintContext, utils::fix_utils::apply_warning_fixes};
+
+    #[test]
+    fn diagnostic_edits_match_full_fix_without_deleting_comments() {
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above_mode: HeadingBlankMode::Exact,
+            lines_below: md022_config::HeadingLevelConfig::scalar(0),
+            ..Default::default()
+        });
+        let input = "# Title\n\n\n\n<!-- first -->\n<!-- second -->\n## Section\n";
+        let expected = "# Title\n\n<!-- first -->\n<!-- second -->\n## Section\n";
+        let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 7);
+        assert_eq!(warnings[0].fix.as_ref().unwrap().additional_edits.len(), 1);
+        assert_eq!(apply_warning_fixes(input, &warnings).unwrap(), expected);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let ctx = LintContext::new(expected, MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
     }
 }

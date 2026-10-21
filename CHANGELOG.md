@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- MD022 `lines-above-mode = "exact"` removes surplus blank lines above headings
+  while preserving comments and the existing minimum-spacing default (#838).
+
 - Opt-in code-block tool version verification against `uv.lock`, declared
   `pyproject.toml` constraints, or pre-commit/prek hook revisions for Ruff,
   Black, djLint and SQLFluff. Supports automatic source selection and one

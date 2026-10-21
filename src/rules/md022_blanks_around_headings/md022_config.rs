@@ -165,6 +165,15 @@ impl Serialize for HeadingLevelConfig {
     }
 }
 
+/// How the blank-line requirement above a heading is enforced.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HeadingBlankMode {
+    #[default]
+    Minimum,
+    Exact,
+}
+
 /// Configuration for MD022 (Headings should be surrounded by blank lines)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -173,6 +182,10 @@ pub struct MD022Config {
     /// Can be a single integer (applies to all levels) or an array of 6 integers (one per level 1-6)
     #[serde(default = "default_lines_above", alias = "lines_above")]
     pub lines_above: HeadingLevelConfig,
+
+    /// Keep at least the configured spacing, or remove surplus blank lines above headings.
+    #[serde(default, alias = "lines_above_mode")]
+    pub lines_above_mode: HeadingBlankMode,
 
     /// Number of blank lines required below headings (default: 1 for all levels)
     /// Can be a single integer (applies to all levels) or an array of 6 integers (one per level 1-6)
@@ -200,6 +213,7 @@ impl Default for MD022Config {
     fn default() -> Self {
         Self {
             lines_above: default_lines_above(),
+            lines_above_mode: HeadingBlankMode::default(),
             lines_below: default_lines_below(),
             allowed_at_start: default_allowed_at_start(),
         }
@@ -291,6 +305,7 @@ mod tests {
             lines_above: HeadingLevelConfig::scalar(2),
             lines_below: HeadingLevelConfig::scalar(1),
             allowed_at_start: false,
+            lines_above_mode: HeadingBlankMode::Minimum,
         };
 
         let serialized = toml::to_string(&config).unwrap();
@@ -305,6 +320,7 @@ mod tests {
             lines_above: HeadingLevelConfig::per_level([0, 1, 1, 2, 2, 2]),
             lines_below: HeadingLevelConfig::per_level([1, 1, 1, 1, 1, 1]),
             allowed_at_start: true,
+            lines_above_mode: HeadingBlankMode::Minimum,
         };
 
         let serialized = toml::to_string(&config).unwrap();
@@ -334,5 +350,23 @@ mod tests {
         assert!(config.lines_above.get_for_level(1).is_unlimited());
         assert_eq!(config.lines_above.get_for_level(2).required_count(), Some(0));
         assert!(config.lines_below.get_for_level(2).is_unlimited());
+    }
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::*;
+    #[test]
+    fn spacing_mode_validates_values_and_roundtrips() {
+        for key in ["lines-above-mode", "lines_above_mode"] {
+            let config: MD022Config = toml::from_str(&format!("{key} = \"exact\"")).unwrap();
+            assert_eq!(config.lines_above_mode, HeadingBlankMode::Exact);
+            assert_eq!(
+                toml::from_str::<MD022Config>(&toml::to_string(&config).unwrap()).unwrap(),
+                config
+            );
+        }
+        assert_eq!(MD022Config::default().lines_above_mode, HeadingBlankMode::Minimum);
+        assert!(toml::from_str::<MD022Config>("lines-above-mode = \"unknown\"").is_err());
     }
 }
