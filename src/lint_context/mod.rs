@@ -3183,6 +3183,7 @@ impl<'a> LintContext<'a> {
     /// `start_col`/`end_col` it feeds into match rumdl's diagnostic convention
     /// (columns are character positions). On lines with multi-byte UTF-8
     /// characters the two differ; reporting bytes would mis-position highlights.
+    #[cfg(test)]
     #[inline]
     fn find_line_for_offset(lines: &[LineInfo], content: &str, byte_offset: usize) -> (usize, usize, usize) {
         let idx = source_positions::line_index(lines, byte_offset);

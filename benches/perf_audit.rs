@@ -248,6 +248,33 @@ fn bench_context_long_line(c: &mut Criterion) {
     group.finish();
 }
 
+/// Native MDX extraction shares the indexed columns used by the other parsers.
+fn bench_context_mdx_columns(c: &mut Criterion) {
+    let mut group = c.benchmark_group("context_mdx_columns");
+    group.sample_size(10);
+    for (name, unit) in [
+        ("links", "[label](https://example.com) ![alt](image.png) "),
+        ("unicode", "é日本🙂 [label](https://example.com) ![图](image.png) "),
+        ("jsx", "é日本🙂 <span>x</span> <Card /> "),
+    ] {
+        for count in [128, 1024, 4096] {
+            let content = format!("{}\n", unit.repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+            if name == "jsx" {
+                assert_eq!(ctx.html_tags().len(), count * 2);
+            } else {
+                assert_eq!(ctx.links().len(), count);
+                assert_eq!(ctx.images().len(), count);
+            }
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_with_input(BenchmarkId::new(name, count), &content, |b, content| {
+                b.iter(|| LintContext::new(black_box(content), MarkdownFlavor::MDX, None));
+            });
+        }
+    }
+    group.finish();
+}
+
 /// Include first access to the lazy element caches: construction alone does
 /// not materialize these source columns.
 fn bench_context_inline_elements(c: &mut Criterion) {
@@ -783,6 +810,7 @@ criterion_group!(
     bench_input_preparation,
     bench_lint_context_new,
     bench_context_long_line,
+    bench_context_mdx_columns,
     bench_context_inline_elements,
     bench_markdown_parse,
     bench_lint_overhead,
