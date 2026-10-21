@@ -291,6 +291,7 @@ jobs:
 
           # Create directory structure for archive
           mkdir -p release-package
+          cp LICENSE release-package/
 
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             # Windows: Create a zip archive
@@ -298,7 +299,7 @@ jobs:
 
             # Create zip archive (using PowerShell via bash)
             cd release-package
-            powershell -command "Compress-Archive -Path rumdl.exe -DestinationPath ../rumdl-${VERSION}-${{ matrix.target }}.zip"
+            powershell -command "Compress-Archive -Path rumdl.exe,LICENSE -DestinationPath ../rumdl-${VERSION}-${{ matrix.target }}.zip"
             cd ..
 
             # Calculate SHA256 for zip
@@ -308,7 +309,7 @@ jobs:
             cp "target/${{ matrix.target }}/release/rumdl" release-package/rumdl
 
             # Create tar.gz archive
-            tar -czf "rumdl-${VERSION}-${{ matrix.target }}.tar.gz" -C release-package rumdl
+            tar -czf "rumdl-${VERSION}-${{ matrix.target }}.tar.gz" -C release-package rumdl LICENSE
 
             # Calculate SHA256
             if [[ "${{ runner.os }}" == "macOS" ]]; then
@@ -1232,6 +1233,8 @@ jobs:
             -C target/docker/binaries/amd64
           tar -xzf artifacts/release-aarch64-unknown-linux-musl/rumdl-*-aarch64-unknown-linux-musl.tar.gz \
             -C target/docker/binaries/arm64
+          cp LICENSE target/docker/binaries/amd64/LICENSE
+          cp LICENSE target/docker/binaries/arm64/LICENSE
 
       - name: Resolve image version
         id: version

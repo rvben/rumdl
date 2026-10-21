@@ -26,7 +26,9 @@ mod mdx;
 mod native_structure;
 pub(crate) use native_structure::{NativeListSource, NativePreparedStructure};
 mod scratch;
+mod source_positions;
 pub(crate) use mdx::{leaf_block_ranges as mdx_leaf_block_ranges, structure_signature as mdx_structure_signature};
+use source_positions::SourcePositions;
 mod table_confirm;
 #[cfg(test)]
 mod tests;
@@ -1321,21 +1323,12 @@ impl<'a> LintContext<'a> {
         let mut pulldown_result = profile_section!(
             "Links, images & link ranges",
             profile,
-            pending_links.finish(&lines, &code_blocks, flavor, &html_comment_ranges)
+            if let Some(mdx) = &mdx_context {
+                pending_links.finish_mdx(mdx, &lines)
+            } else {
+                pending_links.finish(&lines, &code_blocks, flavor, &html_comment_ranges)
+            }
         );
-
-        if let Some(mdx) = &mdx_context {
-            let (links, images) = mdx.links_and_images(content, &lines);
-            pulldown_result.link_byte_ranges = links.iter().map(|link| (link.byte_offset, link.byte_end)).collect();
-            pulldown_result.link_found_positions = links.iter().map(|link| link.byte_offset).collect();
-            pulldown_result.image_found_positions = images.iter().map(|image| image.byte_offset).collect();
-            pulldown_result.links = links;
-            pulldown_result.images = images;
-            pulldown_result.footnote_refs = mdx.footnote_refs();
-            pulldown_result
-                .broken_links
-                .retain(|link| mdx.contains_text(link.span.start, link.span.end));
-        }
 
         heading_detection::mark_parser_html_blocks(content, &mut lines, &html_blocks, flavor);
         let html_block_lines = heading_detection::parser_html_block_lines(&lines, &html_blocks, flavor);

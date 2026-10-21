@@ -1880,3 +1880,98 @@ fn nested_list_table_confirmation_linear_complexity() {
         large / small
     );
 }
+
+#[test]
+fn test_mdx_jsx_positions_linear_complexity() {
+    let durations: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|count| {
+            let content = "é日本🙂 <span>x</span> <Card /> ".repeat(count);
+            let mut times: Vec<_> = (0..5)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+                    assert_eq!(ctx.html_tags().len(), count * 2);
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[times.len() / 2]
+        })
+        .collect();
+    assert_linear_complexity("MDX JSX positions", &durations, 3.0);
+}
+
+#[test]
+fn test_mdx_links_linear_complexity() {
+    let durations: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|count| {
+            let content = "é日本🙂 [label](https://example.com) ![图](image.png) ".repeat(count);
+            let mut times: Vec<_> = (0..5)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+                    assert_eq!(ctx.links().len(), count);
+                    assert_eq!(ctx.images().len(), count);
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[times.len() / 2]
+        })
+        .collect();
+    assert_linear_complexity("MDX links and images", &durations, 3.0);
+}
+
+#[test]
+fn test_mdx_nested_context_linear_complexity() {
+    for name in ["nested", "unmatched", "paired"] {
+        let times: Vec<_> = [1024, 2048, 4096]
+            .into_iter()
+            .map(|count| {
+                let text = match name {
+                    "nested" => format!("{}text{}", "<b>".repeat(count), "</b>".repeat(count)),
+                    "unmatched" => format!("{}{}", "<b>".repeat(count), "</i>".repeat(count)),
+                    _ => "<b>text</b> ".repeat(count),
+                };
+                let content = format!("# {text}\n");
+                let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+                assert_eq!(ctx.headings().count(), 1);
+                let mut samples: Vec<_> = (0..7)
+                    .map(|_| {
+                        let start = MeasurementClock::now();
+                        std::hint::black_box(LintContext::new(&content, MarkdownFlavor::MDX, None));
+                        start.elapsed()
+                    })
+                    .collect();
+                samples.sort();
+                samples[3]
+            })
+            .collect();
+        assert_linear_complexity(&format!("MDX nested context {name}"), &times, 3.0);
+    }
+}
+
+/// Native MDX facts must bypass redundant primary-parser image label scans.
+#[test]
+fn test_mdx_nested_image_labels_linear_complexity() {
+    let times: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|count| {
+            let content = format!("{}x{}", "![".repeat(count), "](image.png)".repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+            assert_eq!(ctx.images().len(), 1);
+            let mut samples: Vec<_> = (0..7)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    std::hint::black_box(LintContext::new(&content, MarkdownFlavor::MDX, None));
+                    start.elapsed()
+                })
+                .collect();
+            samples.sort();
+            samples[3]
+        })
+        .collect();
+    assert_linear_complexity("MDX nested image labels", &times, 3.0);
+}

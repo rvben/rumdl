@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "A fast Markdown linter and formatter written in Rust"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [
     { name = "Ruben J. Jongejan", email = "ruben.jongejan@gmail.com" }
 ]

@@ -31,6 +31,7 @@ LABEL org.opencontainers.image.title="rumdl" \
       org.opencontainers.image.revision="${REVISION}"
 
 COPY binaries/${TARGETARCH}/rumdl /usr/local/bin/rumdl
+COPY binaries/${TARGETARCH}/LICENSE /usr/share/licenses/rumdl/LICENSE
 
 WORKDIR /data
 
@@ -55,6 +56,7 @@ LABEL org.opencontainers.image.title="rumdl" \
       org.opencontainers.image.revision="${REVISION}"
 
 COPY binaries/${TARGETARCH}/rumdl /usr/local/bin/rumdl
+COPY binaries/${TARGETARCH}/LICENSE /usr/share/licenses/rumdl/LICENSE
 
 # Mount the project to lint at /data: docker run -v "$PWD:/data" <image> check .
 WORKDIR /data

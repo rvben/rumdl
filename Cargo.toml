@@ -79,9 +79,10 @@ memchr = "2.8"
 # which rumdl never builds. `html` is the renderer MD085 uses.
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
 unicase = "2.9"
-# MDX structure and JavaScript expression boundaries. Oxc 0.137 supports our
-# Rust 1.94 minimum; regular-expression validation is unnecessary for boundaries.
-markdown = "1.0.0"
+# Identifier classification for the bundled markdown-rs parser.
+unicode-id = { version = "0.3", features = ["no_std"] }
+# MDX JavaScript boundaries. Oxc 0.137 supports our Rust 1.94 minimum;
+# regular-expression validation is unnecessary for boundaries.
 oxc_parser = { version = "0.137.0", default-features = false }
 oxc_allocator = "0.137.0"
 oxc_span = "0.137.0"
@@ -153,6 +154,8 @@ wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
 wasi = ["parallel", "colored", "blake3", "postcard", "chrono", "env_logger", "notify", "ec4rs"]
 
 [dev-dependencies]
+# Compatibility oracle for the bundled parser; never used by production code.
+markdown = "=1.0.0"
 assert_cmd = "2.2.2"
 indoc = "2"
 predicates = "3.1.4"

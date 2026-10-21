@@ -2647,6 +2647,7 @@ dependencies = [
  "toml_edit",
  "tower-lsp",
  "unicase",
+ "unicode-id",
  "unicode-normalization",
  "unicode-segmentation",
  "unicode-width",

@@ -118,6 +118,8 @@ docker-binaries: build-static-all
 	mkdir -p $(DOCKER_CONTEXT)/binaries/amd64 $(DOCKER_CONTEXT)/binaries/arm64
 	cp target/x86_64-unknown-linux-musl/release/rumdl $(DOCKER_CONTEXT)/binaries/amd64/rumdl
 	cp target/aarch64-unknown-linux-musl/release/rumdl $(DOCKER_CONTEXT)/binaries/arm64/rumdl
+	cp LICENSE $(DOCKER_CONTEXT)/binaries/amd64/LICENSE
+	cp LICENSE $(DOCKER_CONTEXT)/binaries/arm64/LICENSE
 	@echo "Docker build context staged at: $(DOCKER_CONTEXT)"
 
 # Stage the latest *released* musl binaries into the build context, without
@@ -130,6 +132,8 @@ docker-binaries-release:
 	gh release download --repo rvben/rumdl --pattern 'rumdl-*-unknown-linux-musl.tar.gz' --dir $(DOCKER_CONTEXT)/dl --clobber
 	tar -xzf $(DOCKER_CONTEXT)/dl/rumdl-*-x86_64-unknown-linux-musl.tar.gz -C $(DOCKER_CONTEXT)/binaries/amd64
 	tar -xzf $(DOCKER_CONTEXT)/dl/rumdl-*-aarch64-unknown-linux-musl.tar.gz -C $(DOCKER_CONTEXT)/binaries/arm64
+	cp LICENSE $(DOCKER_CONTEXT)/binaries/amd64/LICENSE
+	cp LICENSE $(DOCKER_CONTEXT)/binaries/arm64/LICENSE
 	@echo "Docker build context staged at: $(DOCKER_CONTEXT) (latest release binaries)"
 
 # Register QEMU binfmt handlers so non-native image platforms can run.

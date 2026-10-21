@@ -5,7 +5,8 @@
 //! source positions, including for expressions and attributes on mixed lines.
 
 use super::line_computation::spanned_lines;
-use super::{FootnoteRef, HtmlTag, LineInfo, LintContext, ParsedImage, ParsedLink, ReferenceDef};
+use super::{FootnoteRef, HtmlTag, LineInfo, ParsedImage, ParsedLink, ReferenceDef, SourcePositions};
+use crate::mdx_parser as markdown;
 use markdown::mdast::{AttributeContent, AttributeValue, Node, ReferenceKind};
 use pulldown_cmark::LinkType;
 use std::borrow::Cow;
@@ -34,14 +35,9 @@ thread_local! {
 
 /// Run the MDX parser, answering a parser panic the same way as a parse error.
 ///
-/// markdown-rs 1.0.0 asserts its node stack is drained when a construct closes,
-/// and malformed JSX can leave an element on it: an unclosed tag inside a link
-/// label (`[<span>text](/x)`) aborts the whole run. Disabling a construct fixes
-/// one exit path at a time - `heading_setext` below is the Setext one - so the
-/// panic itself is caught here and the caller falls back to the recovery
-/// context, which is what a returned error already does. Those assertions are
-/// debug assertions, so only a build with debug assertions panics there; a
-/// build without them gets back the tree markdown-rs built.
+/// Known malformed-JSX failures return errors in the bundled parser. Retain
+/// this boundary as a last resort for other upstream parser assertions, so
+/// incomplete editor input can still use the recovery context.
 ///
 /// The panic report is suppressed for this call alone. It names a crash that
 /// did not happen, and printing it also captures a backtrace, which costs more
@@ -116,6 +112,11 @@ pub(crate) fn leaf_block_ranges(content: &str) -> Option<Vec<std::ops::Range<usi
 }
 
 fn parse_for_structure(content: &str) -> Option<Node> {
+    let options = mdx_parse_options();
+    parse_without_crashing(|| markdown::to_mdast(content, &options)).ok()
+}
+
+fn mdx_parse_options() -> markdown::ParseOptions {
     let mut options = markdown::ParseOptions::mdx();
     options.mdx_expression_parse = Some(Box::new(parse_expression));
     options.mdx_esm_parse = Some(Box::new(parse_esm));
@@ -124,7 +125,7 @@ fn parse_for_structure(content: &str) -> Option<Node> {
     options.constructs.gfm_task_list_item = true;
     options.constructs.gfm_footnote_definition = true;
     options.constructs.gfm_label_start_footnote = true;
-    parse_without_crashing(|| markdown::to_mdast(content, &options)).ok()
+    options
 }
 
 fn strip_positions(node: &mut Node) {
@@ -177,6 +178,7 @@ impl MdxContext {
     pub(super) fn html_tags(&self, content: &str, lines: &[LineInfo]) -> (Vec<HtmlTag>, Vec<HtmlTag>) {
         let mut html = Vec::new();
         let mut components = Vec::new();
+        let mut positions = SourcePositions::new(content, lines);
         for node in nodes(&self.root) {
             let (name, position) = match node {
                 Node::MdxJsxFlowElement(element) => (&element.name, &element.position),
@@ -209,12 +211,8 @@ impl MdxContext {
             for (tag_start, tag_end, is_closing, is_self_closing) in
                 std::iter::once((start, open_end, false, self_closing)).chain(closing)
             {
-                let (index, line, start_col) = LintContext::find_line_for_offset(lines, content, tag_start);
-                let first_line = &lines[index];
-                let end_col = crate::utils::range_utils::byte_to_char_count(
-                    first_line.content(content),
-                    (tag_end - first_line.byte_offset).min(first_line.byte_len),
-                ) - 1;
+                let (index, line, start_col) = positions.position(tag_start);
+                let end_col = positions.column_on_line(index, tag_end);
                 tags.push(HtmlTag {
                     line,
                     start_col,
@@ -246,34 +244,21 @@ impl MdxContext {
                 }
             }
         }
-        let mut options = markdown::ParseOptions::mdx();
-        options.mdx_expression_parse = Some(Box::new(parse_expression));
-        options.mdx_esm_parse = Some(Box::new(parse_esm));
-        // Heading structure comes from the primary Markdown parser. This AST
-        // only supplies MDX regions and inline content; it does not consume
-        // heading nodes. markdown-rs 1.0.0 can panic while closing a Setext
-        // underline with an unclosed JSX element on its stack. Parse those
-        // lines as ordinary Markdown here so malformed JSX returns an error
-        // and uses the recovery context instead, including on panic=abort targets.
-        options.constructs.heading_setext = false;
-        options.constructs.gfm_table = true;
-        options.constructs.gfm_strikethrough = true;
-        options.constructs.gfm_task_list_item = true;
-        options.constructs.gfm_footnote_definition = true;
-        options.constructs.gfm_label_start_footnote = true;
+        let options = mdx_parse_options();
         let source = std::str::from_utf8(&input).expect("masked UTF-8");
-        let root = match parse_without_crashing(|| markdown::to_mdast(source, &options)) {
-            Ok(root) => root,
-            Err(error) => {
-                log::debug!("MDX syntax unavailable; retaining recovery context: {error}");
-                return None;
-            }
-        };
+        let (root, attribute_ranges) =
+            match parse_without_crashing(|| markdown::to_mdast_with_attribute_ranges(source, &options)) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    log::debug!("MDX syntax unavailable; retaining recovery context: {error}");
+                    return None;
+                }
+            };
         let mut ctx = Self {
             root,
             code_blocks: Vec::new(),
             code_spans: Vec::new(),
-            expressions: Vec::new(),
+            expressions: attribute_ranges,
             comments: Vec::new(),
             text: Vec::new(),
             jsx: Vec::new(),
@@ -289,17 +274,15 @@ impl MdxContext {
                 Node::Text(_) => ctx.text.push(range),
                 Node::MdxjsEsm(_) => ctx.esm.push(range),
                 Node::Table(_) => ctx.tables.push(range),
-                Node::MdxJsxFlowElement(element) => {
+                Node::MdxJsxFlowElement(_) => {
                     if ctx.jsx.last().is_none_or(|&(_, end)| range.0 >= end) {
                         ctx.jsx.push(range);
                     }
-                    attribute_expressions(&element.attributes, &mut ctx.expressions);
                 }
-                Node::MdxJsxTextElement(element) => {
+                Node::MdxJsxTextElement(_) => {
                     if ctx.jsx.last().is_none_or(|&(_, end)| range.0 >= end) {
                         ctx.jsx.push(range);
                     }
-                    attribute_expressions(&element.attributes, &mut ctx.expressions);
                 }
                 Node::MdxFlowExpression(_) | Node::MdxTextExpression(_) => {
                     if crate::utils::mdx_comments::is_comment_only_expression(&content[range.0..range.1]) {
@@ -444,6 +427,7 @@ impl MdxContext {
         }
         let mut links = Vec::new();
         let mut images = Vec::new();
+        let mut positions = SourcePositions::new(content, lines);
         for node in nodes(&self.root) {
             let (url, title, reference_id, link_type, image) = match node {
                 Node::Link(link) => (link.url.as_str(), link.title.as_deref(), None, LinkType::Inline, false),
@@ -477,8 +461,8 @@ impl MdxContext {
             let pos = node.position().expect("parsed node position");
             let start = pos.start.offset;
             let end = pos.end.offset;
-            let (_, line, start_col) = LintContext::find_line_for_offset(lines, content, start);
-            let (_, end_line, end_col) = LintContext::find_line_for_offset(lines, content, end);
+            let (_, line, start_col) = positions.position(start);
+            let (_, end_line, end_col) = positions.position(end);
             let text = if let Some(children) = node.children() {
                 // MDX labels may contain JSX with brackets in its attributes.
                 // Child positions identify the label boundary without treating
@@ -489,7 +473,11 @@ impl MdxContext {
                     .map_or(start + 1, |p| p.end.offset);
                 Cow::Borrowed(&content[start + 1..label_end])
             } else {
-                Cow::Borrowed(image_label(&content[start..end], link_type, title.is_some()))
+                let Some(label) = image_label(&content[start..end], link_type, title.is_some()) else {
+                    log::debug!("MDX image label unavailable at {start}..{end}");
+                    continue;
+                };
+                Cow::Borrowed(label)
             };
             let url = Cow::Owned(url.to_owned());
             let title = title.or_else(|| {
@@ -593,21 +581,6 @@ fn jsx_tag_end(content: &str, start: usize, limit: usize, expressions: &[(usize,
     None
 }
 
-fn attribute_expressions(attributes: &[AttributeContent], ranges: &mut Vec<(usize, usize)>) {
-    for attribute in attributes {
-        let (value, stops) = match attribute {
-            AttributeContent::Expression(expr) => (&expr.value, &expr.stops),
-            AttributeContent::Property(prop) => match &prop.value {
-                Some(AttributeValue::Expression(expr)) => (&expr.value, &expr.stops),
-                _ => continue,
-            },
-        };
-        if let (Some(first), Some(last)) = (stops.first(), stops.last()) {
-            ranges.push((first.1.saturating_sub(1), last.1 + value.len() - last.0 + 1));
-        }
-    }
-}
-
 /// Let a JavaScript parser decide whether a candidate `}` closes the MDX
 /// expression. Counting braces cannot distinguish strings, regex literals,
 /// comments, templates, or JSX nested in an expression.
@@ -653,17 +626,18 @@ fn reference_type(kind: &ReferenceKind) -> LinkType {
 /// Image nodes store decoded alt text rather than children. Find the label
 /// from the resource/reference suffix so brackets inside JSX and code in the
 /// alt text cannot truncate a link-style fix.
-fn image_label(source: &str, kind: LinkType, has_title: bool) -> &str {
+fn image_label(source: &str, kind: LinkType, has_title: bool) -> Option<&str> {
     let bytes = source.as_bytes();
+    let suffix = bytes.len().checked_sub(1)?;
     let label_end = match kind {
-        LinkType::Shortcut => Some(bytes.len() - 1),
-        LinkType::Collapsed => Some(bytes.len() - 3),
-        LinkType::Reference => (2..bytes.len() - 1)
+        LinkType::Shortcut => Some(suffix),
+        LinkType::Collapsed => bytes.len().checked_sub(3),
+        LinkType::Reference => (2..suffix)
             .rev()
             .find(|&i| bytes[i] == b'[' && !escaped_at(bytes, i))
             .and_then(|i| i.checked_sub(1)),
         LinkType::Inline => {
-            let mut end = bytes.len() - 1; // outer closing parenthesis
+            let mut end = suffix; // outer closing parenthesis
             if (has_title || super::link_parser::has_explicit_empty_inline_title(source))
                 && let Some((start, _)) = title_range(&source[..end])
             {
@@ -705,10 +679,8 @@ fn image_label(source: &str, kind: LinkType, has_title: bool) -> &str {
         }
         _ => None,
     };
-    let end = label_end
-        .filter(|&end| end >= 2 && bytes.get(end) == Some(&b']'))
-        .expect("MDX image has a parsed label and resource/reference suffix");
-    &source[2..end]
+    let end = label_end.filter(|&end| end >= 2 && bytes.get(end) == Some(&b']'))?;
+    source.get(2..end)
 }
 
 fn escaped_at(bytes: &[u8], offset: usize) -> bool {
@@ -726,6 +698,7 @@ fn mark_lines(lines: &mut [LineInfo], start: usize, end: usize, mark: impl Fn(&m
 mod tests {
     use super::*;
     use crate::config::MarkdownFlavor;
+    use crate::lint_context::LintContext;
     use crate::rule::Rule;
     use crate::rules::{MD042NoEmptyLinks, MD059LinkText, MD091NoMarkdownInHtml};
 
@@ -736,6 +709,147 @@ mod tests {
             "MDX parse failed: {content}"
         );
         ctx
+    }
+
+    #[test]
+    fn attribute_ranges_preserve_indentation_tabs_and_container_prefixes() {
+        for source in [
+            "<A b={x\n  } />",
+            "- <A b={\n\tx}/>",
+            "- <A b={\n\t x}/>",
+            "> <A b={x\n>   } />",
+            "<A {...props\n  } />",
+            "<A b={/* } */} />",
+            "<A b={x > y} />",
+            "<A b={<B title='}' />} />",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let content = source.replace('\n', newline);
+                let ctx = context(&content);
+                let mdx = MdxContext::parse(&content, &ctx.lines).unwrap();
+                assert_eq!(
+                    mdx.expressions,
+                    vec![(content.find('{').unwrap(), content.rfind('}').unwrap() + 1)],
+                    "{content:?}",
+                );
+                let (_, components) = mdx.html_tags(&content, &ctx.lines);
+                assert_eq!(components.len(), 1, "{content:?}");
+                assert_eq!(components[0].byte_offset, content.find('<').unwrap());
+                assert_eq!(components[0].byte_end, content.len());
+            }
+        }
+        let content = "{before}\n\n<A b={after} />\n\n{tail}";
+        let ctx = context(content);
+        let mdx = MdxContext::parse(content, &ctx.lines).unwrap();
+        let slices: Vec<_> = mdx
+            .expressions
+            .iter()
+            .map(|&(start, end)| &content[start..end])
+            .collect();
+        assert_eq!(slices, ["{before}", "{after}", "{tail}"]);
+    }
+
+    #[test]
+    fn native_positions_match_source_for_nested_and_multiline_elements() {
+        let prefix = "é日本🙂e\u{301}\t".repeat(80);
+        let source = format!(
+            "{prefix}<Card><span title=\"日本\">text <b>bold</b></span></Card> [![图](image.png)](target)\n\n\
+             <Card\n  title=\"multiline\">\n\n{prefix}[multi\nline](target) ![multi\nimage](image.png)\n\n</Card>\n\n\
+             {prefix}[ref][] ![ref][] [full][ref] ![full][ref] [ref] ![ref]\n\n[ref]: target"
+        );
+        for newline in ["\n", "\r\n"] {
+            let content = source.replace('\n', newline);
+            let ctx = context(&content);
+            let mdx = MdxContext::parse(&content, &ctx.lines).unwrap();
+            let (links, images) = mdx.links_and_images(&content, &ctx.lines);
+            assert_eq!(links.len(), 5);
+            assert_eq!(images.len(), 5);
+            for (start, end, line, col, end_line, end_col) in links
+                .iter()
+                .map(|s| (s.byte_offset, s.byte_end, s.line, s.start_col, s.end_line, s.end_col))
+                .chain(
+                    images
+                        .iter()
+                        .map(|s| (s.byte_offset, s.byte_end, s.line, s.start_col, s.end_line, s.end_col)),
+                )
+            {
+                let (_, expected_line, expected_col) = LintContext::find_line_for_offset(&ctx.lines, &content, start);
+                let (_, expected_end_line, expected_end_col) =
+                    LintContext::find_line_for_offset(&ctx.lines, &content, end);
+                assert_eq!(
+                    (line, col, end_line, end_col),
+                    (expected_line, expected_col, expected_end_line, expected_end_col)
+                );
+            }
+            let (html, components) = mdx.html_tags(&content, &ctx.lines);
+            assert_eq!(html.len(), 4);
+            assert_eq!(components.len(), 4);
+            for tag in html.iter().chain(&components) {
+                let (index, line, col) = LintContext::find_line_for_offset(&ctx.lines, &content, tag.byte_offset);
+                let info = &ctx.lines[index];
+                let end_col = crate::utils::range_utils::byte_to_char_count(
+                    info.content(&content),
+                    tag.byte_end - info.byte_offset,
+                ) - 1;
+                assert_eq!((tag.line, tag.start_col, tag.end_col), (line, col, end_col));
+            }
+        }
+    }
+
+    #[test]
+    fn native_parser_matches_upstream_with_javascript_callbacks() {
+        use ::markdown as upstream;
+
+        fn signal(value: markdown::MdxSignal) -> upstream::MdxSignal {
+            match value {
+                markdown::MdxSignal::Ok => upstream::MdxSignal::Ok,
+                markdown::MdxSignal::Eof(message, source, rule) => upstream::MdxSignal::Eof(message, source, rule),
+                markdown::MdxSignal::Error(message, offset, source, rule) => {
+                    upstream::MdxSignal::Error(message, offset, source, rule)
+                }
+            }
+        }
+        let mut options = upstream::ParseOptions::mdx();
+        options.constructs.gfm_table = true;
+        options.constructs.gfm_strikethrough = true;
+        options.constructs.gfm_task_list_item = true;
+        options.constructs.gfm_footnote_definition = true;
+        options.constructs.gfm_label_start_footnote = true;
+        options.mdx_esm_parse = Some(Box::new(|value| signal(parse_esm(value))));
+        options.mdx_expression_parse = Some(Box::new(|value, kind| {
+            let kind = match kind {
+                upstream::MdxExpressionKind::Expression => markdown::MdxExpressionKind::Expression,
+                upstream::MdxExpressionKind::AttributeExpression => markdown::MdxExpressionKind::AttributeExpression,
+                upstream::MdxExpressionKind::AttributeValueExpression => {
+                    markdown::MdxExpressionKind::AttributeValueExpression
+                }
+            };
+            signal(parse_expression(value, &kind))
+        }));
+        for source in [
+            "import Card from './card';\n\nexport const value = {nested: '日本'};\n\n<Card>{value.nested}</Card>\n",
+            "<Card {...props} title={foo({a: 1})}>[![图](img)](url) {`hello ${name}`}</Card>\n",
+            "<日本 属性={value}>[é *label*](target)</日本> {/* [hidden](url) */}\n",
+            "[a <span>{value}</span> b](target) ![<Icon /> image](image.png)\n",
+            "<Card>{(() => { return /[}]/.test('}'); })()}</Card>\n",
+            "Heading <b>text</b>\n===\n",
+            "# Heading <b>text</b> #\n",
+            "<Card title={value +} />\n",
+            "export const = broken;\n",
+            "<Card>{unterminated",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let content = source.replace('\n', newline);
+                let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+                let actual = MdxContext::parse(&content, &ctx.lines);
+                let expected = parse_without_crashing(|| upstream::to_mdast(&content, &options)).ok();
+                assert_eq!(
+                    actual.as_ref().map(|mdx| format!("{:?}", mdx.root)),
+                    expected.as_ref().map(|root| format!("{root:?}")),
+                    "source: {content:?}",
+                );
+            }
+        }
     }
 
     #[test]
@@ -753,10 +867,6 @@ mod tests {
 
     #[test]
     fn unclosed_jsx_in_link_label_is_linted_without_crashing() {
-        // markdown-rs rejects these labels through debug assertions, so a build
-        // with debug assertions panics inside the parser and takes the recovery
-        // context, and a build without them gets a tree back. Every rule has to
-        // lint the document either way.
         let rules = crate::rules::all_rules(&crate::config::Config::default());
         for content in [
             "[<span>text](/x)\n",
@@ -766,14 +876,15 @@ mod tests {
             "[a<>b](/x)\n",
             "![<>]()\n",
             "[<div>](/x)\r\n",
+            "<b>[x</b>](/y)",
+            "<b>![x</b>](/y)",
+            "> <b>[x</b>](/y)",
         ] {
             let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
-            if cfg!(debug_assertions) {
-                assert!(
-                    MdxContext::parse(content, &ctx.lines).is_none(),
-                    "expected recovery context for {content:?}"
-                );
-            }
+            assert!(
+                MdxContext::parse(content, &ctx.lines).is_none(),
+                "expected recovery context for {content:?}"
+            );
             assert_eq!(ctx.content, content);
             let linted = crate::lint(content, &rules, false, MarkdownFlavor::MDX, None, None);
             assert!(linted.is_ok(), "{content:?}: {linted:?}");

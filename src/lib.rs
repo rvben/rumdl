@@ -47,6 +47,8 @@
 // for symmetry with non-empty string literals.
 #![allow(clippy::manual_string_new)]
 
+extern crate alloc;
+
 pub mod code_block_tools;
 pub mod config;
 pub mod discovery;
@@ -61,6 +63,7 @@ pub mod inline_config;
 pub mod linguist_data;
 pub mod lint_context;
 pub mod markdownlint_config;
+mod mdx_parser;
 pub mod merge_conflict;
 pub mod profiling;
 pub mod rule;

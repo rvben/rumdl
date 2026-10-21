@@ -447,6 +447,25 @@ fn extension_trigger(bytes: &[u8]) -> bool {
 }
 
 impl<'a> PendingLinks<'a> {
+    /// MDX already supplies all resolved link facts. Retain the primary parser's
+    /// unresolved references without materializing links and images we discard.
+    pub(super) fn finish_mdx(self, mdx: &super::mdx::MdxContext, lines: &[LineInfo]) -> ParsedLinks<'a> {
+        let (links, images) = mdx.links_and_images(self.content, lines);
+        ParsedLinks {
+            link_byte_ranges: links.iter().map(|link| (link.byte_offset, link.byte_end)).collect(),
+            link_found_positions: links.iter().map(|link| link.byte_offset).collect(),
+            image_found_positions: images.iter().map(|image| image.byte_offset).collect(),
+            links,
+            images,
+            broken_links: self
+                .broken_links
+                .into_iter()
+                .filter(|link| mdx.contains_text(link.span.start, link.span.end))
+                .collect(),
+            footnote_refs: mdx.footnote_refs(),
+        }
+    }
+
     pub(super) fn finish(
         self,
         lines: &[LineInfo],
@@ -596,6 +615,75 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn mdx_native_link_facts_preserve_primary_reference_handoff() {
+        for source in [
+            "[ok](/x) ![![nested](inner)](outer) [bad][missing]",
+            "[full][ref] [ref][] [ref] ![alt][ref]\n\n[ref]: /target \"title\"",
+            "<Card title=\"[fake][missing]\">\n{'[fake][missing]'}\n[visible][missing]\n</Card>",
+            "```md\n![hidden](image) [fake][missing]\n```\n\n`[fake][missing]` [visible][missing]",
+            "{/* [fake][missing] */}\n\n![visible](image) [visible][missing]",
+            "Footnote[^n] and [broken][unknown].\n\n[^n]: body [link](url)",
+            "---\ntitle: <Card>\n---\n\n![body](image)",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let content = source.replace('\n', newline);
+                let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+                let mdx = super::super::mdx::MdxContext::parse(&content, &ctx.lines)
+                    .unwrap_or_else(|| panic!("invalid MDX fixture: {content:?}"));
+                let mut expected = ParsedDocument::parse(&content, &ctx.line_offsets).pending_links.finish(
+                    &ctx.lines,
+                    &ctx.code_blocks,
+                    MarkdownFlavor::MDX,
+                    &ctx.html_comment_ranges,
+                );
+                let (links, images) = mdx.links_and_images(&content, &ctx.lines);
+                expected.link_byte_ranges = links.iter().map(|link| (link.byte_offset, link.byte_end)).collect();
+                expected.link_found_positions = links.iter().map(|link| link.byte_offset).collect();
+                expected.image_found_positions = images.iter().map(|image| image.byte_offset).collect();
+                expected.links = links;
+                expected.images = images;
+                expected.footnote_refs = mdx.footnote_refs();
+                expected
+                    .broken_links
+                    .retain(|link| mdx.contains_text(link.span.start, link.span.end));
+                let actual = ParsedDocument::parse(&content, &ctx.line_offsets)
+                    .pending_links
+                    .finish_mdx(&mdx, &ctx.lines);
+                assert_eq!(actual.link_byte_ranges, expected.link_byte_ranges, "{content:?}");
+                assert_eq!(actual.link_found_positions, expected.link_found_positions);
+                assert_eq!(actual.image_found_positions, expected.image_found_positions);
+                // Debug includes ranges, decoded values, titles, and reference IDs.
+                assert_eq!(
+                    format!(
+                        "{:?}",
+                        (actual.links, actual.images, actual.broken_links, actual.footnote_refs)
+                    ),
+                    format!(
+                        "{:?}",
+                        (
+                            expected.links,
+                            expected.images,
+                            expected.broken_links,
+                            expected.footnote_refs
+                        )
+                    ),
+                    "{content:?}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_mdx_keeps_primary_image_fallback() {
+        let content = "![visible](image.png)\n\n# <Open> #\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        assert!(super::super::mdx::MdxContext::parse(content, &ctx.lines).is_none());
+        assert_eq!(ctx.images().len(), 1);
+        assert_eq!(ctx.images()[0].alt_text, "visible");
+        assert_eq!(ctx.images()[0].url, "image.png");
     }
 
     #[test]
