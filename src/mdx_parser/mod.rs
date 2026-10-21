@@ -34,6 +34,7 @@ pub mod unist;
 mod util;
 
 pub use configuration::{Constructs, ParseOptions};
+pub(crate) use util::character_reference::{decode_named, decode_numeric};
 pub use util::mdx::{
     EsmParse as MdxEsmParse, ExpressionKind as MdxExpressionKind, ExpressionParse as MdxExpressionParse,
     Signal as MdxSignal,

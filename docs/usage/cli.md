@@ -151,6 +151,27 @@ line, such as the indentation and `/// `, to `column`.
 Fix ranges address the snippet's bytes, so applying them to the source needs
 the extractor's own per-line byte map. Linting without fixing avoids that.
 
+### `check-assets`
+
+Report assets with no reference or literal filename mention in complete Markdown
+source directories. This command never modifies files.
+
+```bash
+rumdl check-assets --root docs --source docs --assets docs/images
+rumdl check-assets --root docs --source docs --assets docs/images --output-format json
+```
+
+Repeat `--source` and `--assets` for additional directories. Use `--include` to
+select root-relative asset globs and `--keep` for files used by CSS, templates,
+or other sources outside Markdown. All directories must be inside `--root`.
+The scan includes hidden and ignored Markdown files and does not load lint
+configuration.
+
+Reports go to stdout; errors go to stderr. Exit codes are 0 for no unreferenced
+assets, 1 for findings, and 2 for an incomplete or invalid scan. An incomplete
+scan emits no findings. See [Find unreferenced assets](../check-assets.md) for
+reference handling, conservative mentions, scan boundaries, and JSON fields.
+
 ### `fmt [PATHS...]`
 
 Format Markdown files (applies fixes like `rumdl check --fix`, but keeps formatter-style exit codes).

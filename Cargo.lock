@@ -2594,6 +2594,7 @@ dependencies = [
 name = "rumdl"
 version = "0.3.0"
 dependencies = [
+ "aho-corasick",
  "assert_cmd",
  "blake3",
  "chrono",

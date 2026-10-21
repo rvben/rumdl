@@ -67,6 +67,7 @@ mod mdx_parser;
 pub mod merge_conflict;
 pub mod profiling;
 pub mod rule;
+pub mod unused_assets;
 #[cfg(feature = "colored")]
 pub mod vscode;
 pub mod workspace_index;

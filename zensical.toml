@@ -25,6 +25,7 @@ nav = [
   ]},
   { "Usage" = [
     { "CLI Commands" = "usage/cli.md" },
+    { "Find Unreferenced Assets" = "check-assets.md" },
     { "Editor Integration" = "usage/editors.md" },
     { "CI/CD Integration" = "usage/ci-cd.md" },
     { "Pre-commit" = "usage/pre-commit.md" },

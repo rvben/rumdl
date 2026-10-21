@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `rumdl check-assets` reports assets unreferenced in complete Markdown source
+  scans, with explicit include/keep globs and text or versioned JSON output.
+  Literal filename mentions are kept separately; incomplete scans emit no findings.
+
 - MD022 `lines-above-mode = "exact"` removes surplus blank lines above headings
   while preserving comments and the existing minimum-spacing default (#838).
 

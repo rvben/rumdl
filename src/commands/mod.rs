@@ -4,6 +4,7 @@
 //! that `main()` dispatches to.
 
 pub mod check;
+pub mod check_assets;
 pub mod clean;
 pub mod code_block_tools_docs;
 pub mod completions;

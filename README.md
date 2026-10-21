@@ -121,6 +121,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 - [Command-line Interface](#command-line-interface)
   - [Commands](#commands)
     - [`check [PATHS...]`](#check-paths)
+    - [`check-assets`](#check-assets)
     - [`fmt [PATHS...]`](#fmt-paths)
     - [`init [OPTIONS]`](#init-options)
     - [`import <FILE> [OPTIONS]`](#import-file-options)
@@ -694,6 +695,18 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `--stdin-batch`: Read repeated UTF-8 `path\0content\0` pairs from stdin
 - `--stdin-batch-closed-world`: Resolve relative links only within the supplied batch
 - `--stdin-batch-targets <FILE>`: Read NUL-terminated paths that exist as link targets but are not linted
+
+#### `check-assets`
+
+Find assets unreferenced in complete Markdown source directories without modifying files:
+
+```bash
+rumdl check-assets --root docs --source docs --assets docs/images
+```
+
+Use `--keep` for assets referenced outside Markdown, such as images used by CSS
+or templates. See [the asset scan documentation](docs/check-assets.md) for
+scan boundaries, reference handling, include/keep globs, and JSON output.
 
 #### `fmt [PATHS...]`
 
