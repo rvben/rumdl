@@ -1,4 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::code_block_utils::{Enclosure, continued_depth, item_runs, strip_enclosure};
 
 /// Rule MD070: Nested code fence collision detection
 ///
@@ -100,161 +101,352 @@ impl MD070NestedCodeFence {
         )
     }
 
-    /// Find the maximum fence length of same-character fences in the content
-    /// Returns (line_offset, fence_length) of the first collision, if any
-    fn find_fence_collision(content: &str, fence_char: char, outer_fence_length: usize) -> Option<(usize, usize)> {
-        for (line_idx, line) in content.lines().enumerate() {
-            let trimmed = line.trim_start();
-
-            // Check if line starts with the same fence character
-            if trimmed.starts_with(fence_char) {
-                let count = trimmed.chars().take_while(|&c| c == fence_char).count();
-
-                // Collision if same char AND at least as long as outer fence
-                if count >= outer_fence_length {
-                    // Verify it looks like a fence line (only fence chars + optional language/whitespace)
-                    let after_fence = &trimmed[count..];
-                    // A fence line is: fence chars + optional language identifier + optional whitespace
-                    // We detect collision if:
-                    // - Line ends after fence chars (closing fence)
-                    // - Line has alphanumeric after fence (opening fence with language)
-                    // - Line has only whitespace after fence
-                    if after_fence.is_empty()
-                        || after_fence.trim().is_empty()
-                        || after_fence
-                            .chars()
-                            .next()
-                            .is_some_and(|c| c.is_alphabetic() || c == '{')
-                    {
-                        return Some((line_idx, count));
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Find the maximum fence length needed to safely contain the content
-    fn find_safe_fence_length(content: &str, fence_char: char) -> usize {
-        let mut max_fence = 0;
-
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with(fence_char) {
-                let count = trimmed.chars().take_while(|&c| c == fence_char).count();
-                if count >= 3 {
-                    // Only count valid fence-like patterns
-                    let after_fence = &trimmed[count..];
-                    if after_fence.is_empty()
-                        || after_fence.trim().is_empty()
-                        || after_fence
-                            .chars()
-                            .next()
-                            .is_some_and(|c| c.is_alphabetic() || c == '{')
-                    {
-                        max_fence = max_fence.max(count);
-                    }
-                }
-            }
-        }
-
-        max_fence
-    }
-
-    /// Find the user's intended closing fence when a collision is detected.
-    /// Searches past the first (premature) closing fence for the last bare
-    /// fence of the same type before hitting a new opening fence.
-    fn find_intended_close(
-        lines: &[&str],
-        first_close: usize,
-        fence_char: char,
-        fence_length: usize,
-        opening_indent: usize,
-    ) -> usize {
-        let mut intended_close = first_close;
-        for (j, line_j) in lines.iter().enumerate().skip(first_close + 1) {
-            if Self::is_closing_fence(line_j, fence_char, fence_length) {
-                intended_close = j;
-            } else if Self::parse_fence_line(line_j)
-                .is_some_and(|(ind, ch, _, info)| ind <= opening_indent && ch == fence_char && !info.is_empty())
-            {
-                break;
-            }
-        }
-        intended_close
-    }
-
-    /// Parse a fence marker from a line, returning (indent, fence_char, fence_length, info_string)
-    fn parse_fence_line(line: &str) -> Option<(usize, char, usize, &str)> {
-        let indent = line.len() - line.trim_start().len();
-        // Per CommonMark, fence must have 0-3 spaces of indentation
+    /// A fence-like line of the block's container, with its indentation
+    /// measured from the container's content.
+    fn fence_line<'l>(line: &'l str, enclosing: &[Enclosure]) -> Option<FenceLine<'l>> {
+        let stripped = strip_enclosure(line, enclosing)?;
+        let (indent, text) = stripped.indent(line);
+        let run_start = text?;
+        // Per CommonMark a fence has 0-3 columns of indentation; more is code.
         if indent > 3 {
             return None;
         }
-
-        let trimmed = line.trim_start();
-
-        if trimmed.starts_with("```") {
-            let count = trimmed.chars().take_while(|&c| c == '`').count();
-            if count >= 3 {
-                let info = trimmed[count..].trim();
-                return Some((indent, '`', count, info));
-            }
-        } else if trimmed.starts_with("~~~") {
-            let count = trimmed.chars().take_while(|&c| c == '~').count();
-            if count >= 3 {
-                let info = trimmed[count..].trim();
-                return Some((indent, '~', count, info));
-            }
+        let ch = line[run_start..].chars().next().filter(|&c| c == '`' || c == '~')?;
+        let len = line[run_start..].chars().take_while(|&c| c == ch).count();
+        if len < 3 {
+            return None;
         }
-
-        None
+        Some(FenceLine {
+            indent,
+            ch,
+            len,
+            run_start,
+            rest: &line[run_start + len..],
+        })
     }
 
-    /// Index whether each opening fence has a closing fence line. A list item
-    /// or blockquote can end a block first, in which case later fences cannot
-    /// collide with it. Build once instead of searching all blocks per opener.
-    fn fence_closures(ctx: &crate::lint_context::LintContext) -> std::collections::HashMap<usize, bool> {
-        let mut closures = std::collections::HashMap::new();
-        for detail in &ctx.code_block_details {
-            if !detail.is_fenced {
+    /// A line that opens a fence of its own: the character, a run, then an info
+    /// string (a backtick fence's info string holds no backtick).
+    fn is_fence_like(fence: &FenceLine<'_>) -> bool {
+        let info = fence.rest.trim_matches([' ', '\t']);
+        if info.is_empty() {
+            return true;
+        }
+        (fence.ch != '`' || !info.contains('`'))
+            && fence.rest.chars().next().is_some_and(|c| c.is_alphabetic() || c == '{')
+    }
+
+    /// A line that opens an independent block of its own: it carries an info
+    /// string (a backtick fence's info string holds no backtick).
+    fn opens_block(fence: &FenceLine<'_>) -> bool {
+        let info = fence.rest.trim_matches([' ', '\t']);
+        !info.is_empty() && (fence.ch != '`' || !info.contains('`'))
+    }
+
+    /// A line CommonMark closes a block of `ch` fences of at least `min_length`
+    /// on: only spaces and tabs follow the run.
+    fn is_closer(fence: &FenceLine<'_>, ch: char, min_length: usize) -> bool {
+        fence.ch == ch && fence.len >= min_length && fence.rest.trim_matches([' ', '\t']).is_empty()
+    }
+
+    /// Whether fences are found from the line text instead of the CommonMark
+    /// blocks. MDX parses JSX and expressions itself, so a fence inside a JSX
+    /// element has no CommonMark block (the parser reads the region as HTML)
+    /// and its container structure is not available.
+    fn blocks_from_line_scan(ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.flavor == crate::config::MarkdownFlavor::MDX
+    }
+
+    /// The closed fenced blocks, from the parser.
+    fn blocks_from_parser(ctx: &crate::lint_context::LintContext) -> Vec<FenceBlock> {
+        let lines = ctx.raw_lines();
+        ctx.code_block_details
+            .iter()
+            .filter(|detail| detail.is_fenced && detail.closed)
+            .filter_map(|detail| {
+                let ch = ctx.content[detail.start..]
+                    .chars()
+                    .next()
+                    .filter(|&c| c == '`' || c == '~')?;
+                let len = ctx.content[detail.start..].chars().take_while(|&c| c == ch).count();
+                let open_line = Self::line_of(ctx, detail.start);
+                let close_line = Self::line_of(ctx, detail.end.saturating_sub(1));
+                (close_line > open_line && close_line < lines.len()).then(|| FenceBlock {
+                    start: detail.start,
+                    ch,
+                    len,
+                    info: detail.info_string.trim().to_string(),
+                    open_line,
+                    close_line,
+                    enclosing: detail.enclosing.clone(),
+                })
+            })
+            .collect()
+    }
+
+    /// The closed fenced blocks of a document the parser cannot see through,
+    /// found from the line text: top-level fences only, minus those the parser
+    /// ended without a closing fence (a container ending ends the block).
+    fn blocks_from_lines(ctx: &crate::lint_context::LintContext) -> Vec<FenceBlock> {
+        let lines = ctx.raw_lines();
+        let unclosed: std::collections::HashSet<usize> = ctx
+            .code_block_details
+            .iter()
+            .filter(|detail| detail.is_fenced && !detail.closed)
+            .map(|detail| Self::line_of(ctx, detail.start))
+            .collect();
+        let mut blocks = Vec::new();
+        let mut i = 0;
+        while i < lines.len() {
+            // A line after a code line is its content or its closer.
+            if i > 0 && ctx.lines.get(i - 1).is_some_and(|prev| prev.in_code_block) {
+                i += 1;
                 continue;
             }
-            let line_idx = ctx.line_number_at_offset(detail.start).saturating_sub(1);
-            if let Some(info) = ctx.lines.get(line_idx)
-                && detail.start >= info.byte_offset
-                && detail.start <= info.byte_offset + info.byte_len
-            {
-                // Preserve the first matching detail even if callers supply
-                // overlapping or out-of-order entries in the public vector.
-                closures.entry(line_idx).or_insert(detail.closed);
+            let Some(open) = Self::fence_line(lines[i], &[]) else {
+                i += 1;
+                continue;
+            };
+            // Markup that is not Markdown source opens no fence.
+            if Self::is_ignored_context(&ctx.lines[i]) {
+                i += 1;
+                continue;
+            }
+            if unclosed.contains(&i) {
+                i += 1;
+                continue;
+            }
+            let close = (i + 1..lines.len()).find(|&j| {
+                Self::fence_line(lines[j], &[]).is_some_and(|fence| Self::is_closer(&fence, open.ch, open.len))
+            });
+            let Some(close_line) = close else {
+                i += 1;
+                continue;
+            };
+            blocks.push(FenceBlock {
+                start: ctx.lines[i].byte_offset + open.run_start,
+                ch: open.ch,
+                len: open.len,
+                info: open.rest.trim().to_string(),
+                open_line: i,
+                close_line,
+                enclosing: Vec::new(),
+            });
+            i = close_line + 1;
+        }
+        blocks
+    }
+
+    /// Whether a line sits in front matter, a comment or an HTML block.
+    fn is_ignored_context(line: &crate::lint_context::LineInfo) -> bool {
+        line.in_front_matter || line.in_html_comment || line.in_mdx_comment || line.in_html_block
+    }
+
+    /// The container structure the intended-close search needs. The line scan
+    /// sees no containers, so it gets no openers.
+    fn nesting<'c>(ctx: &'c crate::lint_context::LintContext) -> Nesting<'c> {
+        let mut openers: Vec<_> = if Self::blocks_from_line_scan(ctx) {
+            Vec::new()
+        } else {
+            ctx.code_block_details
+                .iter()
+                .filter(|detail| detail.is_fenced)
+                .map(|detail| (Self::line_of(ctx, detail.start), detail.enclosing.as_slice()))
+                .collect()
+        };
+        openers.sort_by_key(|&(open, _)| open);
+
+        let lines = ctx.raw_lines();
+        let mut continued = vec![usize::MAX; lines.len()];
+        let mut nearest = None;
+        let mut next = 0;
+        for (i, line) in lines.iter().enumerate() {
+            while let Some(&(_, enclosing)) = openers.get(next).filter(|&&(open, _)| open <= i) {
+                nearest = Some((enclosing, item_runs(enclosing)));
+                next += 1;
+            }
+            if let Some((enclosing, runs)) = &nearest {
+                continued[i] = continued_depth(line, enclosing, runs);
             }
         }
-        closures
+
+        let mut next_shallower = vec![lines.len(); lines.len()];
+        let mut deeper: Vec<usize> = Vec::new();
+        for i in (0..lines.len()).rev() {
+            while deeper.last().is_some_and(|&k| continued[k] >= continued[i]) {
+                deeper.pop();
+            }
+            if let Some(&k) = deeper.last() {
+                next_shallower[i] = k;
+            }
+            deeper.push(i);
+        }
+
+        Nesting {
+            openers,
+            continued,
+            next_shallower,
+        }
     }
 
-    /// Check if a line is a valid closing fence for the given opening fence
-    /// Per CommonMark, closing fences can have 0-3 spaces of indentation regardless of opening fence
-    fn is_closing_fence(line: &str, fence_char: char, min_length: usize) -> bool {
-        let indent = line.len() - line.trim_start().len();
-        // Per CommonMark spec, closing fence can have 0-3 spaces of indentation
-        if indent > 3 {
-            return false;
-        }
-
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with(fence_char) {
-            return false;
-        }
-
-        let count = trimmed.chars().take_while(|&c| c == fence_char).count();
-        if count < min_length {
-            return false;
-        }
-
-        // Closing fence must have only whitespace after fence chars
-        trimmed[count..].trim().is_empty()
+    /// Zero-based line holding byte `offset`.
+    fn line_of(ctx: &crate::lint_context::LintContext, offset: usize) -> usize {
+        ctx.lines
+            .partition_point(|line| line.byte_offset <= offset)
+            .saturating_sub(1)
     }
+
+    /// The warning for one fenced block, when a fence-like line inside it makes
+    /// the parser end it before the author meant it to end.
+    fn check_block(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        block: &FenceBlock,
+        nesting: &Nesting,
+    ) -> Option<(LintWarning, usize)> {
+        let openers = &nesting.openers;
+        let lines = ctx.raw_lines();
+        let language = block.info.split_whitespace().next().unwrap_or("");
+        if !Self::should_check_language(language) {
+            return None;
+        }
+
+        // The first fence-like line inside the extent the parser gave the block.
+        let collision = (block.open_line + 1..block.close_line).find(|&j| {
+            Self::fence_line(lines[j], &block.enclosing)
+                .is_some_and(|fence| fence.ch == block.ch && fence.len >= block.len && Self::is_fence_like(&fence))
+        })?;
+
+        // Where the author meant the block to end: the last bare fence before
+        // the container ends, a line stops being part of it, or another fence
+        // with an info string begins at the opener's own indentation.
+        let line_start = ctx.lines[block.open_line].byte_offset;
+        let opener_indent = strip_enclosure(&lines[block.open_line][..block.start - line_start], &block.enclosing)
+            .map_or(0, |prefix| {
+                prefix.indent(&lines[block.open_line][..block.start - line_start]).0
+            });
+        let bound = block.enclosing.last().map(Enclosure::end);
+        let depth = block.enclosing.len();
+        let mut intended_close = block.close_line;
+        let mut next_opener = openers.partition_point(|&(open, _)| open <= block.close_line);
+        let mut j = block.close_line + 1;
+        while let Some(line) = lines.get(j) {
+            if bound.is_some_and(|end| ctx.lines[j].byte_offset >= end) {
+                break;
+            }
+            // A line that does not continue every container ends the search.
+            if strip_enclosure(line, &block.enclosing).is_none() {
+                break;
+            }
+            // A quote or list item nested inside the block's container holds
+            // its own blocks, and its fences open and close those, so the
+            // search resumes after it. Any fence of such a container comes at
+            // or after the opener of its first fenced block. A lazy line in it
+            // continues it but not the block's own containers, and ends the
+            // search as it does anywhere else.
+            while openers.get(next_opener).is_some_and(|&(open, _)| open < j) {
+                next_opener += 1;
+            }
+            if let Some(&(_, enclosing)) = openers.get(next_opener).filter(|&&(open, _)| open == j)
+                && let Some(nested) = enclosing.get(depth)
+            {
+                let end = Self::line_of(ctx, nested.end().saturating_sub(1)).max(j);
+                let mut k = j;
+                while k <= end && nesting.continued[k] >= depth {
+                    k = nesting.next_shallower[k];
+                }
+                if k <= end {
+                    break;
+                }
+                j = end + 1;
+                continue;
+            }
+            // A blank line or text decides nothing: the container goes on.
+            if let Some(fence) = Self::fence_line(line, &block.enclosing) {
+                if Self::is_closer(&fence, block.ch, block.len) {
+                    intended_close = j;
+                } else if fence.ch == block.ch && fence.indent <= opener_indent && Self::opens_block(&fence) {
+                    break;
+                }
+            }
+            j += 1;
+        }
+
+        // The longest fence inside what the author meant to hold.
+        let longest = (block.open_line + 1..intended_close)
+            .filter_map(|j| Self::fence_line(lines[j], &block.enclosing))
+            .filter(|fence| fence.ch == block.ch && Self::is_fence_like(fence))
+            .map(|fence| fence.len)
+            .max()
+            .unwrap_or(0);
+        let suggested_fence: String = std::iter::repeat_n(block.ch, longest.max(block.len) + 1).collect();
+
+        let closer = Self::fence_line(lines[intended_close], &block.enclosing)?;
+        let closer_start = ctx.lines[intended_close].byte_offset + closer.run_start;
+        let fix = Fix::with_additional_edits(
+            block.start..block.start + block.len,
+            suggested_fence.clone(),
+            vec![Fix::new(
+                closer_start..closer_start + closer.len,
+                suggested_fence.clone(),
+            )],
+        );
+        let collision_line_num = collision + 1;
+        Some((
+            LintWarning {
+                rule_name: Some(self.name().to_string()),
+                message: format!(
+                    "Code block contains fence markers at line {collision_line_num} that interfere with block parsing — use {suggested_fence} for outer fence"
+                ),
+                line: block.open_line + 1,
+                column: 1,
+                end_line: intended_close + 1,
+                end_column: lines[intended_close].chars().count() + 1,
+                severity: Severity::Warning,
+                fix: Some(fix),
+            },
+            intended_close,
+        ))
+    }
+}
+
+/// A closed fenced block to judge, wherever it was found.
+struct FenceBlock {
+    /// Byte offset of the opening fence's first character.
+    start: usize,
+    ch: char,
+    /// Length of the opening fence.
+    len: usize,
+    info: String,
+    open_line: usize,
+    /// The line the parser ends the block on.
+    close_line: usize,
+    enclosing: Vec<Enclosure>,
+}
+
+/// The containers of a document, as the intended-close search sees them.
+struct Nesting<'c> {
+    /// The opening line and containers of every fenced block the parser found,
+    /// closed or not, in document order.
+    openers: Vec<(usize, &'c [Enclosure])>,
+    /// For each line, how many containers of the nearest fenced block opening
+    /// at or before it the line continues. Every container a search skips
+    /// holds that opener, so the count answers for the skipping block's own
+    /// containers too. `usize::MAX` before the first opener.
+    continued: Vec<usize>,
+    /// For each line, the next line that continues fewer containers.
+    next_shallower: Vec<usize>,
+}
+
+struct FenceLine<'l> {
+    /// Columns of indentation past the container's prefix.
+    indent: usize,
+    ch: char,
+    len: usize,
+    /// Byte offset of the first fence character in the line.
+    run_start: usize,
+    /// What follows the run.
+    rest: &'l str,
 }
 
 impl Rule for MD070NestedCodeFence {
@@ -272,140 +464,33 @@ impl Rule for MD070NestedCodeFence {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
-        let lines = ctx.raw_lines();
-        let mut fence_closures = None;
+        let blocks = if Self::blocks_from_line_scan(ctx) {
+            Self::blocks_from_lines(ctx)
+        } else {
+            Self::blocks_from_parser(ctx)
+        };
+        let nesting = Self::nesting(ctx);
 
-        let mut i = 0;
-        while i < lines.len() {
-            // Skip lines in contexts that shouldn't be processed
-            if let Some(line_info) = ctx.lines.get(i)
-                && (line_info.in_front_matter
-                    || line_info.in_html_comment
-                    || line_info.in_mdx_comment
-                    || line_info.in_html_block)
-            {
-                i += 1;
+        // Blocks the author's intended closing fence already covers are skipped,
+        // so no two fixes touch the same lines.
+        let mut covered_until = 0;
+        for block in &blocks {
+            if block.open_line < covered_until {
                 continue;
             }
-
-            // Skip if we're already inside a code block (check previous line).
-            // This handles list-indented code blocks (4+ spaces) which our rule doesn't
-            // parse directly, but the context detects correctly. If the previous line
-            // is in a code block, this line is either content or a closing fence for
-            // that block - not a new opening fence.
-            if i > 0
-                && let Some(prev_line_info) = ctx.lines.get(i - 1)
-                && prev_line_info.in_code_block
+            // Skip contexts that are not Markdown source.
+            let Some(line_info) = ctx.lines.get(block.open_line) else {
+                continue;
+            };
+            if Self::is_ignored_context(line_info)
+                || block.enclosing.iter().any(|e| matches!(e, Enclosure::Opaque { .. }))
             {
-                i += 1;
                 continue;
             }
-
-            let line = lines[i];
-
-            // Try to parse as opening fence
-            if let Some((_indent, fence_char, fence_length, info_string)) = Self::parse_fence_line(line) {
-                if fence_closures
-                    .get_or_insert_with(|| Self::fence_closures(ctx))
-                    .get(&i)
-                    .is_some_and(|closed| !closed)
-                {
-                    i += 1;
-                    continue;
-                }
-                let block_start = i;
-
-                // Extract the language (first word of info string)
-                let language = info_string.split_whitespace().next().unwrap_or("");
-
-                // Find the closing fence
-                let mut block_end = None;
-                for (j, line_j) in lines.iter().enumerate().skip(i + 1) {
-                    if Self::is_closing_fence(line_j, fence_char, fence_length) {
-                        block_end = Some(j);
-                        break;
-                    }
-                }
-
-                if let Some(end_line) = block_end {
-                    // We have a complete code block from block_start to end_line
-                    // Check if we should analyze this block
-                    if Self::should_check_language(language) {
-                        // Get the content between fences
-                        let block_content: String = if block_start + 1 < end_line {
-                            lines[(block_start + 1)..end_line].join("\n")
-                        } else {
-                            String::new()
-                        };
-
-                        // Check for fence collision
-                        if let Some((collision_line_offset, _collision_length)) =
-                            Self::find_fence_collision(&block_content, fence_char, fence_length)
-                        {
-                            let collision_line_num = block_start + 1 + collision_line_offset + 1; // 1-indexed
-
-                            // Find the user's intended closing fence (may be past the
-                            // CommonMark-visible close when inner ``` causes premature closure)
-                            let indent = line.len() - line.trim_start().len();
-                            let intended_close =
-                                Self::find_intended_close(lines, end_line, fence_char, fence_length, indent);
-
-                            // Compute safe fence length from the full intended content
-                            let full_content: String = if block_start + 1 < intended_close {
-                                lines[(block_start + 1)..intended_close].join("\n")
-                            } else {
-                                block_content.clone()
-                            };
-                            let safe_length = Self::find_safe_fence_length(&full_content, fence_char) + 1;
-                            let suggested_fence: String = std::iter::repeat_n(fence_char, safe_length).collect();
-
-                            // Build a Fix that replaces the block from opening fence
-                            // through the intended closing fence. This must be safe for
-                            // direct application by the LSP code action path.
-                            let open_byte_start = ctx.line_start_byte(block_start + 1).unwrap_or(0);
-                            let close_byte_end = ctx.line_start_byte(intended_close + 2).unwrap_or(ctx.content.len());
-
-                            let indent_str = &line[..indent];
-                            let closing_line = lines[intended_close];
-                            let closing_indent = &closing_line[..closing_line.len() - closing_line.trim_start().len()];
-                            let mut replacement = format!("{indent_str}{suggested_fence}");
-                            if !info_string.is_empty() {
-                                replacement.push_str(info_string);
-                            }
-                            replacement.push('\n');
-                            for content_line in &lines[(block_start + 1)..intended_close] {
-                                replacement.push_str(content_line);
-                                replacement.push('\n');
-                            }
-                            replacement.push_str(closing_indent);
-                            replacement.push_str(&suggested_fence);
-                            // Only add trailing newline if the replaced range ends with one
-                            if close_byte_end <= ctx.content.len() && ctx.content[..close_byte_end].ends_with('\n') {
-                                replacement.push('\n');
-                            }
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                message: format!(
-                                    "Code block contains fence markers at line {collision_line_num} that interfere with block parsing — use {suggested_fence} for outer fence"
-                                ),
-                                line: block_start + 1,
-                                column: 1,
-                                end_line: intended_close + 1,
-                                end_column: lines[intended_close].chars().count() + 1,
-                                severity: Severity::Warning,
-                                fix: Some(Fix::new(open_byte_start..close_byte_end, replacement)),
-                            });
-                        }
-                    }
-
-                    // Move past this code block
-                    i = end_line + 1;
-                    continue;
-                }
+            if let Some((warning, intended_close)) = self.check_block(ctx, block, &nesting) {
+                covered_until = intended_close + 1;
+                warnings.push(warning);
             }
-
-            i += 1;
         }
 
         Ok(warnings)
@@ -453,52 +538,21 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
 
-    #[test]
-    fn fence_closures_match_first_detail_search() {
-        use crate::utils::code_block_utils::CodeBlockDetail;
-
-        for content in ["", "\n", "é日本🙂\r\n\n```rust\nx\n```", "```\r\nx\r\n", "```\nx\n"] {
-            let mut ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-            // Include newline bytes, interior UTF-8 bytes, EOF and offsets past
-            // EOF, as well as duplicate starts with conflicting closure states.
-            ctx.code_block_details = (0..=content.len() + 1)
-                .chain(std::iter::once(usize::MAX))
-                .flat_map(|start| {
-                    [false, true].map(move |closed| CodeBlockDetail {
-                        start,
-                        end: start,
-                        is_fenced: start % 3 != 1 || closed,
-                        info_string: String::new(),
-                        content_column: None,
-                        closed,
-                    })
-                })
-                .collect();
-            for reversed in [false, true] {
-                if reversed {
-                    ctx.code_block_details.reverse();
-                }
-                let closures = MD070NestedCodeFence::fence_closures(&ctx);
-                for (line_idx, info) in ctx.lines.iter().enumerate() {
-                    let expected = ctx
-                        .code_block_details
-                        .iter()
-                        .find(|detail| {
-                            detail.is_fenced
-                                && detail.start >= info.byte_offset
-                                && detail.start <= info.byte_offset + info.byte_len
-                        })
-                        .map(|detail| detail.closed);
-                    assert_eq!(closures.get(&line_idx).copied(), expected, "{content:?}, {line_idx}");
-                }
-            }
-        }
-    }
-
     fn run_check(content: &str) -> LintResult {
         let rule = MD070NestedCodeFence::new();
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.check(&ctx)
+    }
+
+    /// Apply a Fix's primary and additional edits as one LSP workspace edit does.
+    fn apply_fix_edits(content: &str, fix: &Fix) -> String {
+        let mut edits: Vec<&Fix> = std::iter::once(fix).chain(fix.additional_edits.iter()).collect();
+        edits.sort_by_key(|edit| std::cmp::Reverse(edit.range.start));
+        let mut text = content.to_string();
+        for edit in edits {
+            text.replace_range(edit.range.clone(), &edit.replacement);
+        }
+        text
     }
 
     fn run_fix(content: &str) -> Result<String, LintError> {
@@ -825,12 +879,16 @@ code()
 
     #[test]
     fn test_blockquote_with_fence() {
-        // Fences inside blockquotes (CommonMark allows this)
+        // The quote's own closer ends the block early, so the outer fence
+        // needs to be longer; the fix touches only the two fence runs.
         let content = "> ```markdown\n> ```python\n> code()\n> ```\n> ```\n";
         let result = run_check(content).unwrap();
-        // Blockquote prefixes are part of the line, so parsing may differ
-        // This documents current behavior
-        assert!(result.is_empty() || result.len() == 1);
+        assert_eq!(result.len(), 1);
+        assert_eq!((result[0].line, result[0].end_line), (1, 5));
+        assert_eq!(
+            run_fix(content).unwrap(),
+            "> ````markdown\n> ```python\n> code()\n> ```\n> ````\n"
+        );
     }
 
     #[test]
@@ -886,16 +944,11 @@ code()
 
     #[test]
     fn test_tab_indented_opening_fence() {
-        // Tab at start of line - CommonMark says tab = 4 spaces for indentation.
-        // A 4-space indented fence is NOT a valid fenced code block per CommonMark
-        // (only 0-3 spaces allowed). However, our implementation counts characters,
-        // treating tab as 1 character. This means tab-indented fences ARE parsed.
-        // This is intentional: consistent with other rules in rumdl and matches
-        // common editor behavior where tab = 1 indent level.
+        // A tab is four columns of indentation, so `\t```markdown` is an
+        // indented code block, not a fence: nothing to collide with.
         let content = "\t```markdown\n```python\ncode()\n```\n```\n";
         let result = run_check(content).unwrap();
-        // With tab treated as 1 char (< 3), this IS parsed as a fence and triggers collision
-        assert_eq!(result.len(), 1, "Tab-indented fence is parsed (tab = 1 char)");
+        assert!(result.is_empty(), "tab-indented line is indented code: {result:?}");
     }
 
     #[test]
@@ -1065,12 +1118,8 @@ b()
         let result = run_check(content).unwrap();
         assert_eq!(result.len(), 1);
 
-        let fix = result[0].fix.as_ref().unwrap();
-        // Apply the Fix directly (simulating LSP path)
-        let mut fixed = String::new();
-        fixed.push_str(&content[..fix.range.start]);
-        fixed.push_str(&fix.replacement);
-        fixed.push_str(&content[fix.range.end..]);
+        // Apply every edit of the Fix the way an LSP code action does.
+        let fixed = apply_fix_edits(content, result[0].fix.as_ref().unwrap());
 
         // The fixed content should have upgraded fences
         assert!(
@@ -1098,11 +1147,7 @@ b()
         let result = run_check(content).unwrap();
         assert_eq!(result.len(), 1);
 
-        let fix = result[0].fix.as_ref().unwrap();
-        let mut fixed = String::new();
-        fixed.push_str(&content[..fix.range.start]);
-        fixed.push_str(&fix.replacement);
-        fixed.push_str(&content[fix.range.end..]);
+        let fixed = apply_fix_edits(content, result[0].fix.as_ref().unwrap());
 
         // The Fix must cover the full intended block (lines 1-10), not just
         // the CommonMark-visible block (lines 1-6). Verify the fixed content
@@ -1282,5 +1327,275 @@ b()
             remaining.len() < 2,
             "fix() should resolve at least one collision, remaining: {remaining:?}",
         );
+    }
+
+    // ---- container-relative behavior -------------------------------------
+
+    const IN_ITEM_VALID_CLOSER: &str = "- a\n\n  ```md\n  x\n     ```\n\n```text\ny\n```\n";
+
+    #[test]
+    fn test_closer_valid_relative_to_list_item_is_not_a_collision() {
+        // Five raw spaces is three columns past the item's content column.
+        assert!(run_check(IN_ITEM_VALID_CLOSER).unwrap().is_empty());
+        assert_eq!(run_fix(IN_ITEM_VALID_CLOSER).unwrap(), IN_ITEM_VALID_CLOSER);
+    }
+
+    #[test]
+    fn test_inner_fence_four_columns_inside_item_is_code() {
+        let content = "- a\n\n  ```markdown\n      ```bash\n  ```\n";
+        assert!(run_check(content).unwrap().is_empty());
+    }
+
+    fn assert_fixes(name: &str, content: &str, expected: &str, lines: (usize, usize)) {
+        let warnings = run_check(content).unwrap();
+        assert_eq!(warnings.len(), 1, "{name}: {warnings:?}");
+        assert_eq!((warnings[0].line, warnings[0].end_line), lines, "{name}: range");
+        let fixed = run_fix(content).unwrap();
+        assert_eq!(fixed, expected, "{name}: fix output");
+        assert!(run_check(&fixed).unwrap().is_empty(), "{name}: fixed output is clean");
+        assert_eq!(run_fix(&fixed).unwrap(), fixed, "{name}: idempotent");
+    }
+
+    #[test]
+    fn test_wide_ordered_item() {
+        assert_fixes(
+            "wide ordered item",
+            "10. a\n\n    ```markdown\n    ```bash\n    x\n    ```\n    ```\n",
+            "10. a\n\n    ````markdown\n    ```bash\n    x\n    ```\n    ````\n",
+            (3, 7),
+        );
+    }
+
+    #[test]
+    fn test_nested_list_item() {
+        assert_fixes(
+            "nested list item",
+            "- a\n  - b\n\n    ```markdown\n    ```bash\n    x\n    ```\n    ```\n",
+            "- a\n  - b\n\n    ````markdown\n    ```bash\n    x\n    ```\n    ````\n",
+            (4, 8),
+        );
+    }
+
+    #[test]
+    fn test_quote_in_list_item_and_list_item_in_quote() {
+        assert_fixes(
+            "quote in item",
+            "- a\n\n  > ```markdown\n  > ```bash\n  > x\n  > ```\n  > ```\n",
+            "- a\n\n  > ````markdown\n  > ```bash\n  > x\n  > ```\n  > ````\n",
+            (3, 7),
+        );
+        assert_fixes(
+            "item in quote",
+            "> - a\n>\n>   ```markdown\n>   ```bash\n>   x\n>   ```\n>   ```\n",
+            "> - a\n>\n>   ````markdown\n>   ```bash\n>   x\n>   ```\n>   ````\n",
+            (3, 7),
+        );
+    }
+
+    #[test]
+    fn test_item_width_is_relative_to_a_quote_whose_indent_varies() {
+        assert_fixes(
+            "varying quote indent",
+            "   > - a\n   >\n   >   ```md\n>   ```python\n>   x\n>   ```\n>   ```\n",
+            "   > - a\n   >\n   >   ````md\n>   ```python\n>   x\n>   ```\n>   ````\n",
+            (3, 7),
+        );
+    }
+
+    #[test]
+    fn test_task_list_item_width_comes_from_the_marker_line() {
+        assert_fixes(
+            "task item",
+            "-  [ ] a\n\n   ```markdown\n   ```python\n   x\n   ```\n   ```\n",
+            "-  [ ] a\n\n   ````markdown\n   ```python\n   x\n   ```\n   ````\n",
+            (3, 7),
+        );
+    }
+
+    #[test]
+    fn test_tab_indented_item_content() {
+        assert_fixes(
+            "tab item",
+            "-\ta\n\n\t```markdown\n\t```bash\n\tx\n\t```\n\t```\n",
+            "-\ta\n\n\t````markdown\n\t```bash\n\tx\n\t```\n\t````\n",
+            (3, 7),
+        );
+    }
+
+    #[test]
+    fn test_fence_opened_on_the_marker_line() {
+        assert_fixes(
+            "marker line opener",
+            "- ```markdown\n  ```bash\n  x\n  ```\n  ```\n",
+            "- ````markdown\n  ```bash\n  x\n  ```\n  ````\n",
+            (1, 5),
+        );
+    }
+
+    #[test]
+    fn test_tilde_fences_in_a_quote() {
+        assert_fixes(
+            "tilde quote",
+            "> ~~~markdown\n> ~~~bash\n> x\n> ~~~\n> ~~~\n",
+            "> ~~~~markdown\n> ~~~bash\n> x\n> ~~~\n> ~~~~\n",
+            (1, 5),
+        );
+    }
+
+    #[test]
+    fn test_search_stays_inside_the_enclosing_item() {
+        // The bare fence in the next sibling item is not this block's closer.
+        let content = "- a\n  - b\n\n    ```markdown\n    ```bash\n    x\n    ```\n- c\n\n  ```\n";
+        assert_fixes(
+            "sibling item",
+            content,
+            "- a\n  - b\n\n    ````markdown\n    ```bash\n    x\n    ````\n- c\n\n  ```\n",
+            (4, 7),
+        );
+    }
+
+    #[test]
+    fn test_search_stays_inside_the_quote() {
+        assert_fixes(
+            "quote bound",
+            "> ```markdown\n> ```bash\n> x\n> ```\n\n```\n",
+            "> ````markdown\n> ```bash\n> x\n> ````\n\n```\n",
+            (1, 4),
+        );
+    }
+
+    #[test]
+    fn test_lazy_line_ends_the_search() {
+        assert_fixes(
+            "lazy line",
+            "- a\n\n  ```markdown\n  ```bash\n  x\n  ```\nlazy\n  ```\n",
+            "- a\n\n  ````markdown\n  ```bash\n  x\n  ````\nlazy\n  ```\n",
+            (3, 6),
+        );
+    }
+
+    #[test]
+    fn test_unicode_space_after_a_fence_does_not_close_it() {
+        // U+00A0 after the run is info-string text, so it cannot be the closer.
+        let content = "> ```markdown\n> ```python\n> x\n> ```\n> ```\u{a0}\n> tail\n";
+        assert_fixes(
+            "nbsp",
+            content,
+            "> ````markdown\n> ```python\n> x\n> ````\n> ```\u{a0}\n> tail\n",
+            (1, 4),
+        );
+    }
+
+    #[test]
+    fn test_fix_edits_only_the_two_fence_runs() {
+        let content = "- a\n\n  ```markdown   title  \n  ```bash\n  x\n  ```\n  ```   \n";
+        let rule = MD070NestedCodeFence::new();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        let fix = warnings[0].fix.as_ref().unwrap();
+        let mut edits: Vec<_> = std::iter::once(fix).chain(fix.additional_edits.iter()).collect();
+        edits.sort_by_key(|edit| edit.range.start);
+        assert_eq!(edits.len(), 2, "opener run and closer run only");
+        for edit in &edits {
+            assert_eq!(&content[edit.range.clone()], "```");
+            assert_eq!(edit.replacement, "````");
+        }
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "- a\n\n  ````markdown   title  \n  ```bash\n  x\n  ```\n  ````   \n"
+        );
+    }
+
+    #[test]
+    fn test_crlf_and_missing_final_newline_are_preserved() {
+        let rule = MD070NestedCodeFence::new();
+        for content in [
+            "> ```markdown\r\n> ```bash\r\n> x\r\n> ```\r\n> ```\r\n",
+            "> ```markdown\r\n> ```bash\r\n> x\r\n> ```\r\n> ```",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            let expected = content.replacen("```markdown", "````markdown", 1);
+            let last = expected.rfind("> ```").unwrap();
+            let expected = format!("{}> ````{}", &expected[..last], &expected[last + 5..]);
+            assert_eq!(fixed, expected);
+        }
+    }
+
+    #[test]
+    fn test_definition_body_is_not_judged() {
+        // The definition ends before `Outside`; the unrelated fence is not a closer.
+        let content = "Term\n: ```md\n  ```python\n  x\n  ```\n\nOutside\n\n```\n";
+        assert!(run_check(content).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_mdx_jsx_element_fences_are_still_checked() {
+        let content = "<Comp>\n```markdown\n```python\nx\n```\n```\n</Comp>\n";
+        let rule = MD070NestedCodeFence::new();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "<Comp>\n````markdown\n```python\nx\n```\n````\n</Comp>\n"
+        );
+    }
+
+    #[test]
+    fn test_search_stops_at_any_independent_fence_with_an_info_string() {
+        // A spaced or numeric info string opens an independent block; it is not absorbed.
+        for opener in ["``` json", "```123"] {
+            let content = format!("```markdown\n```python\nx\n```\n{opener}\ny\n```\n");
+            let rule = MD070NestedCodeFence::new();
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{opener}: {warnings:?}");
+            assert_eq!(
+                warnings[0].end_line, 4,
+                "{opener}: the block ends at the first bare fence"
+            );
+        }
+    }
+
+    #[test]
+    fn test_search_skips_the_fences_of_a_nested_container() {
+        // Each item's block ends at its own closer: the child item's closer
+        // belongs to the child's block, not to the parent's.
+        let content = "- item\n\n  ```markdown\n  ```python\n  x\n  ```\n\n  - item\n\n    ```markdown\n    ```python\n    x\n    ```\n";
+        let warnings = run_check(content).unwrap();
+        let spans: Vec<_> = warnings.iter().map(|w| (w.line, w.end_line)).collect();
+        assert_eq!(spans, [(3, 6), (10, 13)], "{warnings:?}");
+    }
+
+    #[test]
+    fn test_lazy_line_in_a_skipped_container_ends_the_search() {
+        let content = "> ```md\n> ```py\n> x\n> ```\n> > ```js\n> > y\n> > ```\n> > p\nlazy\n> ```\n> tail\n> ```\n";
+        let warnings = run_check(content).unwrap();
+        let spans: Vec<_> = warnings.iter().map(|w| (w.line, w.end_line)).collect();
+        assert_eq!(spans, [(1, 4)], "{warnings:?}");
+    }
+
+    #[test]
+    fn test_mdx_commented_fence_does_not_hide_a_later_collision() {
+        let content = "<!--\n```md\n-->\n\n```markdown\n```python\nx\n```\n```\n";
+        let rule = MD070NestedCodeFence::new();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 5);
+    }
+
+    #[test]
+    fn test_many_unclosed_fences_in_items_are_linear() {
+        // Each item's fence is ended by its item; none can collide.
+        let content = (0..2000).fold(String::new(), |mut acc, i| {
+            acc.push_str(&format!("- {i}\n\n  ```md\n  x\n\n"));
+            acc
+        });
+        let started = std::time::Instant::now();
+        assert!(run_check(&content).unwrap().is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 }

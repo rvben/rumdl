@@ -1160,10 +1160,12 @@ impl<'a> FormatProof<'a> {
             if start > 0 && !is_blank(start - 1) || end + 1 < lines.len() && !is_blank(end + 1) {
                 facts.reject(&[31]);
             }
+            // A fence-like line may sit behind quote markers and indentation;
+            // MD070 judges it relative to its container, so any such prefix
+            // here must decline the proof rather than guess where it ends.
             for line in lines.iter().take(end).skip(start + 1) {
-                if line.text(source).trim_start().starts_with("```")
-                    || line.text(source).trim_start().starts_with("~~~")
-                {
+                let text = line.text(source).trim_start_matches(['>', ' ', '\t']);
+                if text.starts_with("```") || text.starts_with("~~~") {
                     facts.reject(&[70]);
                 }
             }
@@ -1857,6 +1859,30 @@ mod tests {
         // stdin and on a file give the same result.
         let source = "- Item:\n\n  ```yaml\n  key: |\n    raw\n\nAfter the list.\n\n```text\nplain\n```\n";
         assert!(NativeFormatPolicy::new(70).proven(&FormatProof::analyze(source, MarkdownFlavor::Standard)));
+        assert_proofs(source);
+    }
+
+    #[test]
+    fn fence_collisions_behind_container_prefixes_are_not_proven_for_md070() {
+        for source in [
+            "> ```markdown\n> ```bash\n> x\n> ```\n> ```\n",
+            "10. a\n\n    ```markdown\n    ```bash\n    x\n    ```\n    ```\n",
+            "- a\n  - b\n\n    ```markdown\n    ```bash\n    x\n    ```\n    ```\n",
+            "- a\n\n  > ~~~markdown\n  > ~~~bash\n  > x\n  > ~~~\n  > ~~~\n",
+        ] {
+            assert!(
+                !NativeFormatPolicy::new(70).proven(&FormatProof::analyze(source, MarkdownFlavor::Standard)),
+                "{source:?}"
+            );
+            assert_proofs(source);
+        }
+    }
+
+    #[test]
+    fn closer_valid_inside_its_list_item_agrees_with_md070() {
+        // Five raw columns is three past the item's content: the fence closes
+        // there, so `fmt` on stdin and on a file leave the document alone.
+        let source = "- a\n\n  ```md\n  x\n     ```\n\n```text\ny\n```\n";
         assert_proofs(source);
     }
 

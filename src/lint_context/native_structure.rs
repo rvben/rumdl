@@ -231,6 +231,7 @@ mod tests {
                             info_string: i.to_string(),
                             content_column: None,
                             closed: i % 2 == 0,
+                            enclosing: Vec::new(),
                         }
                     })
                     .collect();

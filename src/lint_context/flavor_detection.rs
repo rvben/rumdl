@@ -1255,6 +1255,7 @@ pub(super) fn detect_azure_colon_fences(
                     info_string,
                     content_column: None,
                     closed: true,
+                    enclosing: Vec::new(),
                 });
             }
         }
@@ -1269,6 +1270,7 @@ pub(super) fn detect_azure_colon_fences(
             info_string,
             content_column: None,
             closed: false,
+            enclosing: Vec::new(),
         });
     }
 

@@ -48,6 +48,7 @@ pub(super) fn parse(content: &str) -> Option<ParsedDocument<'_>> {
                     info_string,
                     content_column: None,
                     closed: true,
+                    enclosing: Vec::new(),
                 });
             }
             offset = end;
@@ -235,6 +236,7 @@ pub(super) fn parse(content: &str) -> Option<ParsedDocument<'_>> {
             info_string,
             content_column: None,
             closed: false,
+            enclosing: Vec::new(),
         });
     }
     Some(ParsedDocument {

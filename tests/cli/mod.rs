@@ -51,6 +51,7 @@ mod cli_md063_ignore_words_punctuation_test;
 mod cli_md065_container_fix_test;
 mod cli_md065_quote_continuation_test;
 mod cli_md069_structure_test;
+mod cli_md070_container_fences_test;
 mod cli_md077_aligned_structure_test;
 mod cli_md077_continuation_structure_test;
 mod cli_md077_mkdocs_nesting_test;

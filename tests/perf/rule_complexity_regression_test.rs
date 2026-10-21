@@ -1269,6 +1269,37 @@ fn test_md070_fence_lookup_linear_complexity() {
     }
 }
 
+/// A block's search for its intended closer must not walk the quotes or list
+/// items nested inside its own container. Every level holds a colliding block,
+/// so the input grows with the depth squared: four times the depth is sixteen
+/// times the input. A search bounded by the nested container costs about 16x;
+/// one that scans every deeper level from every block costs about 64x.
+#[test]
+fn test_md070_nested_container_search_linear_complexity() {
+    let rule = MD070NestedCodeFence::new();
+    let quote = |k: usize| {
+        let p = "> ".repeat(k + 1);
+        format!("{p}```markdown\n{p}```python\n{p}x\n{p}```\n")
+    };
+    let list = |k: usize| {
+        let p = "  ".repeat(k);
+        format!("{p}- item\n\n{p}  ```markdown\n{p}  ```python\n{p}  x\n{p}  ```\n\n")
+    };
+    for (name, level) in [("quote", &quote as &dyn Fn(usize) -> String), ("list", &list)] {
+        let measure = |depth: usize| {
+            let content: String = (0..depth).map(level).collect();
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), depth, "MD070 nested {name}");
+            measure_rule_time_with_context(&rule, &ctx, 7)
+        };
+        let ratio = measure(256).as_secs_f64() / measure(64).as_secs_f64();
+        assert!(
+            ratio < 32.0,
+            "MD070 nested {name}: 16x the input took {ratio:.1}x the time"
+        );
+    }
+}
+
 /// Warning positions must not rescan every preceding construct on a heading.
 #[test]
 fn test_md093_warning_columns_linear_complexity() {
