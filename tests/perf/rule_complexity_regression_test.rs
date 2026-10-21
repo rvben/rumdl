@@ -2926,8 +2926,6 @@ fn nested_list_table_confirmation_linear_complexity() {
     );
 }
 
-
-
 #[test]
 fn test_mdx_nested_context_linear_complexity() {
     for name in ["nested", "unmatched", "paired"] {

@@ -823,6 +823,26 @@ fn bench_heading_anchor_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_mdx_nested_context(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mdx_nested_context");
+    group.sample_size(10);
+    for name in ["nested", "unmatched", "paired"] {
+        for count in [128, 1024, 4096] {
+            let text = match name {
+                "nested" => format!("{}text{}", "<b>".repeat(count), "</b>".repeat(count)),
+                "unmatched" => format!("{}{}", "<b>".repeat(count), "</i>".repeat(count)),
+                _ => "<b>text</b> ".repeat(count),
+            };
+            let content = format!("# {text}\n");
+            group.throughput(Throughput::Bytes(content.len() as u64));
+            group.bench_function(BenchmarkId::new(name, count), |b| {
+                b.iter(|| black_box(LintContext::new(black_box(&content), MarkdownFlavor::MDX, None)));
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_md063_tag_pairing(c: &mut Criterion) {
     use rumdl_lib::rules::MD063HeadingCapitalization;
 
@@ -1595,6 +1615,7 @@ criterion_group!(
     bench_list_code_context,
     bench_md063_heading_regions,
     bench_md063_tag_pairing,
+    bench_mdx_nested_context,
     bench_heading_anchor_lookup,
     bench_md030_indented_fallback,
     bench_md087_suppressions,

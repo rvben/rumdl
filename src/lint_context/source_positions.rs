@@ -118,7 +118,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn line_only_lookup_matches_full_position_at_all_byte_boundaries() {
         for content in ["", "\n", "\r\n", "é日本🙂", "é日本🙂\n\n", "é日本🙂\r\n\r\nlast\r"] {
