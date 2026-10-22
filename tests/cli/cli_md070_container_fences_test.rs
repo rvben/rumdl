@@ -56,6 +56,26 @@ const BROKEN: &[(&str, &str, &str)] = &[
         "-  [ ] a\n\n   ````markdown\n   ```python\n   x\n   ```\n   ````\n",
     ),
     (
+        "closer indented past the raw limit inside an item with an empty first line",
+        "-\n  ```md\n  ```python\n  x\n  ```\n     ```\n",
+        "-\n  ````md\n  ```python\n  x\n  ```\n     ````\n",
+    ),
+    (
+        "list item, quote and list item opening on one line",
+        "- > - ```md\n  >   ```python\n  >   x\n  >   ```\n  >   ```\n",
+        "- > - ````md\n  >   ```python\n  >   x\n  >   ```\n  >   ````\n",
+    ),
+    (
+        "quote, list item, quote and list item opening on one line",
+        "> - > - ```md\n>   >   ```python\n>   >   x\n>   >   ```\n>   >   ```\n",
+        "> - > - ````md\n>   >   ```python\n>   >   x\n>   >   ```\n>   >   ````\n",
+    ),
+    (
+        "ordered item, quote and list item opening on one line",
+        "1. > - ```md\n   >   ```python\n   >   x\n   >   ```\n   >   ```\n",
+        "1. > - ````md\n   >   ```python\n   >   x\n   >   ```\n   >   ````\n",
+    ),
+    (
         "search does not enter the next sibling item",
         "- a\n  - b\n\n    ```markdown\n    ```bash\n    x\n    ``` \n- c\n\n  ```\n",
         "- a\n  - b\n\n    ````markdown\n    ```bash\n    x\n    ```` \n- c\n\n  ```\n",

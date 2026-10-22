@@ -65,7 +65,7 @@ impl Enclosure {
 }
 
 /// A line with its container prefixes removed (see [`strip_enclosure`]).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct StrippedLine {
     /// Byte offset in the line where the unconsumed text starts. When a tab was
     /// only partly consumed this is past the tab and `pending` holds the rest.
@@ -204,9 +204,9 @@ pub fn item_runs(enclosing: &[Enclosure]) -> Vec<usize> {
 
 /// The width a list item opening at `marker` takes, in columns: the marker, the
 /// whitespace after it when 1 to 4 columns of text follow, otherwise a single
-/// column. Returns the visual column where its content starts, and the marker
-/// line's start.
-fn item_content_column(content: &str, marker: usize) -> Option<(usize, usize)> {
+/// column. Returns where its content starts on the marker line, and that line's
+/// start.
+fn item_content_start(content: &str, marker: usize) -> Option<(StrippedLine, usize)> {
     let line_start = content[..marker].rfind('\n').map_or(0, |i| i + 1);
     let rest = content.get(marker..)?;
     let marker_len = match rest.as_bytes().first()? {
@@ -238,12 +238,25 @@ fn item_content_column(content: &str, marker: usize) -> Option<(usize, usize)> {
             }
         }
     }
-    let gap = col - marker_col;
-    Some(if text.is_some() && (1..=4).contains(&gap) {
-        (col, line_start)
-    } else {
-        (marker_col + 1, line_start)
-    })
+    let mut at = StrippedLine {
+        pos: marker_end - line_start,
+        col: marker_col,
+        pending: 0,
+    };
+    match text {
+        Some(i) if (1..=4).contains(&(col - marker_col)) => {
+            at.pos += i;
+            at.col = col;
+        }
+        // Nothing follows the marker on an empty item, so no later container
+        // reads the position; its content still starts one column on.
+        _ => {
+            if at.take_whitespace(&content[line_start..line_end], 1) == 0 {
+                at.col += 1;
+            }
+        }
+    }
+    Some((at, line_start))
 }
 
 /// Whether the fenced block spanning `start..end` of `content` ends with a
@@ -606,9 +619,9 @@ impl CodeBlockUtils {
         let mut list_item_spans: Vec<(usize, usize, Option<usize>)> = Vec::new();
         let mut open_items: Vec<usize> = Vec::new();
         // Containers open at the current event, outermost first, each with the
-        // start of the line it opened on and, for an item, the visual column
-        // where its content starts there.
-        let mut open_containers: Vec<(Enclosure, usize, usize)> = Vec::new();
+        // start of the line it opened on and, for an item, where its content
+        // starts there.
+        let mut open_containers: Vec<(Enclosure, usize, StrippedLine)> = Vec::new();
         let mut code_block_enclosing: Vec<Enclosure> = Vec::new();
         let mut block_stack: Vec<Option<usize>> = Vec::new();
         let mut definition_paragraph: Option<(usize, usize)> = None;
@@ -638,30 +651,33 @@ impl CodeBlockUtils {
             match &event {
                 Event::Start(Tag::BlockQuote(_)) => {
                     let line_start = content[..range.start].rfind('\n').map_or(0, |i| i + 1);
-                    open_containers.push((Enclosure::Quote { end: range.end }, line_start, 0));
+                    open_containers.push((Enclosure::Quote { end: range.end }, line_start, StrippedLine::default()));
                 }
                 Event::Start(Tag::Item) => {
-                    let parents: Vec<Enclosure> = open_containers.iter().map(|container| container.0).collect();
-                    let entry = item_content_column(content, range.start)
-                        .and_then(|(content_column, line_start)| {
-                            let base = match strip_enclosure(&content[line_start..range.start], &parents) {
-                                Some(prefix) => Some(prefix.col),
-                                // A parent item opened on this same line: its marker is in the prefix.
-                                None => open_containers
-                                    .last()
-                                    .filter(|&&(parent, parent_line, _)| {
-                                        matches!(parent, Enclosure::Item { .. }) && parent_line == line_start
-                                    })
-                                    .map(|&(_, _, parent_column)| parent_column),
-                            }?;
-                            let width = content_column.checked_sub(base)?;
-                            Some((Enclosure::Item { width, end: range.end }, line_start, content_column))
+                    let entry = item_content_start(content, range.start)
+                        .and_then(|(content_start, line_start)| {
+                            let prefix = &content[line_start..range.start];
+                            // A parent item that opened on this same line has
+                            // its marker in the prefix, so the prefix is read
+                            // from where that item's content starts.
+                            let same_line = open_containers.iter().rposition(|&(parent, parent_line, _)| {
+                                matches!(parent, Enclosure::Item { .. }) && parent_line == line_start
+                            });
+                            let (mut at, rest) = match same_line {
+                                Some(i) => (open_containers[i].2, &open_containers[i + 1..]),
+                                None => (StrippedLine::default(), &open_containers[..]),
+                            };
+                            if !rest.iter().all(|&(parent, _, _)| at.take_container(prefix, parent)) {
+                                return None;
+                            }
+                            let width = content_start.col.checked_sub(at.col)?;
+                            Some((Enclosure::Item { width, end: range.end }, line_start, content_start))
                         })
-                        .unwrap_or((Enclosure::Opaque { end: range.end }, 0, 0));
+                        .unwrap_or((Enclosure::Opaque { end: range.end }, 0, StrippedLine::default()));
                     open_containers.push(entry);
                 }
                 Event::Start(Tag::DefinitionListDefinition | Tag::FootnoteDefinition(_)) => {
-                    open_containers.push((Enclosure::Opaque { end: range.end }, 0, 0));
+                    open_containers.push((Enclosure::Opaque { end: range.end }, 0, StrippedLine::default()));
                 }
                 Event::End(
                     TagEnd::BlockQuote(_)
@@ -1098,6 +1114,44 @@ mod tests {
                     "line {line:?} in {stack:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_items_opening_on_one_line_through_a_quote_record_their_widths() {
+        use super::Enclosure;
+        let quote = Enclosure::Quote { end: 0 };
+        let item = |width| Enclosure::Item { width, end: 0 };
+        let cases = [
+            ("- > - ```md\n  >   x\n  >   ```\n", vec![item(2), quote, item(2)]),
+            (
+                "> - > - ```md\n>   >   x\n>   >   ```\n",
+                vec![quote, item(2), quote, item(2)],
+            ),
+            ("1. > - ```md\n   >   x\n   >   ```\n", vec![item(3), quote, item(2)]),
+            ("- > 10. ```md\n  >     x\n  >     ```\n", vec![item(2), quote, item(4)]),
+            ("- >\t- ```md\n  >\t  x\n  >\t  ```\n", vec![item(2), quote, item(2)]),
+            (
+                "- > - - ```md\n  >     x\n  >     ```\n",
+                vec![item(2), quote, item(2), item(2)],
+            ),
+            (
+                "- > > - ```md\n  > >   x\n  > >   ```\n",
+                vec![item(2), quote, quote, item(2)],
+            ),
+        ];
+        for (content, expected) in cases {
+            let parsed = CodeBlockUtils::detect_code_blocks_and_spans(content);
+            let enclosing: Vec<Enclosure> = parsed.code_block_details[0]
+                .enclosing
+                .iter()
+                .map(|&enclosure| match enclosure {
+                    Enclosure::Quote { .. } => quote,
+                    Enclosure::Item { width, .. } => item(width),
+                    Enclosure::Opaque { .. } => Enclosure::Opaque { end: 0 },
+                })
+                .collect();
+            assert_eq!(enclosing, expected, "{content:?}");
         }
     }
 
