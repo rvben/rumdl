@@ -1,3 +1,7 @@
+---
+description: "Find images and other asset files that no Markdown link, image, HTML attribute, or filename mention in your sources refers to, with rumdl check-assets."
+---
+
 # Find unreferenced assets
 
 `rumdl check-assets` reports files that have neither a parsed Markdown
