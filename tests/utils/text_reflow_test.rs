@@ -5757,6 +5757,129 @@ fn test_relaxed_sentences_initials_not_split() {
 }
 
 #[test]
+fn single_letter_labels_end_sentences() {
+    for require_sentence_capital in [true, false] {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            require_sentence_capital,
+            ..Default::default()
+        };
+        for (first, second) in [
+            ("Service B keeps a copy for service A.", "It is updated by events."),
+            ("We fall back to plan B.", "Then we try again."),
+            ("Choose option C.", "Continue here."),
+            ("We assume Y.", "This follows."),
+            ("Une lettre après émilie A.", "La suite arrive."),
+            ("We choose **option C.**", "Continue here."),
+            ("We choose _option_ C.", "Continue here."),
+            ("We choose option C.", "2nd attempt follows."),
+            ("We choose option C.", "再試行します。"),
+            ("We fall back to plan B.", "\"Then\" we retry."),
+        ] {
+            for separator in [" ", "\n"] {
+                let input = format!("{first}{separator}{second}");
+                let actual = reflow_line(&input, &options);
+                assert_eq!(actual, [first, second], "{input:?}");
+                assert_whitespace_only(&input, &actual);
+            }
+        }
+    }
+}
+
+#[test]
+fn single_letter_initials_keep_their_name_context() {
+    for input in [
+        "The book by Robert C. Martin is a classic.",
+        "J. K. Rowling wrote it.",
+        "Written by J. K. Rowling in the nineties.",
+        "A. Smith wrote it.",
+        "Ask J. Smith for help.",
+        "Ask Łukasz C. Martin for help.",
+        "Plan B. Then we try again.",
+        "World War I. The war ended.",
+        "Smith, J. and Doe, K. (2020)",
+        "Written by J. van der Berg.",
+        "Uses type A. batteries.",
+        "& B. Jones wrote it.",
+        "3 A. Smith wrote it.",
+        "版本 A. It follows.",
+        "Ask **Robert** C. Martin for help.",
+        "Ask [Robert](url) C. Martin for help.",
+        "Ask <em>Robert</em> C. Martin for help.",
+        "Ask &nbsp;Robert C. Martin for help.",
+        "Ask Robert\u{a0}C. Martin for help.",
+        "For example, J. Smith showed that it works.",
+        "Thanks to our contributors: A. Smith and Robert B. Jones.",
+        "We asked the editor; A. Smith replied.",
+        "We asked the **editor,** J. Smith, to reply.",
+        "Edit config.toml B. Then retry.",
+    ] {
+        for require_sentence_capital in [true, false] {
+            let options = ReflowOptions {
+                line_length: 0,
+                sentence_per_line: true,
+                require_sentence_capital,
+                ..Default::default()
+            };
+            assert_eq!(reflow_line(input, &options), [input], "{input:?}");
+        }
+    }
+    for require_sentence_capital in [true, false] {
+        let options = ReflowOptions {
+            require_sentence_capital,
+            ..sentence_per_line_options()
+        };
+        // Test the sentence detector across source breaks. Document joining is
+        // covered by the CLI and MD013 rule tests, whose paragraph collector
+        // differs from the low-level reflow_markdown wrapper.
+        for input in [
+            "The book by Robert C.\nMartin is a classic.",
+            "Uses type A.\nbatteries.",
+            "Written by J.\nvan der Berg.",
+            "Written by J.\nK. Rowling.",
+            // Code spans have no cased first character for this heuristic.
+            "We choose option C. `rumdl` runs.",
+        ] {
+            assert_eq!(
+                split_into_sentences(input, None, require_sentence_capital, CjkSoftBreak::Space),
+                [input],
+                "{input:?}"
+            );
+        }
+        for first in ["It ended.", "It ended.\"", "It **ended.**", "It ended.[^1]"] {
+            let input = format!("{first} A. Smith wrote it.");
+            assert_eq!(
+                reflow_line(&input, &options),
+                [first, "A. Smith wrote it."],
+                "{input:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn single_letter_context_retains_explicit_abbreviations_and_documents_ambiguity() {
+    let options = ReflowOptions {
+        abbreviations: Some(vec!["B".to_string()]),
+        ..sentence_per_line_options()
+    };
+    let input = "We choose plan B. Then we retry.";
+    assert_eq!(reflow_line(input, &options), [input]);
+
+    // Lowercase words before names and technical labels have the same local shape.
+    // Without a surname dictionary, the lowercase context wins in both cases.
+    assert_eq!(
+        reflow_line("The book was edited by A. Smith in 2020.", &sentence_per_line_options()),
+        ["The book was edited by A.", "Smith in 2020."]
+    );
+    assert_eq!(
+        reflow_line("Visit the J. Paul Getty Museum.", &sentence_per_line_options()),
+        ["Visit the J.", "Paul Getty Museum."]
+    );
+}
+
+#[test]
 fn test_relaxed_sentences_decimal_not_split() {
     let options = ReflowOptions {
         line_length: 0,

@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MD013 sentence reflow uses surrounding context to distinguish technical labels
+  (`service A.`, `plan B.`) from name initials (#965).
+  A lone initial after a lowercase word (`edited by A. Smith`) can now also split.
+  Custom `abbreviations` preserve ambiguous initials globally, including when
+  the same letter is used as a technical label.
 - Silent formatting applies native bare-URL fixes in continued reference
   definitions and reference labels with empty destinations.
 - Silent formatting applies native list-indentation fixes when display-math

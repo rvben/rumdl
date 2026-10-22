@@ -33,6 +33,7 @@ mod cli_md010_tab_structure_test;
 mod cli_md013_bare_marker_reflow_test;
 mod cli_md013_break_code_spans_test;
 mod cli_md013_break_words_test;
+mod cli_md013_initial_context_test;
 mod cli_md013_parenthetical_reflow_test;
 mod cli_md013_terminal_link_punctuation_test;
 mod cli_md022_exact_spacing_test;

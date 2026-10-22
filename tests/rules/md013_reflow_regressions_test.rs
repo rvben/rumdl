@@ -1467,6 +1467,30 @@ fn source_sentence_breaks_do_not_relax_inline_or_abbreviation_detection() {
     }
 }
 
+#[test]
+fn single_letter_labels_split_without_changing_rendered_prose() {
+    for (input, expected) in [
+        (
+            "Service B keeps a copy for service A. It is updated by events.\n",
+            "Service B keeps a copy for service A.\nIt is updated by events.\n",
+        ),
+        (
+            "- We choose option C. Then we retry.\n",
+            "- We choose option C.\n  Then we retry.\n",
+        ),
+        (
+            "> We choose option C. Then we retry.\n",
+            "> We choose option C.\n> Then we retry.\n",
+        ),
+        (
+            "The book by Robert C.\nMartin is a classic.\n",
+            "The book by Robert C. Martin is a classic.\n",
+        ),
+    ] {
+        assert_reflows_to(input, 0, &[Mode::SentencePerLine, Mode::SemanticLineBreaks], expected);
+    }
+}
+
 /// Reflow rewrites only the item's paragraph, so a later line of the quote
 /// keeps its indentation. Narrowing the marker's padding would move the
 /// item's content column onto that line and nest it in the item.

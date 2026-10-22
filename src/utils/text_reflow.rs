@@ -1245,10 +1245,11 @@ fn sentence_boundary(
             return None;
         }
 
-        // Check for single-letter initials (e.g., "J. K. Rowling")
-        // A single uppercase letter before the period preceded by whitespace or start
-        // is likely an initial, not a sentence ending.
-        if chars[pos - 1].is_ascii_uppercase() && (pos == 1 || (pos >= 2 && chars[pos - 2].is_whitespace())) {
+        // A lone capital can be a name initial or a technical label ("plan B.").
+        // Keep initials in name context, at sentence start, or in a chain like
+        // "J. K. Rowling". Only lowercase context followed by a strict-mode
+        // sentence opener relaxes this guard, even with a source break or relaxed mode.
+        if single_letter_initial(chars, pos, next_char_pos, first_char) {
             return None;
         }
     }
@@ -1310,6 +1311,48 @@ fn sentence_boundary(
     }
 
     Some(space_pos)
+}
+
+/// Whether a lone capital keeps the initial guard instead of ending a sentence.
+/// `next_word` precedes inline opener/quote skipping; `first_char` follows it.
+fn single_letter_initial(chars: &[char], period: usize, next_word: usize, first_char: char) -> bool {
+    if period == 0 || !chars[period - 1].is_ascii_uppercase() || (period > 1 && !chars[period - 2].is_whitespace()) {
+        return false;
+    }
+
+    let before = &chars[..period - 1];
+    let end = before.iter().rposition(|c| !c.is_whitespace()).map_or(0, |i| i + 1);
+    if end == 0 {
+        return true;
+    }
+    let before = &before[..end];
+    let start = before.iter().rposition(|c| c.is_whitespace()).map_or(0, |i| i + 1);
+    let previous_word = &before[start..];
+    let previous_ender = previous_word
+        .iter()
+        .rev()
+        .copied()
+        .find(|&c| !matches!(c, '*' | '_' | '~') && !is_closing_quote(c) && !is_closing_bracket(c));
+    // Tags and entities can precede a capitalized visible name; their
+    // own lowercase spelling is not evidence for a sentence ending.
+    if previous_word
+        .iter()
+        .any(|&c| matches!(c, '.' | '!' | '?' | '<' | '>' | '&') || is_cjk_sentence_ending(c))
+        || previous_ender.is_some_and(continues_clause)
+        || !previous_word
+            .iter()
+            .find(|c| c.is_alphabetic())
+            .is_some_and(|c| c.is_lowercase())
+        || !opens_sentence_in_strict_mode(first_char)
+    {
+        return true;
+    }
+
+    // A following initial identifies the start of a chain even after a
+    // lowercase word, as in "written by J. K. Rowling".
+    chars.get(next_word).is_some_and(char::is_ascii_uppercase)
+        && chars.get(next_word + 1) == Some(&'.')
+        && chars.get(next_word + 2).is_none_or(|c| c.is_whitespace())
 }
 
 /// Index of the space that follows the run of emphasis and strikethrough
