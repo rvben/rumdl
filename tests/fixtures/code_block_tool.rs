@@ -108,6 +108,29 @@ fn main() {
         }
         return;
     }
+    // The parent can hold this lock to prevent observable entry regardless of
+    // how either process is scheduled. A broken timeout fails within 10 seconds.
+    if executable.with_extension("entry-lock").exists() {
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(executable.with_extension("entry-lock"))
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match lock.try_lock() {
+                Ok(()) => break,
+                Err(fs::TryLockError::WouldBlock) => {
+                    if std::time::Instant::now() >= deadline {
+                        eprintln!("fixture entry lock was not released");
+                        std::process::exit(2);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("acquire fixture entry lock: {error}"),
+            }
+        }
+    }
     // Record entry before arguments or stdin can hide an unintended invocation.
     if executable.with_extension("record").exists() {
         use std::io::Write;

@@ -303,22 +303,49 @@ fn parallel_format_failures_are_collected_in_source_order() {
 
 #[test]
 fn repeated_timeouts_stop_new_attempts_without_losing_block_warnings() {
-    for threads in [1, 4] {
+    for (threads, blocked_entry) in [(1, false), (4, false), (1, true), (4, true)] {
         let dir = setup("slow", "timeout = 100", "python = { lint = [\"test\"] }");
         let tool = native_tool::install(dir.path(), "slow");
         fs::write(tool.with_extension("record"), "").unwrap();
+        let _entry_lock = blocked_entry.then(|| {
+            let lock = fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(tool.with_extension("entry-lock"))
+                .unwrap();
+            lock.lock().unwrap();
+            lock
+        });
         let input: String = (0..12).map(|i| format!("```python\nblock-{i}\n```\n\n")).collect();
         fs::write(dir.path().join("doc.md"), &input).unwrap();
         let output = run(dir.path(), threads, "check", &["doc.md"]);
         assert!(output.status.success(), "{threads}: {output:?}");
-        let attempts = fs::read_to_string(tool.with_extension("calls"))
-            .unwrap()
-            .lines()
-            .count();
-        // Three timeouts disable the tool. Already running children may finish
-        // later, but new work cannot multiply that bound by the block count.
-        assert!((3..=3 + threads - 1).contains(&attempts), "{threads}: {attempts}");
+        let entries = match fs::read_to_string(tool.with_extension("calls")) {
+            Ok(calls) => calls.lines().count(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => panic!("read child entries: {error}"),
+        };
         let warnings = String::from_utf8_lossy(&output.stderr);
+        let timeouts = warnings.matches("timed out after 100ms").count();
+        let skipped = warnings.matches("skipped after timing out").count();
+        // A child may time out before it reaches its entry recorder. The CLI
+        // reports every timeout, including those unobserved by the child.
+        // Three timeouts disable the tool; in-flight attempts may still time out
+        // later, but new work cannot multiply that bound by the block count.
+        assert!(
+            (3..=3 + threads - 1).contains(&timeouts),
+            "{threads} workers, blocked entry = {blocked_entry}: {output:?}"
+        );
+        assert_eq!(timeouts + skipped, 12, "{output:?}");
+        assert!(
+            entries <= timeouts,
+            "{entries} child entries, {timeouts} timeouts: {output:?}"
+        );
+        if blocked_entry {
+            assert_eq!(entries, 0, "a held lock prevents entry: {output:?}");
+        }
         let positions: Vec<_> = (0..12)
             .map(|i| {
                 warnings
