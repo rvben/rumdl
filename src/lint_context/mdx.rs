@@ -28,6 +28,23 @@ pub(super) struct MdxContext {
     pub(super) tables: Vec<(usize, usize)>,
 }
 
+impl Drop for MdxContext {
+    fn drop(&mut self) {
+        // Traversal is iterative, and releasing a deeply nested JSX tree must
+        // be too. Empty each node before its ordinary destructor runs. The
+        // children accessor covers every field that owns further nodes.
+        let Some(children) = self.root.children_mut() else {
+            return;
+        };
+        let mut pending = std::mem::take(children);
+        while let Some(mut node) = pending.pop() {
+            if let Some(children) = node.children_mut() {
+                pending.append(children);
+            }
+        }
+    }
+}
+
 thread_local! {
     /// Set only while `parse_without_crashing` is inside the MDX parser.
     static RECOVERING_FROM_MDX_PARSE: Cell<bool> = const { Cell::new(false) };

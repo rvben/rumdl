@@ -205,3 +205,32 @@ fn one_invocation_detects_each_documents_style_independently() {
         assert_eq!(fs::read_to_string(dir.path().join(name)).unwrap(), expected);
     }
 }
+
+#[test]
+fn deeply_nested_mdx_headings_can_be_checked_in_parallel() {
+    let dir = tempdir().unwrap();
+    let content = format!("# {}text{}\n", "<b>".repeat(8192), "</b>".repeat(8192));
+    let paths: Vec<_> = (0..4).map(|i| dir.path().join(format!("doc-{i}.mdx"))).collect();
+    for path in &paths {
+        fs::write(path, &content).unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args([
+            "check",
+            "--no-config",
+            "--no-cache",
+            "--enable",
+            "MD063",
+            "--flavor",
+            "mdx",
+        ])
+        .args(&paths)
+        .env("RAYON_NUM_THREADS", "2")
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .expect("check deeply nested MDX on the default worker stack");
+    assert!(output.status.success(), "{output:?}");
+    for path in paths {
+        assert_eq!(fs::read_to_string(path).unwrap(), content);
+    }
+}
