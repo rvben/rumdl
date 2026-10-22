@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long fuzz-reflow fuzz-sentence-layout fuzz-seed-corpus reflow-sweep check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long fuzz-reflow fuzz-sentence-layout fuzz-seed-corpus reflow-sweep check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics docs-search-test docs-site sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -750,6 +750,30 @@ docs-discoverability:
 # event endpoint without requiring a Cloudflare binding or network access.
 docs-analytics:
 	node scripts/docs_analytics_test.mjs
+
+docs-search-test:
+	node scripts/docs_search_test.mjs
+
+# Build the documentation site and run every check on it, in deploy order: the
+# checker self-tests, the Zensical build, the publication boundary and sitemap,
+# the playground, then the checks that read the built site. The Documentation
+# workflow runs exactly this, and so does the pre-push hook when documentation
+# sources change. Steps run one at a time because each reads what the previous
+# one wrote to site/.
+docs-site:
+	@command -v zensical >/dev/null || { echo "zensical not found; install it with 'pip install zensical'"; exit 1; }
+	$(MAKE) docs-sanitize-test
+	$(MAKE) docs-sitemap-test
+	$(MAKE) docs-benchmark-test
+	$(MAKE) docs-analytics
+	$(MAKE) docs-search-test
+	zensical build --clean
+	$(MAKE) docs-sanitize
+	$(MAKE) docs-sitemap
+	$(MAKE) docs-playground
+	$(MAKE) docs-smoke
+	$(MAKE) docs-descriptions
+	$(MAKE) docs-discoverability
 
 release-patch:
 	vership bump patch

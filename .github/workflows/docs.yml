@@ -110,41 +110,8 @@ jobs:
       - name: Install Zensical
         run: pip install zensical
 
-      - name: Test documentation publication boundary
-        run: make docs-sanitize-test
-
-      - name: Test documentation sitemap completion
-        run: make docs-sitemap-test
-
-      - name: Verify benchmark publication consistency
-        run: make docs-benchmark-test
-
-      - name: Test privacy-preserving analytics endpoint
-        run: make docs-analytics
-
-      - name: Test documentation search
-        run: node scripts/docs_search_test.mjs
-
-      - name: Build documentation
-        run: zensical build --clean
-
-      - name: Enforce public documentation boundary
-        run: make docs-sanitize
-
-      - name: Complete public documentation sitemap
-        run: make docs-sitemap
-
-      - name: Build Playground from this checkout
-        run: make docs-playground
-
-      - name: Smoke-test built site
-        run: make docs-smoke
-
-      - name: Check per-page descriptions
-        run: make docs-descriptions
-
-      - name: Check documentation discoverability
-        run: make docs-discoverability
+      - name: Build and check documentation site
+        run: make docs-site
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
