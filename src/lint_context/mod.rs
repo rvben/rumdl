@@ -429,6 +429,7 @@ pub struct LintContext<'a> {
     bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>,           // Lazy-loaded bare URLs
     has_mixed_list_nesting_cache: OnceLock<bool>, // Cached result for mixed ordered/unordered list nesting detection
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
+    html_block_ranges: Vec<(usize, usize)>,       // Parser HTML blocks excluding opaque flavor regions
     html_block_lines: Vec<std::ops::Range<usize>>, // Line runs of the parser's HTML blocks, in any container
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
     parser_table_ranges: Vec<(usize, usize)>,     // Complete native table spans, including pipe-less body rows
@@ -1331,7 +1332,7 @@ impl<'a> LintContext<'a> {
         );
 
         heading_detection::mark_parser_html_blocks(content, &mut lines, &html_blocks, flavor);
-        let html_block_lines = heading_detection::parser_html_block_lines(&lines, &html_blocks, flavor);
+        let (html_block_ranges, html_block_lines) = heading_detection::parser_html_blocks(&lines, &html_blocks, flavor);
 
         // Now detect headings and blockquotes
         let mdx_flow_lines = mdx_context.as_ref().map(|mdx| mdx.flow_lines(&lines));
@@ -1926,6 +1927,7 @@ impl<'a> LintContext<'a> {
                 has_mixed_list_nesting_cache: OnceLock::new(),
                 html_comment_ranges,
                 html_block_lines,
+                html_block_ranges,
                 table_blocks,
                 parser_table_ranges: table_ranges,
                 jinja_ranges,
@@ -2398,6 +2400,18 @@ impl<'a> LintContext<'a> {
     /// column. This also preserves its empty-input and trailing-newline behavior.
     pub(crate) fn line_number_at_offset(&self, offset: usize) -> usize {
         self.line_offsets.partition_point(|&start| start <= offset)
+    }
+
+    /// Return the half-open parser HTML block containing a source byte offset.
+    /// Opaque flavor regions are excluded using the same policy as HTML block lines.
+    pub fn html_block_range_at(&self, byte_offset: usize) -> Option<(usize, usize)> {
+        let index = self
+            .html_block_ranges
+            .partition_point(|&(start, _)| start <= byte_offset);
+        self.html_block_ranges
+            .get(index.checked_sub(1)?)
+            .copied()
+            .filter(|&(_, end)| byte_offset < end)
     }
 
     /// Position conversions borrow the context's existing source table. Building

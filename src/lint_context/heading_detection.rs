@@ -1903,29 +1903,33 @@ pub(super) fn mark_parser_html_blocks(
     }
 }
 
-/// The lines of every HTML block CommonMark's parser found, as runs of line
-/// indices in document order. Unlike the `in_html_block` flag this includes
+/// Every HTML block CommonMark's parser found, as half-open source byte ranges
+/// in document order. Unlike the `in_html_block` flag this includes
 /// comments, processing instructions, declarations and blocks opened after a
 /// container marker, so it answers whether a line is HTML rather than
 /// paragraph text. A block the flavor reads as text or JSX is left out, as in
 /// [`mark_parser_html_blocks`].
-pub(super) fn parser_html_block_lines(
+pub(super) fn parser_html_blocks(
     lines: &[LineInfo],
     blocks: &[(usize, usize)],
     flavor: MarkdownFlavor,
-) -> Vec<std::ops::Range<usize>> {
-    if flavor.supports_jsx() {
-        return Vec::new();
-    }
-    blocks
-        .iter()
-        .map(|&(start, end)| spanned_lines(lines, start, end))
-        .filter(|spanned| {
-            lines
+) -> (Vec<(usize, usize)>, Vec<std::ops::Range<usize>>) {
+    let mut ranges = Vec::new();
+    let mut line_runs = Vec::new();
+    if !flavor.supports_jsx() {
+        for &(start, end) in blocks {
+            let spanned = spanned_lines(lines, start, end);
+            if lines
                 .get(spanned.start)
                 .is_some_and(|opener| !parser_html_block_is_text(opener))
-        })
-        .collect()
+            {
+                ranges.push((start, end));
+                line_runs.push(spanned);
+            }
+        }
+    }
+    debug_assert!(ranges.windows(2).all(|pair| pair[0].1 <= pair[1].0));
+    (ranges, line_runs)
 }
 
 /// Detect HTML blocks in the content

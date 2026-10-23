@@ -6803,3 +6803,26 @@ fn rendered_link_membership_preserves_unresolved_reference_and_image_boundaries(
         }
     }
 }
+
+#[test]
+fn html_block_byte_ranges_are_half_open_and_flavor_aware() {
+    let content = "é before\n\n<div>\ninside\n</div>\n\n<em>\nsecond\n</em>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.html_block_range_at(0), None);
+    for needle in ["<div>", "<em>"] {
+        let start = content.find(needle).unwrap();
+        let (a, b) = ctx.html_block_range_at(start).unwrap();
+        assert_eq!(a, start);
+        assert_eq!(ctx.html_block_range_at(b - 1), Some((a, b)));
+        assert_eq!(ctx.html_block_range_at(b), None);
+    }
+    assert_eq!(ctx.html_block_range_at(usize::MAX), None);
+    for (content, flavor) in [
+        ("---\nvalue: |\n  <div>\n---\n\ntext\n", MarkdownFlavor::Standard),
+        ("<Component>\n<div>child</div>\n</Component>\n", MarkdownFlavor::MDX),
+        ("```html\n<div>literal</div>\n```\n", MarkdownFlavor::Standard),
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        assert_eq!(ctx.html_block_range_at(content.find("<div>").unwrap()), None);
+    }
+}
