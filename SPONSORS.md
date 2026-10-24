@@ -8,6 +8,7 @@ Thank you to all our sponsors who support rumdl development!
 
 ## Supporters
 
+- [Antonin Hildebrand](https://github.com/darwin)
 - [Luke W. Johnston](https://github.com/lwjohnst86)
 - [Stuart Ellis](https://github.com/stuartellis)
 - [Tony Burns](https://github.com/tbhb)
