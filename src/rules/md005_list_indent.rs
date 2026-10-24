@@ -552,13 +552,16 @@ impl MD005ListIndent {
             // Check if blocks are consecutive (no significant gap between them)
             let line_gap = current_block.start_line().saturating_sub(prev_block.end_line());
 
-            // Group blocks if they are close together
-            // This handles cases where mixed list types are split but should be treated together.
+            // Mixed nested lists can share a structure, but a type change at
+            // the same nesting level starts a separate list. Its indentation
+            // history must not influence the new list's descendants.
+            let separate_lists = current_block.is_ordered() != prev_block.is_ordered()
+                && current_block.nesting_level() == prev_block.nesting_level();
             // Lists in different blockquotes are never one structure: each
             // measures its indentation from its own quote's margin.
             let same_quote = current_block.blockquote_prefix().matches('>').count()
                 == prev_block.blockquote_prefix().matches('>').count();
-            if same_quote && line_gap <= Self::LIST_GROUP_GAP_TOLERANCE {
+            if same_quote && !separate_lists && line_gap <= Self::LIST_GROUP_GAP_TOLERANCE {
                 current_group.push(current_block);
             } else {
                 // Start a new group
@@ -1059,6 +1062,39 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_adjacent_ordered_and_bullet_lists_issue_970() {
+        let rule = MD005ListIndent::default();
+        for indent in [3, 4] {
+            for marker in ["1.", "-"] {
+                for deeper in ["", "      - five\n"] {
+                    let ordered = format!("1. one\n2. two\n{}{marker} a\n", " ".repeat(indent));
+                    let bullets = format!("- one\n  - three\n    - four\n{deeper}");
+                    for (first, second) in [(&ordered, &bullets), (&bullets, &ordered)] {
+                        for gap in ["", "\n"] {
+                            let content = format!("{first}{gap}{second}");
+                            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                            let result = rule.check(&ctx).unwrap();
+                            assert!(result.is_empty(), "{content}\nWarnings: {result:?}");
+                            assert_eq!(rule.fix(&ctx).unwrap(), content);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_inconsistent_indent_after_list_type_change() {
+        let rule = MD005ListIndent::default();
+        let content = "1. one\n2. two\n    1. a\n\n- one\n    - three\n   - four\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "{result:?}");
+        assert_eq!(result[0].line, 7);
+        assert_eq!(result[0].message, "Expected indentation of 4 spaces, found 3");
     }
 
     #[test]
