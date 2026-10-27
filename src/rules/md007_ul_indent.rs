@@ -146,7 +146,12 @@ impl MD007ULIndent {
         }
     }
 
-    /// Calculate expected indentation for a nested list item.
+    /// Fixed indentation includes the configured offset of the outermost list.
+    fn fixed_indent(&self, nesting_level: usize, start_indent: usize) -> usize {
+        start_indent + nesting_level * self.config.indent.get() as usize
+    }
+
+    /// Calculate expected indentation for a list item.
     ///
     /// This uses per-parent logic rather than document-wide style selection:
     /// - When parent is **ordered**: align with parent's text (handles variable-width markers)
@@ -158,17 +163,18 @@ impl MD007ULIndent {
         &self,
         nesting_level: usize,
         parent_info: Option<(bool, usize)>, // (is_ordered, content_visual_col)
+        start_indent: usize,
     ) -> usize {
         if nesting_level == 0 {
-            return 0;
+            return start_indent;
         }
 
         // If user explicitly set style, respect their choice uniformly
         if self.config.style_explicit {
             return match self.config.style {
-                md007_config::IndentStyle::Fixed => nesting_level * self.config.indent.get() as usize,
+                md007_config::IndentStyle::Fixed => self.fixed_indent(nesting_level, start_indent),
                 md007_config::IndentStyle::TextAligned => {
-                    parent_info.map_or(nesting_level * 2, |(_, content_col)| content_col)
+                    parent_info.map_or(start_indent + nesting_level * 2, |(_, content_col)| content_col)
                 }
             };
         }
@@ -184,7 +190,7 @@ impl MD007ULIndent {
                 }
                 _ => {
                     // Parent is unordered or no parent: use fixed indent
-                    return nesting_level * self.config.indent.get() as usize;
+                    return self.fixed_indent(nesting_level, start_indent);
                 }
             }
         }
@@ -201,13 +207,13 @@ impl MD007ULIndent {
                 // If yes, continue with fixed style (for pure unordered lists)
                 // If no, parent is offset (e.g., inside ordered list), use text-aligned
                 let parent_level = nesting_level.saturating_sub(1);
-                let expected_parent_marker = parent_level * self.config.indent.get() as usize;
+                let expected_parent_marker = self.fixed_indent(parent_level, start_indent);
                 // Parent's marker column is content column minus marker width (2 for "- ")
                 let parent_marker_col = parent_content_col.saturating_sub(2);
 
                 if parent_marker_col == expected_parent_marker {
                     // Parent is at expected fixed position, continue with fixed style
-                    nesting_level * self.config.indent.get() as usize
+                    self.fixed_indent(nesting_level, start_indent)
                 } else {
                     // Parent is offset, use text-aligned
                     parent_content_col
@@ -215,7 +221,7 @@ impl MD007ULIndent {
             }
             None => {
                 // No parent found (shouldn't happen at nesting_level > 0)
-                nesting_level * self.config.indent.get() as usize
+                self.fixed_indent(nesting_level, start_indent)
             }
         }
     }
@@ -499,16 +505,19 @@ impl Rule for MD007ULIndent {
                     .find(|item| item.4 == bq_depth)
                     .map(|&(_, _, is_ordered, content_col, _, _, _)| (is_ordered, content_col));
 
-                // Calculate expected indent using per-parent logic
-                // When start_indented is true, only depth-0 items use the start_indent value.
-                // For nested items (depth >= 1), the parent's actual position in the stack
-                // already reflects the start_indent shift, so calculate_expected_indent
-                // naturally produces the correct result.
-                let mut expected_indent = if self.config.start_indented && nesting_level == 0 {
+                // MD007 only indents unordered roots. An ordered root owns its own
+                // position, so its descendants must not receive the bullet-root offset.
+                let ordered_root = list_stack
+                    .iter()
+                    .find(|item| item.4 == bq_depth)
+                    .is_some_and(|item| item.2);
+                let start_indent = if self.config.start_indented && !ordered_root {
                     self.config.start_indent.get() as usize
                 } else {
-                    self.calculate_expected_indent(nesting_level, parent_info)
+                    0
                 };
+                // Text-aligned expectations already inherit the parent's offset.
+                let mut expected_indent = self.calculate_expected_indent(nesting_level, parent_info, start_indent);
 
                 // Clamp the fixed expectation to the parent's content column. The
                 // floor cascades: a fixed child stores its corrected content column
@@ -519,7 +528,7 @@ impl Rule for MD007ULIndent {
                 }
 
                 // When indent is explicitly set and parent is ordered, also accept
-                // the fixed indent value (nesting_level * indent). This lets users
+                // the fixed indent value (start_indent + nesting_level * indent). This lets users
                 // choose either text-aligned or their configured indent under ordered lists.
                 // Not under the clamp: there the fixed value can sit left of the
                 // parent's content column, and suggesting it would detach the item.
@@ -527,7 +536,7 @@ impl Rule for MD007ULIndent {
                     && self.config.indent_explicit
                     && parent_info.is_some_and(|(is_ordered, _)| is_ordered)
                 {
-                    Some(nesting_level * self.config.indent.get() as usize)
+                    Some(self.fixed_indent(nesting_level, start_indent))
                 } else {
                     None
                 };
