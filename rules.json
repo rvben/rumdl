@@ -237,8 +237,8 @@
     "aliases": [],
     "summary": "Spaces after list markers should be consistent",
     "category": "list",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is sometimes available.",
+    "fix_availability": "Sometimes",
     "url": "https://rumdl.dev/md030/"
   },
   {
@@ -897,5 +897,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md095/"
+  },
+  {
+    "code": "MD096",
+    "name": "table-sort",
+    "aliases": [],
+    "summary": "Table rows should be sorted by a named column",
+    "category": "table",
+    "fix": "Fix is sometimes available.",
+    "fix_availability": "Sometimes",
+    "url": "https://rumdl.dev/md096/"
   }
 ]

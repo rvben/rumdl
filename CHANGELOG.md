@@ -7,15 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/rvben/rumdl/compare/v0.3.0...v0.3.1) - 2026-10-27
+
 ### Added
 
 - `rumdl check-assets` reports assets unreferenced in complete Markdown source
   scans, with explicit include/keep globs and text or versioned JSON output.
   Literal filename mentions are kept separately; incomplete scans emit no findings.
-
 - MD022 `lines-above-mode = "exact"` removes surplus blank lines above headings
   while preserving comments and the existing minimum-spacing default (#838).
-
 - Opt-in code-block tool version verification against `uv.lock`, declared
   `pyproject.toml` constraints, or pre-commit/prek hook revisions for Ruff,
   Black, djLint and SQLFluff. Supports automatic source selection and one
@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replacements together from their original source ranges.
 - MD013 `break-words` adds project-specific or localized words to the semantic
   reflow defaults, with case-insensitive Unicode matching.
+- **custom-rules**: prototype versioned checker interchange ([602a8f7](https://github.com/rvben/rumdl/commit/602a8f7fe4224c4d9b012f3fd877278501461d72))
+- **code-block-tools**: verify pre-commit and prek revisions ([0cfe861](https://github.com/rvben/rumdl/commit/0cfe861a2e71a82c968bad19627d5a0b82d22457))
+- **MD096**: add opt-in table sorting by named column ([43a7858](https://github.com/rvben/rumdl/commit/43a78584866c9579c6f21486eeeeb40a21e335ef))
 
 ### Changed
 
@@ -60,6 +63,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sentence detection and counts them as single units in paragraph diagnostics.
   Overlong asides prefer inner sentence boundaries before further width wrapping;
   explicit hard breaks remain separate reflow segments.
+- **MD007**: honor start-indent at nested list levels ([fbf3d10](https://github.com/rvben/rumdl/commit/fbf3d10d98c2c1311f1d7139f10caee4ecfcebbc))
+- MD005: keep adjacent ordered and bullet lists separate (#970) ([2c1d543](https://github.com/rvben/rumdl/commit/2c1d543bb7f554849b9e12027bfa60be5dcf617d))
+- **MD033**: guard HTML conversions with parser byte ranges ([dea14d8](https://github.com/rvben/rumdl/commit/dea14d83d66c2604aa679fc0acd46e388c21c370))
+- **docs**: retire AI search and retain keyword search ([f9f4f2e](https://github.com/rvben/rumdl/commit/f9f4f2e8ac6a86139a25b4c0ed6109190bfbf323))
+- **MD070**: detect collisions in list items opened on a quoted item line ([21c3149](https://github.com/rvben/rumdl/commit/21c314927080a564a6a6d255ec011f4609e362ee))
+- **MD070**: judge nested fences relative to their list item or blockquote ([68dbb3e](https://github.com/rvben/rumdl/commit/68dbb3e9d6d1a9f030570a62797f4ed736375d7b))
+- **mdx**: bundle maintained parser and avoid redundant image scans ([c281ade](https://github.com/rvben/rumdl/commit/c281adea82c0755c60c8cf796efe7d2f3d7051cd))
+- **MD070**: skip a fence that ends with its list item (#967) ([3be9c0c](https://github.com/rvben/rumdl/commit/3be9c0cdc5e0286868d0fa55dcafa7f0111ce642))
+- **MD030**: stop auto-fixing '1.Foo' lines that are paragraph text ([abf05df](https://github.com/rvben/rumdl/commit/abf05df81fcc80d6de8c39c40aca14a57b567166))
+- **MD023**: measure headings after quoted items from the quote they sit in ([632c88d](https://github.com/rvben/rumdl/commit/632c88db3f12842099c1123b638cc779331ba4c9))
+- **parser**: treat the lines of an HTML block inside a blockquote as raw HTML ([751f025](https://github.com/rvben/rumdl/commit/751f02572d64096e71a49e6cbae1eb71a209d81a))
+- **MD044**: preserve filename extension capitalization ([25fef5b](https://github.com/rvben/rumdl/commit/25fef5b2e68cf8d0e756af318092bfba28eb5bb8))
+- **code-block-tools**: avoid parsing jq output as diagnostics ([79a3abd](https://github.com/rvben/rumdl/commit/79a3abde466745cec43ad6b5e58d1dc177c105ff))
+
+### Performance
+
+- **MD044**: bound fallback code and link scans ([3dedd68](https://github.com/rvben/rumdl/commit/3dedd6827d6d4dad8d8f98b674d816c4457c8de5))
+- **MD044**: index WikiLink destinations once ([f1d5c0f](https://github.com/rvben/rumdl/commit/f1d5c0feb6a44230f8eba93ea766220e66807565))
+- **MD044**: reuse URL ranges and character columns ([a19906f](https://github.com/rvben/rumdl/commit/a19906f8948c401577359a80872b07777d7c6413))
+- **headings**: retain anchor ranges across plain attributes ([538ecb3](https://github.com/rvben/rumdl/commit/538ecb3822022d9328606aef21919068b68bda82))
+- **headings**: bound backtick run rescans ([08a9f4d](https://github.com/rvben/rumdl/commit/08a9f4d7935b06398c8f9c2c9a7dc1dfc7c0572f))
+- **headings**: bound image delimiter rescans ([9cb0aee](https://github.com/rvben/rumdl/commit/9cb0aeec90088ee1ede4f22e024f4f3aa08a6b2a))
+- **headings**: build anchor display text in linear time ([8945a71](https://github.com/rvben/rumdl/commit/8945a71dc79d68eb5dd052d168a016344170e5a4))
+- **headings**: reuse trailing anchor ranges ([fb4af16](https://github.com/rvben/rumdl/commit/fb4af1685715f25386a316bfc9c6ecb57aead12f))
+- **MD063**: avoid repeated unmatched tag scans ([1303d3a](https://github.com/rvben/rumdl/commit/1303d3a9c3f95c29cbaffad30ce66ff0e423e433))
+- **MD030**: reuse indented block lookups ([7797130](https://github.com/rvben/rumdl/commit/77971301346bcc0cc78be79675238531b59c607d))
+- **headings**: sweep opaque ranges during anchor extraction ([80ec3bc](https://github.com/rvben/rumdl/commit/80ec3bc2068e1ccbd3ff0a3d7d8733df8ef8cc79))
+- **MD063**: sweep heading regions in source order ([51602e0](https://github.com/rvben/rumdl/commit/51602e0eb63fb9e55b6ef07385bfc1e2b5f5b98b))
+- **lint-context**: reuse list continuation indentation ([f0588d4](https://github.com/rvben/rumdl/commit/f0588d456290eb5714ed5e12c3e32ccfae9ba941))
+- **MD031**: memoize textual list membership ([9a6a4fd](https://github.com/rvben/rumdl/commit/9a6a4fd2c919ad0109f711b5cc0d3b32b4c52566))
+- avoid repeated fence scans in spacing rules ([96f6873](https://github.com/rvben/rumdl/commit/96f68735a5b62770382e9a93e995137ae5a55a66))
+- **inline-config**: index directive code ranges ([9415ab6](https://github.com/rvben/rumdl/commit/9415ab60226b048c069e0b012ae91d779f0bbc96))
+- **inline-config**: reuse suppression and comment lookups ([692e326](https://github.com/rvben/rumdl/commit/692e326e8653cb0057602f26a5616bb17bda430d))
+- **MD077**: index native fence queries ([e8e1749](https://github.com/rvben/rumdl/commit/e8e174993558266d64a03159c57ff72d86d8b18b))
+- **MD070**: index fence closure lookups ([37106d6](https://github.com/rvben/rumdl/commit/37106d62b745b779b852dfe3454a689316f12adf))
+- **workspace**: reuse link searches and source columns ([f52e95b](https://github.com/rvben/rumdl/commit/f52e95bc1b1fde6c553282aaf4a9973aeed20dbd))
+- **MD057**: cache link diagnostic columns ([12ab11b](https://github.com/rvben/rumdl/commit/12ab11bd45214514fa0c2c6e211f993f44e282a3))
+- **MD093**: cache heading warning columns ([8a23e39](https://github.com/rvben/rumdl/commit/8a23e39e2de7e9f4cf2583565a859c031f153381))
+- **MD084**: cache fix offsets and defer Unicode formatting ([e4cdbce](https://github.com/rvben/rumdl/commit/e4cdbcedb54ffbb85c2e64eb98e330620cf4fac2))
+- **parser**: index heading link exclusions ([e7a5ec6](https://github.com/rvben/rumdl/commit/e7a5ec6c0f38ecfbbe163422f859617be25ec567))
+- **MD089**: index image links and warning columns ([6c38dc2](https://github.com/rvben/rumdl/commit/6c38dc2bb027f5fd9b28d4730be78abffa7658c2))
+- **MD095**: reuse indexed source positions ([93515db](https://github.com/rvben/rumdl/commit/93515db93b53a09c785723f7e477d798b75b226c))
+- **parser**: index comment exclusions and line containment ([87f6930](https://github.com/rvben/rumdl/commit/87f69308a9181edb693f75080914fb54cad0976d))
+- **MD049**: cache markup exclusions and source columns ([1fb5463](https://github.com/rvben/rumdl/commit/1fb5463598ff90d62a9c10ac162590484d762b09))
+- **MD037**: index warning exclusions and columns ([e5984c1](https://github.com/rvben/rumdl/commit/e5984c14f5e0d610b408e119da1fcd1fdc3a20b4))
+- **emphasis**: bound delimiter pairing searches ([ef1e7c2](https://github.com/rvben/rumdl/commit/ef1e7c2b6983a61f1ed6a63d83e5d0ad0da1d3b8))
+- **emphasis**: index skip checks and source columns ([f612dd0](https://github.com/rvben/rumdl/commit/f612dd022ffbfaddaf355076682240e4913c5d1c))
+- **MD054**: reuse parsed diagnostic positions ([2102f60](https://github.com/rvben/rumdl/commit/2102f603ce769aa22262d2584c680395dc6013b6))
+- **MD054**: avoid quadratic fix preparation ([09873a9](https://github.com/rvben/rumdl/commit/09873a9901c90f3fd888f9caeba713f8eaa5eef6))
+- **MD033**: index allowed-inside regions ([ebb66a5](https://github.com/rvben/rumdl/commit/ebb66a56a8f2f07c58b4070fa1b9693e005fe83a))
+- **MD033**: avoid rescanning diagnostic line prefixes ([a4f4cdd](https://github.com/rvben/rumdl/commit/a4f4cddcf77e2d1f2de32a38882ebf1953eddc46))
+- **parser**: reuse column indexes for inline elements ([a4abcc4](https://github.com/rvben/rumdl/commit/a4abcc410866668b6463db728930b34072a7db53))
+- **parser**: index link columns on long lines ([143b17d](https://github.com/rvben/rumdl/commit/143b17db003843fafa502a05b4147cebce1d749c))
+- **MD034**: avoid quadratic scans on URL-heavy lines ([5513676](https://github.com/rvben/rumdl/commit/551367628f2bbf1e2d8544dfab1c026dae629d24))
+- **stdin-batch**: avoid rebuilding declared link targets ([e4b902d](https://github.com/rvben/rumdl/commit/e4b902d6deb24047ac4615866db4d304a5811c3c))
 
 ## [0.3.0](https://github.com/rvben/rumdl/compare/v0.2.79...v0.3.0) - 2026-10-17
 

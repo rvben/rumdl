@@ -2641,7 +2641,7 @@ dependencies = [
 
 [[package]]
 name = "rumdl"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "aho-corasick",
  "assert_cmd",
