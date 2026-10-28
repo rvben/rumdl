@@ -9947,6 +9947,46 @@ fn sentence_per_line_rule() -> MD013LineLength {
     })
 }
 
+#[test]
+fn sentence_reflow_preserves_common_reference_abbreviations_and_titles() {
+    let rule = sentence_per_line_rule();
+    for input in [
+        "The tool fails for approx. 6.5% of the inputs.\n",
+        "All services, incl. Kafka consumers, read this file.\n",
+        "See the setup guide, esp. Docker and the dev container.\n",
+        "Compare the old format (cf. Table 2) with the new one.\n",
+        "The solution is in eq. 4 on p. 12, derived on pp. 8–11.\n",
+        "Col. Smith and Lt. Jones signed the report.\n",
+        "Capt. Smith, Gov. Jones, Sgt. Brown and Rev. Green arrived.\n",
+        "The alternatives, viz. Alpha and Beta, date from ca. 1950.\n",
+    ] {
+        let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{input:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), input);
+    }
+}
+
+#[test]
+fn numbered_abbreviations_require_a_following_number() {
+    let rule = sentence_per_line_rule();
+    for (input, expected) in [
+        (
+            "We are based in Sacramento, CA. We ship worldwide.\n",
+            "We are based in Sacramento, CA.\nWe ship worldwide.\n",
+        ),
+        (
+            "We compare the value to p. We then retry.\n",
+            "We compare the value to p.\nWe then retry.\n",
+        ),
+        ("The font is 12 pt. We kept it.\n", "The font is 12 pt.\nWe kept it.\n"),
+        ("Read pt. 4 next.\n", "Read pt. 4 next.\n"),
+        ("See p.\n12 for details.\n", "See p. 12 for details.\n"),
+    ] {
+        let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{input:?}");
+    }
+}
+
 /// The same configuration with `require_sentence_capital` off, under which a
 /// sentence may open with any character.
 fn relaxed_sentence_per_line_rule() -> MD013LineLength {

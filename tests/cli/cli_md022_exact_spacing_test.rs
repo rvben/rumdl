@@ -44,6 +44,82 @@ fn assert_spacing(input: &str, expected: &str, settings: &str) {
 }
 
 #[test]
+fn heading_spacing_is_enforced_before_lists_and_fences_without_other_rules() {
+    for block in ["- item", "1. item", "```rust\ncode\n```", "~~~\ncode\n~~~"] {
+        assert_spacing(
+            &format!("# Heading\n{block}\n"),
+            &format!("# Heading\n\n{block}\n"),
+            "lines-below = 1",
+        );
+        assert_spacing(
+            &format!("# Heading\n{block}\n"),
+            &format!("# Heading\n{block}\n"),
+            "lines-below = 0",
+        );
+    }
+    assert_spacing("# Heading\n- item\n", "# Heading\n\n\n- item\n", "lines-below = 2");
+    assert_spacing(
+        "> # Heading\n> - item\n",
+        "> # Heading\n>\n> - item\n",
+        "lines-below = 1",
+    );
+    assert_spacing(
+        "Heading\n=======\n- item",
+        "Heading\n=======\n\n- item",
+        "lines-below = 1",
+    );
+}
+
+#[test]
+fn markdownlint_config_enforces_heading_spacing_with_list_rule_disabled() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("doc.md");
+    let config = dir.path().join(".markdownlint.jsonc");
+    fs::write(
+        &config,
+        r#"{"default": false, "MD019": true, "MD022": {"lines_above": 1, "lines_below": 1}}"#,
+    )
+    .unwrap();
+    for args in [vec!["fmt"], vec!["check", "--fix"]] {
+        fs::write(&path, "# Heading\n- list item\n").unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .args(&args)
+            .args(["--no-cache", "--config"])
+            .arg(&config)
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# Heading\n\n- list item\n");
+    }
+}
+
+#[test]
+fn overlapping_heading_list_and_fence_rules_insert_only_one_blank() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("doc.md");
+    for block in ["- item", "```rust\ncode\n```"] {
+        fs::write(&path, format!("# Heading\n{block}\n")).unwrap();
+        for _ in 0..2 {
+            let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .args([
+                    "check",
+                    "--fix",
+                    "--isolated",
+                    "--no-cache",
+                    "--enable",
+                    "MD022,MD031,MD032",
+                ])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), format!("# Heading\n\n{block}\n"));
+        }
+    }
+}
+
+#[test]
 fn exact_spacing_preserves_comments_and_comment_interiors() {
     assert_spacing(
         "# Title\n\n\n<!-- KEEP ME -->\n## Section\n",

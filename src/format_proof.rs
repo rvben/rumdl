@@ -401,6 +401,11 @@ impl<'a> FormatProof<'a> {
             bits: u128::MAX,
             parsed: None,
         };
+        // MD067 can reorder complete definitions. Only their lexical absence
+        // proves that this policy cannot edit; real footnotes need full analysis.
+        if source.contains("[^") {
+            facts.reject(&[67]);
+        }
         // Native MD048 scans physical fence candidates even inside HTML
         // comments and other literal regions. Primary parser code-block events
         // alone cannot prove its source-wide style is uniform. A raw superset

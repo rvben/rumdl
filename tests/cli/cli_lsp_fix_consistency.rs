@@ -9,6 +9,108 @@ use rumdl_lib::rule::{FixCapability, Rule};
 use rumdl_lib::rules::*;
 use rumdl_lib::utils::fix_utils;
 
+#[test]
+fn overlapping_heading_spacing_diagnostics_insert_one_blank() {
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(MD022BlanksAroundHeadings::default()),
+        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD032BlanksAroundLists::default()),
+    ];
+    for block in ["- item", "```rust\ncode\n```"] {
+        let content = format!("# Heading\n{block}\n");
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings: Vec<_> = rules.iter().flat_map(|rule| rule.check(&ctx).unwrap()).collect();
+        assert!(warnings.len() >= 2, "the fixture must exercise overlapping findings");
+        assert_eq!(
+            fix_utils::apply_warning_fixes(&content, &warnings).unwrap(),
+            format!("# Heading\n\n{block}\n")
+        );
+    }
+}
+
+#[test]
+fn overlapping_heading_spacing_respects_counts_and_blockquotes() {
+    for count in [1, 2, 3] {
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD022BlanksAroundHeadings::with_values(1, count)),
+            Box::new(MD031BlanksAroundFences::default()),
+            Box::new(MD032BlanksAroundLists::default()),
+        ];
+        for prefix in ["", ">", "> >"] {
+            for block in ["- item", "```rust\ncode\n```"] {
+                let line_prefix = if prefix.is_empty() {
+                    String::new()
+                } else {
+                    format!("{prefix} ")
+                };
+                let block = block
+                    .lines()
+                    .map(|line| format!("{line_prefix}{line}\n"))
+                    .collect::<String>();
+                let content = format!("{line_prefix}# Heading\n{block}");
+                let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+                let warnings: Vec<_> = rules.iter().flat_map(|rule| rule.check(&ctx).unwrap()).collect();
+                assert!(warnings.len() >= 2, "the fixture must exercise overlapping findings");
+                let expected = format!("{line_prefix}# Heading\n{}{block}", format!("{prefix}\n").repeat(count));
+                let fixed = fix_utils::apply_warning_fixes(&content, &warnings).unwrap();
+                assert_eq!(fixed, expected, "count={count}, prefix={prefix:?}");
+                let ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+                assert!(rules.iter().all(|rule| rule.check(&ctx).unwrap().is_empty()));
+            }
+        }
+    }
+}
+
+#[test]
+fn overlapping_heading_spacing_preserves_line_endings_and_list_containers() {
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(MD022BlanksAroundHeadings::with_values(1, 2)),
+        Box::new(MD031BlanksAroundFences::default()),
+        Box::new(MD032BlanksAroundLists::default()),
+    ];
+    for eol in ["\n", "\r\n"] {
+        for (input, expected) in [
+            ("# Heading\n- item\n", "# Heading\n\n\n- item\n"),
+            ("- # Heading\n  - sub\n", "- # Heading\n\n\n  - sub\n"),
+            (
+                "- # Heading\n  ```\n  code\n  ```\n",
+                "- # Heading\n\n\n  ```\n  code\n  ```\n",
+            ),
+            ("> # Heading\n> - item\n", "> # Heading\n>\n>\n> - item\n"),
+        ] {
+            let input = input.replace('\n', eol);
+            let expected = expected.replace('\n', eol);
+            let ctx = LintContext::new(&input, rumdl_lib::config::MarkdownFlavor::Standard, None);
+            let warnings: Vec<_> = rules.iter().flat_map(|rule| rule.check(&ctx).unwrap()).collect();
+            let fixed = fix_utils::apply_warning_fixes(&input, &warnings).unwrap();
+            assert_eq!(fixed, expected);
+            let ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+            assert!(rules.iter().all(|rule| rule.check(&ctx).unwrap().is_empty()));
+        }
+    }
+}
+
+#[test]
+fn footnote_reordering_is_atomic_when_another_rule_edits_a_definition() {
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(MD009TrailingSpaces::default()),
+        Box::new(MD067FootnoteDefinitionOrder::new()),
+    ];
+    let content = "Refs[^a][^b].\n\n[^b]: B \n[^a]: A\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings: Vec<_> = rules.iter().flat_map(|rule| rule.check(&ctx).unwrap()).collect();
+    assert_eq!(warnings.len(), 2);
+    let fixed = fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+    assert_eq!(fixed, "Refs[^a][^b].\n\n[^b]: B\n[^a]: A\n");
+    let mut current = fixed;
+    for _ in 0..2 {
+        let ctx = LintContext::new(&current, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings: Vec<_> = rules.iter().flat_map(|rule| rule.check(&ctx).unwrap()).collect();
+        current = fix_utils::apply_warning_fixes(&current, &warnings).unwrap();
+        assert_eq!(current, "Refs[^a][^b].\n\n[^a]: A\n[^b]: B\n");
+    }
+}
+
 /// Test helper to compare CLI and LSP fix results for a given rule and content
 fn test_cli_lsp_consistency(rule: &dyn Rule, content: &str, test_name: &str) {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);

@@ -44,6 +44,23 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
     apply_edits(content, warnings.iter().filter_map(|warning| warning.fix.as_ref())).map(Cow::into_owned)
 }
 
+/// Recognize repeated blank lines with an identical optional quote prefix.
+fn blank_line_insertion(text: &str) -> Option<(&str, usize)> {
+    let mut lines = text.strip_suffix('\n')?.split('\n');
+    let prefix = lines.next()?;
+    if !prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'>')) {
+        return None;
+    }
+    let mut count = 1;
+    for line in lines {
+        if line != prefix {
+            return None;
+        }
+        count += 1;
+    }
+    Some((prefix, count))
+}
+
 /// Apply source edits without requiring diagnostics or copying an unchanged
 /// document. Warning and engine callers share ordering, overlap, UTF-8 and EOL
 /// handling through this one implementation.
@@ -119,6 +136,22 @@ pub(crate) fn apply_edits<'a, 'f>(
                 // we can sensibly merge. Stop here so the apply loop sees only
                 // the first replacement (matching prior behavior).
                 break;
+            }
+            // Blank-line requirements at a line boundary overlap: satisfy
+            // the larger count instead of adding the requirements together.
+            // Other inserts (such as reference definitions) still concatenate.
+            if current.range.start == 0 || content.as_bytes().get(current.range.start - 1) == Some(&b'\n') {
+                let existing = combined.as_deref().unwrap_or(&current.replacement);
+                if let (Some((prefix, count)), Some((next_prefix, next_count))) =
+                    (blank_line_insertion(existing), blank_line_insertion(&next.replacement))
+                    && prefix == next_prefix
+                {
+                    if next_count > count {
+                        combined = Some(next.replacement.clone());
+                    }
+                    j += 1;
+                    continue;
+                }
             }
             // Zero-width inserts at the same offset: concatenate.
             let buf = combined.get_or_insert_with(|| current.replacement.clone());

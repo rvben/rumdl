@@ -76,11 +76,11 @@ The general settings "Default escape character" and "YAML aliases section style"
 
 ### Footnote Rules (3)
 
-| Obsidian Linter              | rumdl                         | Notes                                                                                                                   |
-| ---------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Footnote after punctuation   | **None**                      | `Lorem[^1].` is clean to rumdl                                                                                          |
-| Move footnotes to the bottom | **Partial** [MD067](md067.md) | MD067 reports definitions that are out of reference order, without a fix, and does not move them to the end of the file |
-| Re-index footnotes           | **None**                      | MD067 checks definition order and never renames an identifier                                                           |
+| Obsidian Linter              | rumdl                         | Notes                                                                                                         |
+| ---------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Footnote after punctuation   | **None**                      | `Lorem[^1].` is clean to rumdl                                                                                |
+| Move footnotes to the bottom | **Partial** [MD067](md067.md) | MD067 can safely reorder definitions to match their references, but does not move them to the end of the file |
+| Re-index footnotes           | **None**                      | MD067 checks definition order and never renames an identifier                                                 |
 
 ### Content Rules (16)
 

@@ -200,7 +200,7 @@ Content";
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "First heading with blank line after should pass");
 
-    // Test 2: Code fence after heading (no blank required)
+    // Test 2: Code fences still need the heading's configured spacing.
     let content = "\
 # Heading
 ```rust
@@ -208,16 +208,18 @@ code
 ```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "Code fence after heading doesn't need blank line");
+    assert_eq!(result.len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), "# Heading\n\n```rust\ncode\n```");
 
-    // Test 3: List after heading (no blank required)
+    // Test 3: Lists need the same spacing, independently of MD032.
     let content = "\
 # Heading
 - List item
 - Another item";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty(), "List after heading doesn't need blank line");
+    assert_eq!(result.len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), "# Heading\n\n- List item\n- Another item");
 
     // Test 4: Document boundaries
     let content = "# Only heading";

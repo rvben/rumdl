@@ -12,7 +12,7 @@ use crate::utils::regex_cache::{
 };
 use crate::utils::sentence_utils::{
     get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_bracket, is_closing_quote, is_opening_quote,
-    text_ends_with_abbreviation,
+    text_ends_with_abbreviation, text_ends_with_numbered_abbreviation,
 };
 use crate::utils::unicode::joins_cjk_soft_break;
 use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
@@ -1241,7 +1241,12 @@ fn sentence_boundary(
         }
 
         // Check for common abbreviations
-        if text_ends_with_abbreviation(&text[..byte_offset_after_punct], abbreviations) {
+        if text_ends_with_abbreviation(&text[..byte_offset_after_punct], abbreviations)
+            || text_ends_with_numbered_abbreviation(
+                &text[..byte_offset_after_punct],
+                &text[st.byte_at(first_letter_pos)..],
+            )
+        {
             return None;
         }
 
@@ -4096,7 +4101,10 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
                 .map(|_| piece_ranges[idx + 1]);
             let closes_before_next = |sentence: &str| -> bool {
                 let sentence_end = line_start + combined.trim_end_matches(is_breakable_whitespace).len();
-                if glued_to_next || inside_parenthetical(sentence_end, &paragraph.parentheticals) {
+                if glued_to_next
+                    || inside_parenthetical(sentence_end, &paragraph.parentheticals)
+                    || text_ends_with_numbered_abbreviation(sentence, &paragraph_text[sentence_end..])
+                {
                     return false;
                 }
                 let Some((next_start, next_end)) = next_bracketed else {
@@ -6152,6 +6160,10 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     && !text_ends_with_abbreviation(
                         prev_trimmed.trim_end_matches(['*', '_', '"', '\'', '\u{201D}', '\u{2019}']),
                         &abbreviations,
+                    )
+                    && !text_ends_with_numbered_abbreviation(
+                        prev_trimmed.trim_end_matches(['*', '_', '"', '\'', '\u{201D}', '\u{2019}']),
+                        next_line,
                     );
 
                 // The space that joins this line to the one before it, and

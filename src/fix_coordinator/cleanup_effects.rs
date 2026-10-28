@@ -258,6 +258,11 @@ impl CleanupBatch {
         if r.is::<MD044ProperNames>() {
             return true;
         }
+        // Admitted cleanup edits cannot introduce a footnote marker. Keep the
+        // old negative result only when there are no footnotes to reorder.
+        if r.is::<MD067FootnoteDefinitionOrder>() {
+            return !ctx.content.contains("[^");
+        }
         // validated() admits only MD025's default configuration here.
         // Its separator exception uses a five-physical-line lookback, so
         // even structurally invisible blank insertions can change it. Only a

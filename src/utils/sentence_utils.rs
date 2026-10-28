@@ -22,11 +22,31 @@ use std::collections::HashSet;
 /// - Abbreviations that commonly end sentences (etc., Inc., Ph.D., U.S.)
 const DEFAULT_ABBREVIATIONS: &[&str] = &[
     // Titles - always have period, always followed by a name
-    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st",
+    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "capt", "col", "gov", "lt", "sgt", "rev",
     // Latin - always written with periods, introduce examples/references
-    "i.e", "e.g", // Reference abbreviations - followed by what they refer to
-    "vs", "fig", "no", "vol", "ch", "sec", "al",
+    "i.e", "e.g", "cf", "viz", // Reference abbreviations - followed by what they refer to
+    "vs", "fig", "no", "vol", "ch", "sec", "al", "esp", "incl", "approx",
 ];
+
+/// Page, equation, part, and approximate-date references need a following
+/// number. Without that context, `p.` can be a variable, `pt.` a font-size
+/// unit, and `CA.` a state abbreviation at the end of a sentence.
+pub fn text_ends_with_numbered_abbreviation(text: &str, following: &str) -> bool {
+    let Some(before_period) = text.strip_suffix('.') else {
+        return false;
+    };
+    let word = before_period
+        .split_whitespace()
+        .next_back()
+        .unwrap_or("")
+        .trim_start_matches(|c: char| !c.is_alphanumeric());
+    if !matches!(word.to_ascii_lowercase().as_str(), "p" | "pp" | "eq" | "pt" | "ca") {
+        return false;
+    }
+    following
+        .trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '*' | '_' | '[' | '(' | '`' | '>' | '\"' | '\''))
+        .starts_with(|c: char| c.is_ascii_digit())
+}
 
 /// Get the effective abbreviations set based on custom additions
 /// All abbreviations are normalized to lowercase for case-insensitive matching
@@ -255,7 +275,10 @@ fn is_after_sentence_ending_with_abbreviations(
         let text_before_period: String = chars[..idx].iter().collect();
 
         // Check if this is an abbreviation
-        if text_ends_with_abbreviation(&format!("{text_before_period}."), abbreviations) {
+        let before_period = format!("{text_before_period}.");
+        if text_ends_with_abbreviation(&before_period, abbreviations)
+            || text_ends_with_numbered_abbreviation(&before_period, &text[match_start..])
+        {
             return false;
         }
 

@@ -646,14 +646,14 @@ fn test_roundtrip_heading_followed_by_indented_list_marker() {
 }
 
 #[test]
-fn test_no_blank_below_heading_followed_by_indented_list_marker() {
+fn test_blank_below_heading_followed_by_indented_list_marker() {
     let rule = MD022BlanksAroundHeadings::default();
     let content = "text\n# Heading\n    - deeper\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2);
     assert!(result[0].message.contains("above"), "got: {:?}", result[0].message);
-    assert_eq!(rule.fix(&ctx).unwrap(), "text\n\n# Heading\n    - deeper\n");
+    assert_eq!(rule.fix(&ctx).unwrap(), "text\n\n# Heading\n\n    - deeper\n");
 }
 
 #[test]
