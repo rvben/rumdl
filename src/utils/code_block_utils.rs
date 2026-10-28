@@ -440,9 +440,8 @@ fn is_inline_tag_end(tag_end: TagEnd) -> bool {
 /// colon touching its text, as in `:warning:` or a `:::` fence closing a div,
 /// which those read as prose or as the fence it is.
 fn opens_definition(content: &str, start: usize) -> bool {
-    // A tab crossing a definition's container indent can make the parser's
-    // marker offset land inside the preceding UTF-8 character. Such an offset
-    // does not identify a source marker and belongs to the rejected reading.
+    // Defensively reject offsets inside UTF-8 characters. Before 0.13.5, a
+    // tab crossing a definition's container indent could produce one.
     let Some(rest) = content.get(start..) else {
         return false;
     };
@@ -709,9 +708,9 @@ impl CodeBlockUtils {
                             // The definition's range takes in the blank lines after
                             // it, quoted ones too, which belong to no block.
                             let item_start = pending_terms.first().map_or(range.start, |&(start, _)| start);
-                            // Only ASCII suffix bytes are removed. The parser
-                            // can report a non-character-boundary marker start
-                            // for a tab crossing the container indentation.
+                            // Only ASCII suffix bytes are removed, remaining
+                            // safe even if a parser regression reports a marker
+                            // start inside a UTF-8 character.
                             let item_end = content.as_bytes()[range.clone()]
                                 .iter()
                                 .rposition(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'>'))
@@ -1548,15 +1547,45 @@ mod tests {
     }
 
     #[test]
-    fn definition_marker_inside_utf8_keeps_the_rejected_source_reading() {
+    fn tab_indented_definition_markers_after_utf8_keep_valid_ranges() {
         for newline in ["\n", "\r", "\r\n"] {
             for term in ["", "a", "¡", "🦀"] {
                 for text in ["b", "\u{e000}", "🦀"] {
                     for tail in ["\t:", "\t: next", "\t: *next*", "\t: `next`"] {
                         let source = format!("{term}{newline}:{text}{newline}{tail}");
                         let result = CodeBlockUtils::detect_code_blocks_and_spans(&source);
-                        assert!(result.definition_items.is_empty(), "{source:?}");
-                        assert!(result.definition_texts.is_empty(), "{source:?}");
+                        // 0.13.5 fixes the nested marker's offset. Its valid
+                        // colon is now accepted, while the colon touching `text`
+                        // remains rejected. No preceding term means no list.
+                        assert_eq!(
+                            result.definition_items.len(),
+                            usize::from(!term.is_empty()),
+                            "{source:?}"
+                        );
+                        assert_eq!(
+                            result.definition_texts.len(),
+                            usize::from(!term.is_empty() && tail != "\t:"),
+                            "{source:?}"
+                        );
+                        let parent_colon = term.len() + newline.len();
+                        let nested_colon = source.len() - tail.len() + 1;
+                        for &(start, end) in &result.definition_items {
+                            assert_eq!((start, end), (parent_colon + 1, source.len()), "{source:?}");
+                            assert!(source.get(start..end).is_some(), "{source:?}: {start}..{end}");
+                        }
+                        for detail in &result.definition_texts {
+                            assert!(source.get(detail.start..detail.end).is_some(), "{source:?}: {detail:?}");
+                            assert_eq!(detail.definition_start, nested_colon, "{source:?}");
+                        }
+                        if !term.is_empty() {
+                            assert!(
+                                result
+                                    .rejected_definition_ranges
+                                    .iter()
+                                    .any(|&(start, end)| start <= parent_colon && parent_colon < end),
+                                "{source:?}"
+                            );
+                        }
                         for &(start, end) in &result.rejected_definition_ranges {
                             assert!(source.get(start..end).is_some(), "{source:?}: {start}..{end}");
                         }

@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Upgrade pulldown-cmark to fix exponential parser event growth and duplicate
+  diagnostics after empty wikilink labels (RUSTSEC-2026-0414), and upgrade Tokio
+  to address its I/O safety advisory (RUSTSEC-2026-0386). Release publication now
+  requires a fresh dependency security audit, including during recovery runs.
 - MD087 recognizes inline suppression of heading-capitalization diagnostics,
   avoiding false unused-disable warnings (#973).
 - MD022 enforces configured spacing below headings before lists and code fences,
@@ -22,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MD013 recognizes additional common abbreviations and titles, including numeric
   references with formatted numbers, while preserving sentence boundaries after
   ambiguous units and labels. Sentence-spacing checks share this behavior (#966).
+- MD013 preserves meaningful indentation inside multiline code spans following
+  a bare list marker when reflowing text.
 
 ## [0.3.1](https://github.com/rvben/rumdl/compare/v0.3.0...v0.3.1) - 2026-10-27
 

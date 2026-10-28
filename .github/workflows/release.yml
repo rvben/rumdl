@@ -54,6 +54,21 @@ permissions:
   contents: read
 
 jobs:
+  audit:
+    timeout-minutes: 15
+    name: Audit release dependencies
+    runs-on: ubuntu-latest
+    # Recheck advisories even when recovering artifacts from an earlier run.
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Audit dependencies for known vulnerabilities
+        run: make audit
+
   test:
     timeout-minutes: 60
     name: Run tests
@@ -694,11 +709,13 @@ jobs:
     # `test` is a dependency here (rather than a gate on the build jobs) so the
     # suite runs in parallel with the build matrix while still blocking every
     # publish step below.
-    needs: [test, build, sdist, test-python-package, build-wasm, test-npm-cli, test-npm-cli-musl]
+    needs: [audit, test, build, sdist, test-python-package, build-wasm, test-npm-cli, test-npm-cli-musl]
     # Every need must succeed, except in a from_run recovery, where they are
-    # all skipped and the source run's own release job proves they passed.
+    # skipped and the source run's own release job proves they passed. The
+    # audit must also pass against the current advisory database on recovery.
     if: >-
       ${{ !cancelled()
+        && needs.audit.result == 'success'
         && !contains(needs.*.result, 'failure')
         && !contains(needs.*.result, 'cancelled')
         && (inputs.from_run || !contains(needs.*.result, 'skipped')) }}

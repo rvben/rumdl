@@ -2,6 +2,26 @@ use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{MD034NoBareUrls, MD039NoSpaceInLinks, MD042NoEmptyLinks};
 
+#[test]
+fn empty_wikilink_labels_do_not_duplicate_following_link_diagnostics() {
+    // RUSTSEC-2026-0414: each empty label used to duplicate the parser events
+    // for the rest of the paragraph. Keep the reproducer small even on failure.
+    for count in [1, 4, 12] {
+        let prefix = "[[a|]] ".repeat(count);
+        let content = format!("{prefix}[ bad ](url)\n");
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD039NoSpaceInLinks;
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{count} empty wikilink labels");
+        assert_eq!(warnings[0].column, prefix.len() + 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, format!("{prefix}[bad](url)\n"));
+        let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
+    }
+}
+
 /// Comprehensive edge case tests for link rules (MD034, MD039, MD042)
 ///
 /// These tests ensure link rules handle Unicode, special cases, and edge conditions correctly.
