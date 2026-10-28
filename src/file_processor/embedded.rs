@@ -12,6 +12,7 @@ use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 
 // Re-export check/lint functions from the library crate
+#[cfg(test)]
 pub use rumdl_lib::embedded_lint::check_embedded_markdown_blocks;
 pub(super) use rumdl_lib::embedded_lint::has_fenced_code_blocks;
 pub(super) use rumdl_lib::embedded_lint::markdown_code_blocks;

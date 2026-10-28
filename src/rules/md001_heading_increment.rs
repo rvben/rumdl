@@ -272,19 +272,12 @@ impl Rule for MD001HeadingIncrement {
 
             let level = heading.level as usize;
 
-            // Headings disabled via inline config keep their original level for
-            // successor tracking (the user explicitly opted out of fixing them),
-            // and no warning is emitted.
-            if ctx
-                .inline_config()
-                .is_rule_disabled(self.name(), valid_heading.line_num)
-            {
-                prev_level = Some(level);
-                continue;
-            }
-
             let (fix_info, new_prev) = Self::compute_heading_fix(prev_level, heading);
-            prev_level = new_prev;
+            // Keep the raw violation for suppression accounting, but track the
+            // original level when this heading will not be rewritten.
+            let disabled = (valid_heading.first_line_num()..=valid_heading.line_num)
+                .any(|line| ctx.is_rule_disabled(self.name(), line));
+            prev_level = if disabled { Some(level) } else { new_prev };
 
             if fix_info.needs_fix {
                 let line_content = line_info.content(ctx.content);

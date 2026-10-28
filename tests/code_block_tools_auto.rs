@@ -33,7 +33,7 @@ fn project(source: &str) -> tempfile::TempDir {
     fs::write(dir.path().join("doc.md"), "```python\nbad\n```\n").unwrap();
     let fixture = native_tool::install(dir.path(), "quiet");
     let tool = fixture.with_file_name(format!("ruff{}", std::env::consts::EXE_SUFFIX));
-    fs::copy(fixture, &tool).unwrap();
+    native_tool::copy_executable(&fixture, &tool);
     fs::write(tool.with_extension("mode"), "count-format").unwrap();
     fs::write(tool.with_extension("version"), "ruff 0.11.2\n").unwrap();
     dir
@@ -269,7 +269,7 @@ fn auto_does_not_search_outside_the_project_or_skip_an_unreadable_selected_candi
     fs::copy(dir.path().join(".rumdl.toml"), nested.join(".rumdl.toml")).unwrap();
     let fixture = native_tool::install(&nested, "quiet");
     let tool = fixture.with_file_name(format!("ruff{}", std::env::consts::EXE_SUFFIX));
-    fs::copy(fixture, &tool).unwrap();
+    native_tool::copy_executable(&fixture, &tool);
     fs::write(tool.with_extension("mode"), "count").unwrap();
     fs::write(tool.with_extension("version"), "ruff 0.11.2\n").unwrap();
     fs::copy(dir.path().join("doc.md"), nested.join("doc.md")).unwrap();

@@ -55,6 +55,7 @@ pub struct DocumentRun<'a> {
     link_target_policy: Option<&'a crate::lint_context::LinkTargetPolicy>,
     invalid_utf8: Option<&'a [crate::encoding::InvalidSeq]>,
     verbose: bool,
+    embedded_rules: Option<&'a [Box<dyn Rule>]>,
 }
 
 impl<'a> DocumentRun<'a> {
@@ -69,6 +70,7 @@ impl<'a> DocumentRun<'a> {
             link_target_policy: None,
             invalid_utf8: None,
             verbose: false,
+            embedded_rules: None,
         }
     }
 
@@ -120,6 +122,13 @@ impl<'a> DocumentRun<'a> {
 
     pub fn verbose(mut self, verbose: bool) -> Self {
         self.verbose = verbose;
+        self
+    }
+
+    /// Include built-in fenced Markdown in this run's suppression accounting.
+    /// Adapters decide whether the current command enables this lint phase.
+    pub fn embedded_markdown(mut self, rules: &'a [Box<dyn Rule>]) -> Self {
+        self.embedded_rules = Some(rules);
         self
     }
 
@@ -252,6 +261,8 @@ impl<'a> DocumentRun<'a> {
             source_file: self.source_file,
             link_target_policy: self.link_target_policy,
             invalid_utf8: self.invalid_utf8,
+            embedded_rules: self.embedded_rules,
+            embedded_depth: 0,
         }
     }
 }

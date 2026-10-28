@@ -206,6 +206,11 @@ pub struct SuppressionReport {
 pub trait Rule: DynClone + Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
+    /// Return raw diagnostics, including findings covered by inline disables.
+    /// The lint driver filters them and records which comments suppressed them
+    /// for observers such as MD087. Filtering them here loses that accounting.
+    /// Disabled regions may still be excluded from inferred settings, and `fix`
+    /// must honor them when rewriting content.
     fn check(&self, ctx: &LintContext) -> LintResult;
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError>;
 

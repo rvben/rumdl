@@ -36,7 +36,7 @@ format = ["test"]
 fn install(root: &Path, name: &str, version: &str, mode: &str) -> PathBuf {
     let fixture = native_tool::install(root, "quiet");
     let tool = fixture.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-    fs::copy(fixture, &tool).unwrap();
+    native_tool::copy_executable(&fixture, &tool);
     fs::write(tool.with_extension("mode"), mode).unwrap();
     fs::write(tool.with_extension("version"), version).unwrap();
     tool

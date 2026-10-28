@@ -9,7 +9,7 @@ use tower_lsp::lsp_types::*;
 use super::Result;
 
 use crate::code_block_tools::CodeBlockToolProcessor;
-use crate::embedded_lint::{check_embedded_markdown_blocks, should_lint_embedded_markdown};
+use crate::embedded_lint::should_lint_embedded_markdown;
 use crate::rule::FixCapability;
 use crate::rules;
 
@@ -163,6 +163,11 @@ impl RumdlLanguageServer {
         // which is why the known recursion vectors are fixed at the source rather
         // than relied upon to be caught here.)
         let document_run = crate::document_run::DocumentRun::new(text, &filtered_rules, &rumdl_config);
+        let document_run = if should_lint_embedded_markdown(&rumdl_config.code_block_tools) {
+            document_run.embedded_markdown(&filtered_rules)
+        } else {
+            document_run
+        };
         let document_run = match file_path.as_deref() {
             Some(path) => document_run.file_path(path),
             None => document_run,
@@ -213,13 +218,6 @@ impl RumdlLanguageServer {
         // the same set the CLI prints, so an editor shows a directive that silently
         // does nothing instead of leaving the user to wonder why it had no effect.
         all_warnings.extend(inline_config_warnings(text, flavor, &active_rules, &ignored_for_file));
-
-        // Check embedded markdown blocks if configured in code-block-tools
-        if should_lint_embedded_markdown(&rumdl_config.code_block_tools) {
-            let embedded_warnings =
-                check_embedded_markdown_blocks(crate::utils::bom::strip_bom(text), &filtered_rules, &rumdl_config);
-            all_warnings.extend(embedded_warnings);
-        }
 
         // Run external code-block-tools only when requested (skip on keystroke events)
         if run_external_tools && rumdl_config.code_block_tools.enabled {

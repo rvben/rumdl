@@ -289,7 +289,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD002" => Some("## H2 (should start with H1)"),
         "MD003" => Some("# ATX\nSetext\n======"),
         "MD004" => Some("* Item 1\n- Item 2"),
-        "MD005" => Some("* Item 1\n   * Item with 3 spaces"),
+        "MD005" => Some("- A\n  - B\n   - C\n"),
         "MD006" => Some("  * Indented list item"),
         "MD007" => Some("- Item 1\n   - Wrong indent"),
         "MD009" => Some("Line with trailing spaces   "),
@@ -308,21 +308,21 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD025" => Some("# First\n# Second H1"),
         "MD026" => Some("# Heading!"),
         "MD027" => Some(">  Multiple spaces in blockquote"),
-        "MD028" => Some("> Quote\n>\n> More quote"),
+        "MD028" => Some("> First\n\n> Second\n"),
         "MD029" => Some("1. First\n3. Third"),
         "MD030" => Some("1.  Multiple spaces after marker"),
         "MD031" => Some("Text\n```\ncode\n```\nText"),
         "MD032" => Some("Text\n* List item\nText"),
         "MD033" => Some("Text with <div>HTML</div>"),
         "MD034" => Some("Visit https://example.com"),
-        "MD035" => Some("Text\n***\nText"),
+        "MD035" => Some("***\n\n---\n"),
         "MD036" => Some("**Bold text as heading**"),
         "MD037" => Some("Text with * spaces around * emphasis"),
         "MD038" => Some("`code `"),
         "MD039" => Some("[link text ]( url )"),
         "MD040" => Some("```\ncode without language\n```"),
         "MD041" => Some("Not a heading"),
-        "MD042" => Some("[]()"),
+        "MD042" => Some("[https://example.com]()"),
         "MD043" => Some("# Wrong heading"),
         "MD044" => Some("javascript instead of JavaScript"),
         "MD045" => Some("![](image.png)"),
@@ -334,21 +334,35 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD051" => Some("[link](#nonexistent)"),
         "MD052" => Some("[ref link][ref]"),
         "MD053" => Some("[ref]: https://example.com"),
-        "MD054" => Some("![image](url)"),
+        "MD054" => Some("[label](https://example.com)\n"),
         "MD055" => Some("|col1|col2|\n|--|--|\ncol3|col4"),
         "MD056" => Some("|col1|col2|\n|--|--|\n|a|"),
         "MD057" => Some("[link](missing.md)"),
         "MD058" => Some("Text\n| a | b |\n| - | - |\n| 1 | 2 |\nText\n"),
         "MD059" => Some("[click here](https://example.com)"),
-        "MD060" => Some("|col1|col2|\n|-|-|\n|a|b|"),
+        "MD060" => Some("| Name | Value |\n| --- | --- |\n| A | longer value |\n"),
         "MD061" => Some("This contains a TODO marker"),
         "MD062" => Some("[link]( https://example.com )"),
         "MD063" => Some("# heading in lowercase"),
         "MD064" => Some("Text with  multiple  spaces"),
         "MD065" => Some("Text\n***\nMore text\n"),
-        "MD066" => Some("Text[^1]\n\n[^1]:"),
+        "MD066" => Some("Text[^missing]\n"),
         "MD067" => Some("Text[^2][^1]\n\n[^1]: First\n[^2]: Second"),
         "MD068" => Some("[^1]:\n\n[^1]: Empty footnote"),
+        "MD069" => Some("- - Item\n"),
+        "MD070" => Some("```markdown\n```python\ncode\n```\n```\n"),
+        "MD071" => Some("---\ntitle: Example\n---\n# Heading\n"),
+        "MD072" => Some("---\nz: 1\na: 2\n---\n"),
+        "MD073" => Some("<!-- toc -->\n- [Old](#old)\n<!-- tocstop -->\n\n## New\n"),
+        "MD074" => Some("# Navigation\n"),
+        "MD075" => Some("| A | B |\n| --- | --- |\n| a | b |\n\n| c | d |\n"),
+        "MD076" => Some("- One\n\n- Two\n- Three\n"),
+        "MD077" => Some("- Item\n\n continuation\n"),
+        "MD078" => Some("```{r}\nplot(1:10)\n```\n"),
+        "MD079" => Some("```{r several words}\nplot(1:10)\n```\n"),
+        "MD080" => Some("# C++\n\n# C\n"),
+        "MD081" => Some("**bold** and **more**\n"),
+        "MD082" => Some("# Parent\n\n## Child\n"),
         "MD083" => Some("Broken dash â€“ here"),
         "MD084" => Some("left \u{2060} right"),
         "MD085" => Some("A paragraph\n  with an indented continuation"),
@@ -459,163 +473,110 @@ fn test_comprehensive_rule_consistency() {
     );
 }
 
+/// Every registered rule must have a fixture that actually diagnoses something.
+/// Configuration and context belong to the fixture, not to permissive skips.
 #[test]
-fn test_all_53_rules_systematic_coverage() {
-    println!("🚀 Starting comprehensive CLI vs LSP consistency test for all 53 rules...\n");
-
-    // Get all rules using the official all_rules function
+fn test_all_rules_systematic_coverage() {
+    use rumdl_lib::config::{MarkdownFlavor, RuleConfig};
     let mut config = Config::default();
-    config.rules.insert(
-        "MD096".into(),
-        rumdl_lib::config::RuleConfig {
-            severity: None,
-            values: [("column".into(), toml::Value::String("Name".into()))].into(),
-        },
-    );
-    let all_rules = rumdl_lib::rules::all_rules(&config);
-
-    let mut total_tested = 0;
-    let mut consistent_fixes = 0;
-    let mut cli_only_fixes = 0;
-    let mut no_fixes = 0;
-    let mut lsp_errors = 0;
-    let mut test_content_missing = 0;
-    let mut unfixable_rules = 0;
-
-    let mut detailed_results = Vec::new();
-
-    for rule in all_rules {
-        let rule_name = rule.name();
-        total_tested += 1;
-
-        // Get appropriate test content for this rule
-        let test_content = match get_test_content_for_rule(rule_name) {
-            Some(content) => content,
-            None => {
-                test_content_missing += 1;
-                detailed_results.push(format!("⚠ {rule_name}: No test content defined"));
-                continue;
-            }
+    for (name, options) in [
+        ("MD013", "reflow = true"),
+        ("MD028", "fix = true"),
+        ("MD036", "fix = true"),
+        ("MD043", "headings = ['# Expected']"),
+        ("MD044", "names = ['JavaScript']"),
+        ("MD046", "style = 'fenced'"),
+        ("MD048", "style = 'backtick'"),
+        ("MD049", "style = 'asterisk'"),
+        ("MD050", "style = 'asterisk'"),
+        ("MD054", "inline = false"),
+        ("MD060", "enabled = true\nstyle = 'aligned'"),
+        ("MD061", "terms = ['TODO']"),
+        ("MD063", "enabled = true"),
+        ("MD072", "enabled = true"),
+        ("MD073", "enabled = true"),
+        ("MD081", "max-per-paragraph = 1"),
+        ("MD096", "column = 'Name'"),
+    ] {
+        config.rules.insert(
+            name.into(),
+            RuleConfig {
+                severity: None,
+                values: toml::from_str(options).unwrap(),
+            },
+        );
+    }
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("docs")).unwrap();
+    std::fs::write(
+        dir.path().join("mkdocs.yml"),
+        "site_name: Fixture\nnav:\n  - Missing: missing.md\n",
+    )
+    .unwrap();
+    let path = dir.path().join("docs/probe.md");
+    let rules = all_rules(&config);
+    let mut failures = Vec::new();
+    for rule in &rules {
+        let name = rule.name();
+        let Some(content) = get_test_content_for_rule(name) else {
+            failures.push(format!("{name}: missing fixture"));
+            continue;
         };
-
-        let ctx = LintContext::new(test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-
-        // Check if rule is marked as Unfixable - these intentionally return unchanged content
-        // from CLI fix() but may have warning-level fixes for optional LSP quick-fix usage
-        if rule.fix_capability() == FixCapability::Unfixable {
-            unfixable_rules += 1;
-            detailed_results.push(format!("○ {rule_name}: Unfixable (by design)"));
+        std::fs::write(&path, content).unwrap();
+        let flavor = match name {
+            "MD074" => MarkdownFlavor::MkDocs,
+            "MD078" | "MD079" => MarkdownFlavor::Quarto,
+            _ => MarkdownFlavor::Standard,
+        };
+        let mut ctx = LintContext::new(content, flavor, Some(path.clone()));
+        // A literal replacement character is valid UTF-8, so MD094 needs real
+        // decoder evidence, not a string that merely looks like a decode error.
+        let invalid = match rumdl_lib::encoding::decode(b"Caf\xe9") {
+            rumdl_lib::encoding::Decoded::Lossy { text, invalid } => {
+                if name == "MD094" {
+                    assert_eq!(text, content);
+                }
+                invalid
+            }
+            _ => unreachable!(),
+        };
+        if name == "MD094" {
+            ctx = ctx.with_invalid_utf8(&invalid);
+        }
+        let warnings = if name == "MD087" {
+            let participating: Vec<Box<dyn Rule>> =
+                vec![Box::new(MD013LineLength::default()), dyn_clone::clone_box(&**rule)];
+            rumdl_lib::lint(content, &participating, false, flavor, None, Some(&config)).unwrap()
+        } else {
+            rule.check(&ctx).unwrap_or_else(|error| panic!("{name}: {error}"))
+        };
+        if !warnings.iter().any(|warning| {
+            warning
+                .rule_name
+                .as_deref()
+                .is_some_and(|reported| reported.split('-').next() == Some(name))
+        }) {
+            failures.push(format!("{name}: fixture produced no diagnostic for its rule"));
             continue;
         }
-
-        let cli_result = rule.fix(&ctx);
-        let warnings_result = rule.check(&ctx);
-
-        match (cli_result, warnings_result) {
-            (Ok(cli_fixed), Ok(warnings)) => {
-                let lsp_result = fix_utils::apply_warning_fixes(test_content, &warnings);
-
-                match lsp_result {
-                    Ok(lsp_fixed) => {
-                        if cli_fixed == lsp_fixed {
-                            consistent_fixes += 1;
-                            detailed_results.push(format!("✅ {rule_name}: CLI and LSP fixes consistent"));
-                        } else {
-                            // This is a real inconsistency that needs investigation
-                            detailed_results.push(format!(
-                                "❌ {rule_name}: INCONSISTENT!\n   Original: {test_content:?}\n   CLI: {cli_fixed:?}\n   LSP: {lsp_fixed:?}"
-                            ));
-                        }
-                    }
-                    Err(lsp_error) => {
-                        // Check if this is expected (no warning fixes) or an error
-                        let has_warning_fixes = warnings.iter().any(|w| w.fix.is_some());
-                        if has_warning_fixes {
-                            lsp_errors += 1;
-                            detailed_results.push(format!(
-                                "⚠ {rule_name}: LSP fix failed but warnings have fixes: {lsp_error}"
-                            ));
-                        } else {
-                            cli_only_fixes += 1;
-                            detailed_results.push(format!("○ {rule_name}: CLI-only fixes (no warning-level fixes)"));
-                        }
-                    }
-                }
+        if rule.fix_capability() == FixCapability::Unfixable {
+            match rule.fix(&ctx) {
+                Ok(unchanged) => assert_eq!(unchanged, content, "{name}: unfixable rule rewrote content"),
+                Err(rumdl_lib::rule::LintError::FixFailed(_)) => {}
+                Err(error) => panic!("{name}: unexpected fix error: {error}"),
             }
-            (Ok(_), Err(check_error)) => {
-                detailed_results.push(format!(
-                    "⚠ {rule_name}: CLI fix succeeded but check failed: {check_error:?}"
-                ));
-            }
-            (Err(_), Ok(warnings)) => {
-                let has_warning_fixes = warnings.iter().any(|w| w.fix.is_some());
-                if has_warning_fixes {
-                    detailed_results.push(format!("○ {rule_name}: No CLI fix but has warning fixes"));
-                } else {
-                    no_fixes += 1;
-                    detailed_results.push(format!("○ {rule_name}: No fixes implemented"));
-                }
-            }
-            (Err(_), Err(_)) => {
-                no_fixes += 1;
-                detailed_results.push(format!("○ {rule_name}: No fixes implemented"));
-            }
+            continue;
+        }
+        let cli = rule.fix(&ctx).unwrap_or_else(|error| panic!("{name}: {error}"));
+        if !warnings.iter().any(|warning| warning.fix.is_some()) || cli == content {
+            failures.push(format!("{name}: fixable fixture did not exercise a fix"));
+            continue;
+        }
+        let lsp = fix_utils::apply_warning_fixes(content, &warnings)
+            .unwrap_or_else(|error| panic!("{name}: invalid warning fix: {error}"));
+        if cli != lsp {
+            failures.push(format!("{name}: CLI/LSP mismatch: {cli:?} vs {lsp:?}"));
         }
     }
-
-    // Print detailed results
-    println!("📋 Detailed Results:");
-    for result in &detailed_results {
-        println!("{result}");
-    }
-
-    // Print comprehensive summary
-    println!("\n📊 === COMPREHENSIVE CLI vs LSP FIX CONSISTENCY REPORT ===");
-    println!("Total rules in rumdl: {total_tested}");
-    println!("Rules tested: {total_tested}");
-    println!("Test content missing: {test_content_missing}");
-    println!("─────────────────────────────────────────────────────");
-    println!("✅ Consistent CLI/LSP fixes: {consistent_fixes}");
-    println!("○ Unfixable (by design): {unfixable_rules}");
-    println!("○ CLI-only fixes: {cli_only_fixes}");
-    println!("○ No fixes available: {no_fixes}");
-    println!("⚠ LSP errors: {lsp_errors}");
-    println!("─────────────────────────────────────────────────────");
-
-    let coverage_tested = total_tested - test_content_missing;
-    let coverage_percentage = if total_tested > 0 {
-        (coverage_tested as f64 / total_tested as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    println!("📈 Test coverage: {coverage_tested}/{total_tested} rules ({coverage_percentage:.1}%)");
-
-    if consistent_fixes > 0 {
-        let consistency_rate = (consistent_fixes as f64 / coverage_tested as f64) * 100.0;
-        println!("🎯 Fix consistency rate: {consistent_fixes}/{coverage_tested} ({consistency_rate:.1}%)");
-    }
-
-    // Quality assertions - use total_tested dynamically instead of hardcoded 53
-    assert!(
-        total_tested >= 53,
-        "Should test at least 53 rules (have {total_tested})"
-    );
-    assert!(test_content_missing < 15, "Should have test content for most rules");
-    assert!(consistent_fixes > 0, "Should have at least some consistent fixes");
-
-    // Success criteria: Most rules should either have consistent fixes or valid reasons for differences
-    let accounted_rules = consistent_fixes + cli_only_fixes + no_fixes + unfixable_rules;
-    let inconsistent_rules = coverage_tested - accounted_rules - lsp_errors;
-
-    println!("❌ Inconsistent fixes: {inconsistent_rules}");
-
-    // For now, allow inconsistencies but track them
-    assert_eq!(
-        coverage_tested,
-        consistent_fixes + cli_only_fixes + no_fixes + unfixable_rules + lsp_errors + inconsistent_rules,
-        "All tested rules should be properly categorized"
-    );
-
-    println!("\n🎉 Systematic CLI vs LSP consistency test completed!");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

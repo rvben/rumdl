@@ -206,11 +206,8 @@ impl MD063HeadingCapitalization {
         ctx.headings().filter(move |parsed| {
             let heading = parsed.heading;
             let line_index = parsed.line_num - 1;
-            // ParsedHeading records a Setext heading on its last text line.
-            let first_index = line_index + 1 - heading.text_lines;
             heading.level >= self.config.min_level
                 && heading.level <= self.config.max_level
-                && !(first_index..=line_index).any(|idx| ctx.is_rule_disabled(self.name(), idx + 1))
                 && !(!parsed.is_blockquote()
                     && matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
                     && crate::utils::blockquote::is_indented_past_edge(
@@ -218,6 +215,19 @@ impl MD063HeadingCapitalization {
                         line_index,
                         parsed.line_info.content(ctx.content),
                     ))
+        })
+    }
+
+    /// Disabled headings neither choose the document style nor get rewritten.
+    /// Raw checks still visit them so the lint driver can account for suppressions.
+    fn enabled_headings<'a>(
+        &'a self,
+        ctx: &'a crate::lint_context::LintContext<'_>,
+    ) -> impl Iterator<Item = crate::lint_context::ParsedHeading<'a>> + 'a {
+        self.eligible_headings(ctx).filter(|parsed| {
+            // ParsedHeading records a Setext heading on its last text line.
+            let first_line = parsed.line_num + 1 - parsed.heading.text_lines;
+            !(first_line..=parsed.line_num).any(|line| ctx.is_rule_disabled(self.name(), line))
         })
     }
 
@@ -230,7 +240,7 @@ impl MD063HeadingCapitalization {
         }
 
         let mut candidates = 0b111_u8;
-        for parsed in self.eligible_headings(ctx) {
+        for parsed in self.enabled_headings(ctx) {
             let mut valid = 0_u8;
             for (index, style) in ResolvedStyle::ALL.into_iter().enumerate() {
                 if self.apply_heading_capitalization(ctx, parsed.line_num - 1, parsed.heading, style)
@@ -1715,7 +1725,7 @@ impl Rule for MD063HeadingCapitalization {
         let mut fixed_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
         let style = self.resolve_style(ctx);
-        for parsed in self.eligible_headings(ctx) {
+        for parsed in self.enabled_headings(ctx) {
             let line_num = parsed.line_num - 1;
             let line_info = parsed.line_info;
             let heading = parsed.heading;
@@ -2470,6 +2480,89 @@ mod tests {
         let content = "hello\nworld\n===\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(rule.fix(&ctx).unwrap(), "Hello\nWorld\n===\n");
+    }
+
+    #[test]
+    fn md087_tracks_heading_suppressions_across_styles_and_scopes() {
+        use crate::config::MarkdownFlavor;
+        use crate::rules::MD087UnusedDisableComment;
+
+        for style in [
+            HeadingCapStyle::TitleCase,
+            HeadingCapStyle::SentenceCase,
+            HeadingCapStyle::AllCaps,
+            HeadingCapStyle::Consistent,
+        ] {
+            let rule = create_rule_with_style(style);
+            let rules: Vec<Box<dyn Rule>> = vec![Box::new(rule.clone()), Box::new(MD087UnusedDisableComment)];
+            let lint =
+                |content: &str| crate::lint(content, &rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+            for name in ["MD063", "heading-capitalization"] {
+                for (directive, source) in [
+                    ("disable-line", format!("# asdf <!-- rumdl-disable-line {name} -->\n")),
+                    (
+                        "disable-next-line",
+                        format!("<!-- rumdl-disable-next-line {name} -->\n# asdf\n"),
+                    ),
+                    ("disable", format!("<!-- rumdl-disable {name} -->\n# asdf\n")),
+                    (
+                        "disable-file",
+                        format!("# asdf\n\n<!-- rumdl-disable-file {name} -->\n"),
+                    ),
+                    // Suppression on either text line must cover the whole Setext heading.
+                    (
+                        "disable-next-line",
+                        format!("<!-- rumdl-disable-next-line {name} -->\nasdf\nasdf\n===\n"),
+                    ),
+                    (
+                        "disable-line",
+                        format!("asdf\nasdf <!-- rumdl-disable-line {name} -->\n===\n"),
+                    ),
+                ] {
+                    let warnings = lint(&source);
+                    assert!(warnings.is_empty(), "{style:?}: {source:?}: {warnings:?}");
+                    let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+                    assert_eq!(rule.fix(&ctx).unwrap(), source, "suppressed heading must not change");
+
+                    // Same comment, now genuinely unnecessary: MD087 must still report it.
+                    let valid = if style == HeadingCapStyle::AllCaps {
+                        "ASDF"
+                    } else {
+                        "Asdf"
+                    };
+                    let unused = if style == HeadingCapStyle::SentenceCase {
+                        source.replacen("asdf", valid, 1)
+                    } else {
+                        source.replace("asdf", valid)
+                    };
+                    let warnings = lint(&unused);
+                    assert_eq!(warnings.len(), 1, "{style:?}: {unused:?}: {warnings:?}");
+                    assert_eq!(warnings[0].rule_name.as_deref(), Some("MD087"));
+                    assert_eq!(warnings[0].message, format!("Unused {directive} comment: {name}"));
+                }
+            }
+            let warnings = lint("# asdf\n");
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].rule_name.as_deref(), Some("MD063"));
+        }
+    }
+
+    #[test]
+    fn md087_accounting_does_not_let_disabled_headings_choose_consistent_style() {
+        use crate::config::MarkdownFlavor;
+        use crate::rules::MD087UnusedDisableComment;
+
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let source =
+            "# Title Case Heading <!-- rumdl-disable-line MD063 -->\n\n## Sentence case heading\n\n### More Details\n";
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(rule.clone()), Box::new(MD087UnusedDisableComment)];
+        let warnings = crate::lint(source, &rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].rule_name.as_deref(), Some("MD063"));
+        assert_eq!(warnings[0].line, 5);
+        assert!(warnings[0].message.contains("'More Details' -> 'More details'"));
+        let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), source.replace("More Details", "More details"));
     }
 
     // Custom ID tests

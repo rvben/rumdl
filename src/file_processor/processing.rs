@@ -14,8 +14,8 @@ use rumdl_lib::code_block_tools::processor::ProcessorError;
 
 use super::discovery::{AuxiliaryExecutionPlan, RuleSets, discovered_display_path, resolve_discovered_display_path};
 use super::embedded::{
-    check_embedded_markdown_blocks, format_embedded_markdown_blocks, has_fenced_code_blocks, markdown_code_blocks,
-    should_format_embedded_markdown, should_lint_embedded_markdown,
+    format_embedded_markdown_blocks, has_fenced_code_blocks, markdown_code_blocks, should_format_embedded_markdown,
+    should_lint_embedded_markdown,
 };
 use super::fix_reporting::reconcile_fixed_warnings;
 use rumdl_lib::utils::bom::strip_bom;
@@ -899,16 +899,14 @@ fn relint_fixed_file_content(
         return rumdl_lib::doc_comment_lint::check_doc_comment_blocks(content, &rule_sets.document, config);
     }
 
-    let flavor = config.get_flavor_for_file(Path::new(file_path));
-    let mut warnings = rumdl_lib::lint(
-        content,
-        &rule_sets.document,
-        false,
-        flavor,
-        Some(PathBuf::from(file_path)),
-        Some(config),
-    )
-    .unwrap_or_default();
+    let run =
+        rumdl_lib::document_run::DocumentRun::new(content, &rule_sets.document, config).file_path(Path::new(file_path));
+    let run = if rule_sets.auxiliary.relint && should_lint_embedded_markdown(&config.code_block_tools) {
+        run.embedded_markdown(&rule_sets.embedded_markdown)
+    } else {
+        run
+    };
+    let mut warnings = run.analyze_raw().0.unwrap_or_default();
     let relint_plan = AuxiliaryExecutionPlan {
         lint: rule_sets.auxiliary.relint,
         format: false,
@@ -936,7 +934,7 @@ fn remaining_after_fixes(
     prepared: Option<Vec<LintWarning>>,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     if content_changed {
-        if let Some(mut warnings) = prepared {
+        if let Some(mut warnings) = prepared.filter(|_| rule_sets.auxiliary.lint == rule_sets.auxiliary.relint) {
             let relint_plan = AuxiliaryExecutionPlan {
                 lint: rule_sets.auxiliary.relint,
                 format: false,
@@ -1108,13 +1106,9 @@ fn with_tool_failures(
     warnings
 }
 
-/// The warnings a file has from the sources beside its own document lint.
-///
-/// Markdown embedded in a fenced code block, and a code block handed to an
-/// external tool, each produce findings `rumdl_lib::lint` knows nothing about.
-/// The check pass adds both, so the re-lint a fix run reconciles against has to
-/// add them on the same terms: a source present on one side and missing on the
-/// other is a warning that leaves the report without anyone having fixed it.
+/// External code-block-tool findings beside the built-in document analysis.
+/// Built-in embedded Markdown is already part of the document run so its
+/// suppressions reach the parent's observers before they report.
 fn auxiliary_warnings(
     content: &str,
     file_path: &str,
@@ -1131,15 +1125,6 @@ fn auxiliary_warnings(
     let mut warnings = Vec::new();
     let mut tool_warnings = Vec::new();
     let mut tool_failed = false;
-
-    // An embedded block is part of this file, so its findings are this file's and
-    // the caller's per-file-ignores decides which of them are reported.
-    if !embedded_markdown_rules.is_empty() && should_lint_embedded_markdown(&config.code_block_tools) {
-        warnings.extend(rumdl_lib::time_function!(
-            "file: embedded markdown blocks",
-            check_embedded_markdown_blocks(content, embedded_markdown_rules, config)
-        ));
-    }
 
     if config.code_block_tools.enabled {
         rumdl_lib::time_section!("file: code block tools", {
@@ -1759,6 +1744,11 @@ pub fn process_file_with_index(
         .file_path(Path::new(file_path))
         .verbose(verbose)
         .invalid_utf8(invalid_utf8.as_deref());
+    let run = if rule_sets.auxiliary.lint && should_lint_embedded_markdown(&config.code_block_tools) {
+        run.embedded_markdown(&rule_sets.embedded_markdown)
+    } else {
+        run
+    };
     let rumdl_lib::document_run::DocumentFormatResult {
         warnings: warnings_result,
         file_index,
@@ -1781,9 +1771,8 @@ pub fn process_file_with_index(
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();
 
-    // Warnings from the sources beside the document lint: markdown embedded in a
-    // fenced block, and code blocks handed to external tools. Both go through the
-    // funnel the re-lint uses, so a fix run reconciles like against like.
+    // Add external-tool findings through the same path used after fixes.
+    // Built-in embedded Markdown is already in warnings_result.
     let tool_failed = {
         // An embedded block is part of this file, so its findings are this file's
         // and per-file-ignores decides which of them are reported.

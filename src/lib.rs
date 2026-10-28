@@ -522,7 +522,7 @@ pub fn lint_and_index(
 }
 
 /// The two path roles involved in document processing.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct DocumentPaths<'a> {
     /// Logical path used for per-file configuration matching.
     pub config_path: Option<&'a std::path::Path>,
@@ -532,6 +532,24 @@ pub struct DocumentPaths<'a> {
     pub link_target_policy: Option<&'a crate::lint_context::LinkTargetPolicy>,
     /// The invalid UTF-8 sequences a lossily decoded document was read with.
     pub invalid_utf8: Option<&'a [crate::encoding::InvalidSeq]>,
+    /// Rules selected for built-in Markdown fences in this run. Kept separate
+    /// because code-block-only mode has no outer document rules.
+    pub embedded_rules: Option<&'a [Box<dyn crate::rule::Rule>]>,
+    /// Current nesting depth; adapters start at zero.
+    pub embedded_depth: usize,
+}
+
+impl std::fmt::Debug for DocumentPaths<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DocumentPaths")
+            .field("config_path", &self.config_path)
+            .field("source_file", &self.source_file)
+            .field("link_target_policy", &self.link_target_policy)
+            .field("invalid_utf8", &self.invalid_utf8)
+            .field("embedded_rules", &self.embedded_rules.map(<[_]>::len))
+            .field("embedded_depth", &self.embedded_depth)
+            .finish()
+    }
 }
 
 impl<'a> DocumentPaths<'a> {
@@ -540,8 +558,7 @@ impl<'a> DocumentPaths<'a> {
         Self {
             config_path: path,
             source_file: path,
-            link_target_policy: None,
-            invalid_utf8: None,
+            ..Default::default()
         }
     }
 }
@@ -802,15 +819,15 @@ fn check_document_context(
             #[cfg(not(target_arch = "wasm32"))]
             let rule_start = (profile_rules || verbose).then(Instant::now);
 
-            // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
-            if rule.should_skip(lint_ctx) {
-                continue;
-            }
-
-            // Use recreated rule if inline config overrides exist for this rule
+            // Use the same effective configuration for skip decisions and checks.
+            // Otherwise an inline stricter limit can be skipped using the base
+            // rule's looser limit, losing both findings and suppression evidence.
             let effective_rule: &dyn crate::rule::Rule = recreated_rules
                 .get(rule.name())
                 .map_or(rule.as_ref(), std::convert::AsRef::as_ref);
+            if effective_rule.should_skip(lint_ctx) {
+                continue;
+            }
 
             // Run single-file check with the effective rule (possibly with inline config applied)
             let result = cached_checks
@@ -855,6 +872,33 @@ fn check_document_context(
                 }
             }
         }
+    }
+
+    // Embedded findings must reach the parent's suppression filter before its
+    // observers run. They carry no document fix ranges; formatting is handled
+    // by the verified embedded write-back path.
+    if let (Some(embedded_rules), Some(config)) = (paths.embedded_rules, config)
+        && !embedded_rules.is_empty()
+    {
+        let embedded_rules: Vec<_> = embedded_rules
+            .iter()
+            .filter(|rule| !ignored_for_file.contains(rule.name()))
+            .map(|rule| dyn_clone::clone_box(&**rule))
+            .collect();
+        let embedded = crate::embedded_lint::check_embedded_markdown_blocks_raw(
+            content,
+            &embedded_rules,
+            config,
+            paths.embedded_depth,
+        );
+        let record = (!suppression_observers.is_empty()).then_some(&mut suppressed);
+        warnings.extend(retain_reportable_warnings(
+            lint_ctx,
+            Some(config),
+            "embedded-markdown",
+            embedded,
+            record,
+        ));
     }
 
     // Report on the inline disable comments, now that every single-file rule has run

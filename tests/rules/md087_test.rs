@@ -363,3 +363,85 @@ fn check_on_its_own_reports_nothing() {
     );
     assert!(rule.check(&ctx).unwrap().is_empty());
 }
+
+#[test]
+fn stateful_rules_keep_raw_findings_for_suppression_accounting() {
+    use rumdl_lib::config::{Config, RuleConfig};
+    use rumdl_lib::lint_context::LintContext;
+    let mut config = Config::default();
+    config.rules.insert(
+        "MD022".into(),
+        RuleConfig {
+            severity: None,
+            values: [("lines-above-mode".into(), toml::Value::String("exact".into()))].into(),
+        },
+    );
+    for (name, bad, good) in [
+        ("MD001", "# H1\n\n#### H4\n\n##### H5\n", "# H1\n\n## H2\n"),
+        ("MD040", "```\ncode\n```\n", "```text\ncode\n```\n"),
+        ("MD022", "Text\n\n\n# Heading\n", "Text\n\n# Heading\n"),
+    ] {
+        let rule = rumdl_lib::rules::create_rule_by_name(name, &config).unwrap();
+        let rules = vec![dyn_clone::clone_box(&*rule), Box::new(MD087UnusedDisableComment)];
+        assert!(
+            lint(bad, &rules).iter().any(|w| w.rule_name.as_deref() == Some(name)),
+            "{name} control"
+        );
+        for directive in ["disable", "disable-file"] {
+            let used = format!("<!-- rumdl-{directive} {name} -->\n\n{bad}");
+            assert!(lint(&used, &rules).is_empty(), "{name}: {used:?}");
+            let ctx = LintContext::new(&used, MarkdownFlavor::Standard, None);
+            assert!(!rule.check(&ctx).unwrap().is_empty(), "raw finding lost for {name}");
+            assert_eq!(rule.fix(&ctx).unwrap(), used, "disabled content changed for {name}");
+            let unused = format!("<!-- rumdl-{directive} {name} -->\n\n{good}");
+            let warnings = lint(&unused, &rules);
+            assert_eq!(warnings.len(), 1, "{name}: {warnings:?}");
+            assert_eq!(warnings[0].rule_name.as_deref(), Some("MD087"));
+        }
+    }
+}
+
+#[test]
+fn disabled_heading_keeps_its_level_for_successor_checks() {
+    use rumdl_lib::rules::MD001HeadingIncrement;
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(MD001HeadingIncrement::default()),
+        Box::new(MD087UnusedDisableComment),
+    ];
+    let content = "# H1\n\n#### H4 <!-- rumdl-disable-line MD001 -->\n\n##### H5\n";
+    assert!(lint(content, &rules).is_empty());
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(rules[0].fix(&ctx).unwrap(), content);
+}
+
+#[test]
+fn inline_stricter_limit_is_checked_before_suppression_accounting() {
+    let config = rumdl_lib::config::Config::default();
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(rumdl_lib::rules::MD013LineLength::default()),
+        Box::new(MD087UnusedDisableComment),
+    ];
+    for key in ["line_length", "line-length"] {
+        let directive = format!("<!-- rumdl-configure-file {{\"MD013\":{{\"{key}\":20}}}} -->\n");
+        for (body, expected) in [
+            ("This line exceeds twenty characters.\n", Some("MD013")),
+            (
+                "<!-- rumdl-disable-next-line MD013 -->\nThis line exceeds twenty characters.\n",
+                None,
+            ),
+            ("<!-- rumdl-disable-next-line MD013 -->\nShort\n", Some("MD087")),
+        ] {
+            let source = format!("{directive}{body}");
+            let warnings =
+                rumdl_lib::lint(&source, &rules, false, MarkdownFlavor::Standard, None, Some(&config)).unwrap();
+            assert_eq!(
+                warnings.len(),
+                usize::from(expected.is_some()),
+                "{source:?}: {warnings:?}"
+            );
+            if let Some(name) = expected {
+                assert_eq!(warnings[0].rule_name.as_deref(), Some(name));
+            }
+        }
+    }
+}

@@ -12,7 +12,6 @@
 //! literal is part of that text, not a doc comment.
 
 use crate::config as rumdl_config;
-use crate::lint_context::LintContext;
 use crate::rule::{LintWarning, Rule};
 use crate::rules::md013_line_length::MD013LineLength;
 use std::path::Path;
@@ -370,6 +369,25 @@ pub fn check_doc_comment_blocks(
 ) -> Vec<LintWarning> {
     let blocks = extract_doc_comment_blocks(content);
     let mut all_warnings = Vec::new();
+    // Inline options recreate rules from configuration. Preserve the doc-comment
+    // default there too, so changing only line length does not re-enable checking
+    // Rust examples managed by rustfmt. An explicit inline override still wins.
+    let mut doc_config = config.clone();
+    let md013 = doc_config.rules.entry("MD013".into()).or_default();
+    md013.values.remove("code_blocks");
+    md013.values.insert("code-blocks".into(), toml::Value::Boolean(false));
+
+    let block_rules: Vec<Box<dyn Rule>> = rules
+        .iter()
+        .filter(|rule| !SKIPPED_RULES.contains(&rule.name()))
+        .map(|rule| {
+            if let Some(md013) = rule.as_any().downcast_ref::<MD013LineLength>() {
+                Box::new(md013.with_code_blocks_disabled()) as Box<dyn Rule>
+            } else {
+                dyn_clone::clone_box(&**rule)
+            }
+        })
+        .collect();
 
     for block in &blocks {
         // Skip empty blocks to avoid spurious warnings
@@ -377,59 +395,39 @@ pub fn check_doc_comment_blocks(
             continue;
         }
 
-        let ctx = LintContext::new(&block.markdown, config.markdown_flavor(), None);
+        if let Ok(warnings) = crate::lint(
+            &block.markdown,
+            &block_rules,
+            false,
+            config.markdown_flavor(),
+            None,
+            Some(&doc_config),
+        ) {
+            for warning in warnings {
+                // Remap line numbers:
+                // warning.line is 1-indexed within the block markdown
+                // block.start_line is 0-indexed in the file
+                // (1-indexed block) + (0-indexed file start) = 1-indexed file line
+                let file_line = warning.line + block.start_line;
+                let file_end_line = warning.end_line + block.start_line;
 
-        for rule in rules {
-            if SKIPPED_RULES.contains(&rule.name()) {
-                continue;
-            }
+                // Remap column: add the prefix byte length for the corresponding line
+                let block_line_idx = warning.line.saturating_sub(1);
+                let col_offset = block.prefix_byte_lengths.get(block_line_idx).copied().unwrap_or(0);
+                let file_column = warning.column + col_offset;
 
-            // For MD013 in doc comments, disable code block checking.
-            // Code blocks contain Rust code formatted by rustfmt (max_width = 100),
-            // not prose governed by markdown line length limits.
-            let doc_rule: Box<dyn Rule>;
-            let effective_rule: &dyn Rule = if rule.name() == "MD013" {
-                if let Some(md013) = rule.as_any().downcast_ref::<MD013LineLength>() {
-                    doc_rule = Box::new(md013.with_code_blocks_disabled());
-                    doc_rule.as_ref()
-                } else {
-                    rule.as_ref()
-                }
-            } else {
-                rule.as_ref()
-            };
+                let block_end_line_idx = warning.end_line.saturating_sub(1);
+                let end_col_offset = block.prefix_byte_lengths.get(block_end_line_idx).copied().unwrap_or(0);
+                let file_end_column = warning.end_column + end_col_offset;
 
-            if let Ok(rule_warnings) = effective_rule.check(&ctx) {
-                // Inline config comments are parsed per block, so filter before
-                // remapping while warning lines are still block-relative.
-                let rule_warnings =
-                    crate::retain_reportable_warnings(&ctx, Some(config), rule.name(), rule_warnings, None);
-                for warning in rule_warnings {
-                    // Remap line numbers:
-                    // warning.line is 1-indexed within the block markdown
-                    // block.start_line is 0-indexed in the file
-                    // (1-indexed block) + (0-indexed file start) = 1-indexed file line
-                    let file_line = warning.line + block.start_line;
-                    let file_end_line = warning.end_line + block.start_line;
-
-                    // Remap column: add the prefix byte length for the corresponding line
-                    let block_line_idx = warning.line.saturating_sub(1);
-                    let col_offset = block.prefix_byte_lengths.get(block_line_idx).copied().unwrap_or(0);
-                    let file_column = warning.column + col_offset;
-
-                    let block_end_line_idx = warning.end_line.saturating_sub(1);
-                    let end_col_offset = block.prefix_byte_lengths.get(block_end_line_idx).copied().unwrap_or(0);
-                    let file_end_column = warning.end_column + end_col_offset;
-
-                    all_warnings.push(LintWarning {
-                        line: file_line,
-                        end_line: file_end_line,
-                        column: file_column,
-                        end_column: file_end_column,
-                        fix: None,
-                        ..warning
-                    });
-                }
+                all_warnings.push(LintWarning {
+                    line: file_line,
+                    end_line: file_end_line,
+                    column: file_column,
+                    end_column: file_end_column,
+                    fix: None,
+                    ..warning
+                });
             }
         }
     }
@@ -440,6 +438,38 @@ pub fn check_doc_comment_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_line_length_keeps_rust_examples_excluded() {
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD013LineLength::default())];
+        let config = rumdl_config::Config::default();
+        for key in ["line_length", "line-length"] {
+            let source = format!(
+                "/// <!-- rumdl-configure-file {{\"MD013\":{{\"{key}\":20}}}} -->\n/// ```rust\n/// let example = \"this Rust line exceeds the prose limit\";\n/// ```\n/// This prose line also exceeds the configured limit.\n"
+            );
+            let warnings = check_doc_comment_blocks(&source, &rules, &config);
+            assert_eq!(warnings.len(), 1, "{key}: {warnings:?}");
+            assert_eq!(warnings[0].line, 5);
+        }
+    }
+
+    #[test]
+    fn doc_comments_account_for_used_and_unused_directives_per_block() {
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD013LineLength::default()),
+            Box::new(crate::rules::MD087UnusedDisableComment),
+        ];
+        let config = rumdl_config::Config::default();
+        let source = format!(
+            "/// {}<!-- rumdl-disable-line MD013 -->\nfn first() {{}}\n\n/// Short <!-- rumdl-disable-line MD013 -->\nfn second() {{}}\n",
+            "word ".repeat(30)
+        );
+        let warnings = check_doc_comment_blocks(&source, &rules, &config);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].rule_name.as_deref(), Some("MD087"));
+        assert_eq!((warnings[0].line, warnings[0].column), (4, 11));
+        assert!(warnings[0].fix.is_none());
+    }
 
     #[test]
     fn test_classify_outer_doc_comment() {

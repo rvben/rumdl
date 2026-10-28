@@ -76,7 +76,7 @@ impl MD040FencedCodeLanguage {
     /// Whether an inline comment turns this rule off for the block's fence line.
     ///
     /// A fence the rule is disabled for takes no part in the document's choice of
-    /// label, so this is asked while counting labels as well as while reporting.
+    /// label, so this is asked while counting labels. Raw findings are still reported.
     fn is_disabled_at(&self, ctx: &crate::lint_context::LintContext, block: &FencedCodeBlock) -> bool {
         ctx.is_rule_disabled(self.name(), block.line_idx + 1)
     }
@@ -251,10 +251,6 @@ impl Rule for MD040FencedCodeLanguage {
         let lines = ctx.raw_lines();
 
         for block in &fenced_blocks {
-            if self.is_disabled_at(ctx, block) {
-                continue;
-            }
-
             // Get the actual line content for additional checks. Strip any
             // blockquote prefix so the info string after the fence is recognized
             // inside blockquotes the same way it is at the top level.
@@ -521,8 +517,14 @@ mod tests {
 
     fn run_check_with_config(content: &str, config: MD040Config) -> LintResult {
         let rule = MD040FencedCodeLanguage::with_config(config);
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        rule.check(&ctx)
+        crate::lint(
+            content,
+            &[Box::new(rule)],
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        )
     }
 
     fn run_fix(content: &str) -> Result<String, LintError> {

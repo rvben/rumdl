@@ -409,8 +409,7 @@ struct Violation {
 
 /// Actual blank source lines to remove above a heading; comments are never edits.
 struct ExcessBlanks {
-    heading_line: usize,
-    first_line: usize,
+    last_line: usize,
     required: usize,
     lines: Vec<usize>,
 }
@@ -495,7 +494,6 @@ impl MD022BlanksAroundHeadings {
                 || (Some(first) == at_start && self.config.allowed_at_start)
                 || parsed.line_info.in_pymdown_block
                 || heading_is_in_template_code(ctx, heading_line, heading)
-                || (first..=last).any(|idx| ctx.is_rule_disabled("MD022", idx + 1))
                 || starts_item_under_bare_marker(ctx, first)
                 || opens_item_on_marker_line(ctx, first, heading)
                 || (ctx.flavor == crate::config::MarkdownFlavor::MDG && follows_mdg_tag_line(ctx, first, heading))
@@ -553,10 +551,9 @@ impl MD022BlanksAroundHeadings {
                 break;
             }
             let lines: Vec<_> = blanks.into_iter().skip(required).collect();
-            if !lines.is_empty() && !lines.iter().any(|&idx| ctx.is_rule_disabled("MD022", idx + 1)) {
+            if !lines.is_empty() {
                 excess.push(ExcessBlanks {
-                    heading_line,
-                    first_line: first,
+                    last_line: last,
                     required,
                     lines,
                 });
@@ -577,6 +574,10 @@ impl MD022BlanksAroundHeadings {
         let removed: std::collections::HashSet<usize> = self
             .excess_blank_lines(ctx)
             .into_iter()
+            .filter(|excess| {
+                !(excess.lines.iter().copied().min().unwrap()..=excess.last_line)
+                    .any(|idx| ctx.is_rule_disabled("MD022", idx + 1))
+            })
             .flat_map(|excess| excess.lines)
             .collect();
         let mut skip_count: usize = 0;
@@ -1126,9 +1127,13 @@ impl Rule for MD022BlanksAroundHeadings {
         }
 
         for excess in self.excess_blank_lines(ctx) {
-            let line = ctx.lines[excess.heading_line].content(ctx.content);
-            let (start_line, start_col, end_line, end_col) =
-                calculate_heading_range(excess.first_line + 1, excess.heading_line + 1, line);
+            // The finding covers the gap it rewrites and the complete heading,
+            // including a Setext underline. A disable anywhere in that span
+            // must suppress both the warning and its edits.
+            let start_line = excess.lines.iter().copied().min().unwrap() + 1;
+            let start_col = 1;
+            let end_line = excess.last_line + 1;
+            let end_col = ctx.lines[excess.last_line].content(ctx.content).chars().count() + 1;
             let mut edits = excess.lines.iter().map(|&idx| {
                 Fix::new(
                     ctx.lines[idx].byte_offset..ctx.lines[idx + 1].byte_offset,
@@ -2807,6 +2812,28 @@ mod exact_spacing_tests {
     use crate::{config::MarkdownFlavor, lint_context::LintContext, utils::fix_utils::apply_warning_fixes};
 
     #[test]
+    fn exact_spacing_suppressions_cover_the_gap_and_setext_underline() {
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above_mode: HeadingBlankMode::Exact,
+            ..Default::default()
+        });
+        for content in [
+            "Text\n\n\n# Heading <!-- rumdl-disable-line MD022 -->\n",
+            "Text\n<!-- rumdl-disable-next-line MD022 -->\n\n\n\n# Heading\n",
+            "Text\n\n\nHeading <!-- rumdl-disable-next-line MD022 -->\n===\n",
+        ] {
+            let rules: Vec<Box<dyn Rule>> = vec![
+                Box::new(rule.clone()),
+                Box::new(crate::rules::MD087UnusedDisableComment),
+            ];
+            let warnings = crate::lint(content, &rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+            assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    #[test]
     fn diagnostic_edits_match_full_fix_without_deleting_comments() {
         let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
             lines_above_mode: HeadingBlankMode::Exact,
@@ -2818,7 +2845,7 @@ mod exact_spacing_tests {
         let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].line, 7);
+        assert_eq!(warnings[0].line, 2);
         assert_eq!(warnings[0].fix.as_ref().unwrap().additional_edits.len(), 1);
         assert_eq!(apply_warning_fixes(input, &warnings).unwrap(), expected);
         assert_eq!(rule.fix(&ctx).unwrap(), expected);

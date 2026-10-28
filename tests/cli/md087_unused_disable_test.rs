@@ -96,3 +96,128 @@ fn fmt_leaves_the_comment_in_place() {
     let (dir, _stdout) = run(UNUSED, &["fmt", "--extend-enable", "MD087"]);
     assert_eq!(fs::read_to_string(dir.path().join("test.md")).unwrap(), UNUSED);
 }
+
+#[test]
+fn heading_suppression_is_used_with_all_rules_enabled_issue_973() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("test.md");
+    fs::write(
+        dir.path().join(".rumdl.toml"),
+        "[global]\nenable = [\"ALL\"]\n[code-block-tools]\nenabled = true\n[code-block-tools.languages.markdown]\nlint = [\"rumdl\"]\n",
+    )
+    .unwrap();
+
+    for content in [
+        "# asdf <!-- rumdl-disable-line heading-capitalization -->\n",
+        "# Example\n\n```markdown\n# asdf <!-- rumdl-disable-line heading-capitalization -->\n```\n",
+    ] {
+        for command in [vec!["check"], vec!["check", "--fix"], vec!["fmt"]] {
+            fs::write(&path, content).unwrap();
+            let output = Command::new(rumdl_bin())
+                .current_dir(dir.path())
+                .args(&command)
+                .args(["--no-cache", "test.md"])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{command:?}: {content:?}: {output:?}");
+            assert!(
+                md087_lines(&String::from_utf8_lossy(&output.stdout)).is_empty(),
+                "{output:?}"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), content);
+        }
+    }
+}
+
+#[test]
+fn outer_disable_gets_credit_only_when_embedded_linting_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("doc.md");
+    let source = "<!-- rumdl-disable-file MD063 -->\n\n```markdown\n# asdf\n```\n";
+    fs::write(&path, source).unwrap();
+    fs::write(dir.path().join(".rumdl.toml"),
+        "[global]\nenable = [\"MD063\", \"MD087\"]\n[code-block-tools]\nenabled = true\n[code-block-tools.languages.markdown]\nlint = [\"rumdl\"]\n"
+    ).unwrap();
+    for args in [vec!["check"], vec!["check", "--fix"], vec!["fmt"]] {
+        let output = Command::new(rumdl_bin())
+            .current_dir(dir.path())
+            .args(args)
+            .args(["--no-cache", "doc.md"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            md087_lines(&String::from_utf8_lossy(&output.stdout)).is_empty(),
+            "{output:?}"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+    let output = Command::new(rumdl_bin())
+        .current_dir(dir.path())
+        .args(["check", "--no-cache", "--no-code-block-tools", "doc.md"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(md087_lines(&String::from_utf8_lossy(&output.stdout)).len(), 1);
+}
+
+#[test]
+fn doc_comment_unused_disables_are_reported_without_rewriting_rust() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lib.rs");
+    let content = "/// Short <!-- rumdl-disable-line MD013 -->\nfn example() {}\n";
+    fs::write(&path, content).unwrap();
+    for command in ["check", "fmt"] {
+        let output = Command::new(rumdl_bin())
+            .current_dir(dir.path())
+            .args([command, "--no-cache", "--isolated", "--enable", "MD013,MD087", "lib.rs"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            md087_lines(&String::from_utf8_lossy(&output.stdout)).len(),
+            1,
+            "{output:?}"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), content);
+    }
+}
+
+#[test]
+fn raw_suppression_evidence_never_enables_cli_fixes() {
+    for (rule, options, body) in [
+        ("MD001", "", "# Heading\n\n### Skipped level\n"),
+        ("MD040", "", "```\ncode\n```\n"),
+        ("MD022", "", "# Heading\nParagraph\n"),
+        ("MD022", "[MD022]\nallowed-at-start = false\n", "# Heading\nParagraph\n"),
+        (
+            "MD022",
+            "[MD022]\nlines-above-mode = 'exact'\nlines-above = 1\nlines-below = 1\n",
+            "# Heading\n\n\n\n## Heading\n",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doc.md");
+        fs::write(
+            dir.path().join(".rumdl.toml"),
+            format!("[global]\nenable = [\"{rule}\", \"MD087\"]\n{options}"),
+        )
+        .unwrap();
+        for directive in ["disable", "disable-file"] {
+            let source = format!("<!-- rumdl-{directive} {rule} -->\n{body}");
+            for args in [vec!["check"], vec!["check", "--fix"], vec!["fmt"]] {
+                fs::write(&path, &source).unwrap();
+                let output = Command::new(rumdl_bin())
+                    .current_dir(dir.path())
+                    .args(&args)
+                    .args(["--no-cache", "doc.md"])
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{rule}, {options}, {directive}, {args:?}: {output:?}"
+                );
+                assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            }
+        }
+    }
+}

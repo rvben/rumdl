@@ -26,7 +26,15 @@ pub(super) fn install(root: &Path, mode: &str) -> PathBuf {
         .join(if cfg!(windows) { ".venv/Scripts" } else { ".venv/bin" })
         .join(format!("rumdl-policy-test{}", std::env::consts::EXE_SUFFIX));
     fs::create_dir_all(tool.parent().unwrap()).unwrap();
-    fs::copy(binary, &tool).unwrap();
+    copy_executable(binary, &tool);
     fs::write(tool.with_extension("mode"), mode).unwrap();
     tool
+}
+
+/// Replace the directory entry instead of overwriting an executable that the
+/// OS may still have mapped or cached from an earlier fixture invocation.
+pub(super) fn copy_executable(source: &Path, destination: &Path) {
+    let staged = tempfile::NamedTempFile::new_in(destination.parent().unwrap()).unwrap();
+    fs::copy(source, staged.path()).unwrap();
+    staged.persist(destination).unwrap();
 }

@@ -8,7 +8,6 @@ use crate::code_block_tools::{
     CodeBlockToolsConfig, FencedCodeBlockInfo, RUMDL_BUILTIN_TOOL, extract_fenced_code_blocks, is_rumdl_builtin,
 };
 use crate::config as rumdl_config;
-use crate::inline_config::InlineConfig;
 use crate::lint_context::LintContext;
 use crate::rule::{LintWarning, Rule};
 
@@ -71,11 +70,13 @@ pub fn check_embedded_markdown_blocks(
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
 ) -> Vec<LintWarning> {
-    check_embedded_markdown_blocks_recursive(content, rules, config, 0)
+    let warnings = check_embedded_markdown_blocks_raw(content, rules, config, 0);
+    let ctx = LintContext::new(content, config.markdown_flavor(), None);
+    crate::retain_reportable_warnings(&ctx, Some(config), "embedded-markdown", warnings, None)
 }
 
 /// Internal recursive implementation with depth tracking.
-fn check_embedded_markdown_blocks_recursive(
+pub(crate) fn check_embedded_markdown_blocks_raw(
     content: &str,
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
@@ -94,7 +95,6 @@ fn check_embedded_markdown_blocks_recursive(
         return Vec::new();
     }
 
-    let inline_config = InlineConfig::from_content(content);
     let mut all_warnings = Vec::new();
 
     for block in blocks {
@@ -102,29 +102,29 @@ fn check_embedded_markdown_blocks_recursive(
             continue;
         }
 
-        // Filter rules based on inline config at the block's first line of code
+        // Do not drop rules disabled by the parent: their findings are what
+        // gives the parent's directive credit. This block handles its own
+        // directives and nested blocks before its findings are mapped outward.
         let block_rules: Vec<Box<dyn Rule>> = rules
             .iter()
-            .filter(|rule| !inline_config.is_rule_disabled(rule.name(), block.start_line + 2))
+            .filter(|rule| !matches!(rule.name(), "MD041" | "MD047"))
             .map(|rule| dyn_clone::clone_box(&**rule))
             .collect();
-
-        // Nested blocks report positions in this block's code, like its own rules
-        let mut block_warnings = check_embedded_markdown_blocks_recursive(&block.code, &block_rules, config, depth + 1);
-
-        // Lint the embedded content, skipping file-scoped rules
-        let ctx = LintContext::new(&block.code, config.markdown_flavor(), None);
-        for rule in &block_rules {
-            match rule.name() {
-                "MD041" => continue, // "First line in file should be heading" - not a file
-                "MD047" => continue, // "File should end with newline" - not a file
-                _ => {}
-            }
-
-            if let Ok(rule_warnings) = rule.check(&ctx) {
-                block_warnings.extend(rule_warnings);
-            }
-        }
+        let paths = crate::DocumentPaths {
+            embedded_rules: Some(&block_rules),
+            embedded_depth: depth + 1,
+            ..Default::default()
+        };
+        let block_warnings = crate::lint_and_index_with_paths(
+            &block.code,
+            &block_rules,
+            false,
+            config.markdown_flavor(),
+            paths,
+            Some(config),
+        )
+        .0
+        .unwrap_or_default();
 
         for warning in block_warnings {
             all_warnings.push(place_in_document(warning, &block));
@@ -246,6 +246,76 @@ mod activation_tests {
                     );
                     assert_eq!(should_lint_embedded_markdown(&config), master && enabled);
                     assert_eq!(should_format_embedded_markdown(&config), master && enabled);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod suppression_tests {
+    use super::*;
+    use crate::rules::{MD063HeadingCapitalization, MD087UnusedDisableComment};
+
+    #[test]
+    fn parent_observers_count_embedded_suppressions_at_each_depth() {
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD063HeadingCapitalization::new()),
+            Box::new(MD087UnusedDisableComment),
+        ];
+        let config = rumdl_config::Config::default();
+        for directive in ["disable", "disable-file"] {
+            for (opening, closing) in [("", ""), ("````markdown\n", "````\n")] {
+                let source = format!("{opening}<!-- rumdl-{directive} MD063 -->\n\n```md\n# asdf\n```\n{closing}");
+                let run = crate::document_run::DocumentRun::new(&source, &rules, &config).embedded_markdown(&rules);
+                assert!(run.analyze().unwrap().warnings.is_empty(), "{source:?}");
+                let unused = source.replace("asdf", "Asdf");
+                let warnings = crate::document_run::DocumentRun::new(&unused, &rules, &config)
+                    .embedded_markdown(&rules)
+                    .analyze()
+                    .unwrap()
+                    .warnings;
+                assert_eq!(warnings.len(), 1, "{unused:?}: {warnings:?}");
+                assert_eq!(warnings[0].rule_name.as_deref(), Some("MD087"));
+                assert_eq!(warnings[0].line, if opening.is_empty() { 1 } else { 2 });
+            }
+        }
+    }
+
+    #[test]
+    fn embedded_markdown_accounts_for_its_own_disable_comments() {
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD063HeadingCapitalization::new()),
+            Box::new(MD087UnusedDisableComment),
+        ];
+        let config = rumdl_config::Config::default();
+        for (opening, prefix, closing, line) in [
+            ("```markdown\n", "", "```\n", 2),
+            ("> ```markdown\n", "> ", "> ```\n", 2),
+            ("````markdown\n```md\n", "", "```\n````\n", 3),
+        ] {
+            for (heading, expected) in [
+                ("# asdf <!-- rumdl-disable-line MD063 -->", None),
+                ("# Asdf <!-- rumdl-disable-line MD063 -->", Some("MD087")),
+                ("# asdf", Some("MD063")),
+            ] {
+                let content = format!("{opening}{prefix}{heading}\n{closing}");
+                let warnings = check_embedded_markdown_blocks(&content, &rules, &config);
+                let parent = crate::document_run::DocumentRun::new(&content, &rules, &config)
+                    .embedded_markdown(&rules)
+                    .analyze()
+                    .unwrap();
+                assert_eq!(
+                    parent.warnings, warnings,
+                    "parent duplicated or lost an embedded finding"
+                );
+                if let Some(name) = expected {
+                    assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+                    assert_eq!(warnings[0].rule_name.as_deref(), Some(name));
+                    assert_eq!(warnings[0].line, line);
+                    assert!(warnings[0].fix.is_none(), "embedded byte ranges must not escape");
+                } else {
+                    assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
                 }
             }
         }
