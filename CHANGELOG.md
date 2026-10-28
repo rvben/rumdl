@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/rvben/rumdl/compare/v0.3.1...v0.3.2) - 2026-10-28
+
+### Fixed
+
+- MD087 recognizes inline suppression of heading-capitalization diagnostics,
+  avoiding false unused-disable warnings (#973).
+- MD022 enforces configured spacing below headings before lists and code fences,
+  including when MD031 or MD032 is disabled. Overlapping spacing fixes insert
+  the required blank lines only once (#971).
+- MD067 can safely reorder complete footnote definitions to match their first
+  references. Reordering is atomic, preserves surrounding content and directive
+  scope, and leaves ambiguous Markdown or MDX cases report-only (#969).
+- MD013 recognizes additional common abbreviations and titles, including numeric
+  references with formatted numbers, while preserving sentence boundaries after
+  ambiguous units and labels. Sentence-spacing checks share this behavior (#966).
+
 ## [0.3.1](https://github.com/rvben/rumdl/compare/v0.3.0...v0.3.1) - 2026-10-27
 
 ### Added
