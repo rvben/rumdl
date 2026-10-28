@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MD013 preserves meaningful indentation inside multiline code spans following
   a bare list marker when reflowing text.
 
+- **security**: patch parser dependencies and gate release publication ([41d60e1](https://github.com/rvben/rumdl/commit/41d60e1ff6701c2c80ae515f7994b19793bbae80))
+- **ci**: install only the tools required by parity checks ([ce014aa](https://github.com/rvben/rumdl/commit/ce014aab5cb71ae44327058a50972030c0555a88))
+- **MD013**: preserve code-span indentation after bare list markers ([9cf648f](https://github.com/rvben/rumdl/commit/9cf648ff2d1bbaf0f8f118377810876a77dbbcef))
+
 ## [0.3.1](https://github.com/rvben/rumdl/compare/v0.3.0...v0.3.1) - 2026-10-27
 
 ### Added
