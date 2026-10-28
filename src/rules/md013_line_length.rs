@@ -4603,6 +4603,18 @@ impl MD013LineLength {
                 i += 1;
             }
 
+            // After a bare marker, the first line's indent preserves whether
+            // the paragraph belongs to the item. That indent is not necessarily
+            // structural on later lines: inside a code span, parsers can retain
+            // it as code text. Inspect the source before stripping the prefix,
+            // which would hide that ambiguity from the guard below.
+            if paragraph_start > 0
+                && opens_bare_item(ctx, paragraph_start - 1)
+                && code_span_runs_into_indentation(&paragraph_lines)
+            {
+                continue;
+            }
+
             // Compute the common leading indent of all non-empty paragraph lines,
             // but only when those lines are structurally inside a list block.
             // Indented continuation lines that follow a nested list arrive here

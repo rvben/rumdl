@@ -2755,3 +2755,19 @@ fn fmt_then_check_leaves_a_channel_reference_in_its_paragraph() {
         String::from_utf8_lossy(&check.stderr)
     );
 }
+
+/// The October 26 semantic fuzz failure: indentation on the closing line of
+/// a code span after an empty list item is part of the rendered code text.
+#[test]
+fn code_span_after_empty_list_keeps_closing_line_space() {
+    // Keep the exact settings bytes from the CI artifact as well as all modes.
+    let settings = std::iter::once(ReflowSettings::from_bytes(52, 5))
+        .chain(REFLOW_MODES.map(|mode| ReflowSettings::with_mode(mode, 80)));
+    for settings in settings {
+        for input in ["-\n ` value\n `\n", "-\n ` value\n  `\n", "*\n ` value\n `\n"] {
+            if let Err(violation) = check(input, &settings) {
+                panic!("{settings:?} on {input:?}: {violation:?}");
+            }
+        }
+    }
+}
