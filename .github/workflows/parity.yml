@@ -39,8 +39,10 @@ jobs:
           experimental: true
           install: false
 
-      - name: Install mise tools
-        run: ./scripts/mise-install.sh
+      # Parity builds the CLI and invokes Python/Node. Installing every optional
+      # development tool makes this job depend on unrelated cargo-tool MSRVs.
+      - name: Install parity toolchain
+        run: ./scripts/mise-install.sh rust python
 
       - uses: Swatinem/rust-cache@v2
         with:
