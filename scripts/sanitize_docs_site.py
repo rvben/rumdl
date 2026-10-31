@@ -9,11 +9,31 @@ copied assets, and search-index entries without touching the local source.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urlparse
+
+
+def repository_env() -> dict[str, str]:
+    """The environment for a git command that must act on the repository at its cwd.
+
+    A git hook in a linked worktree exports `GIT_DIR` (and prek adds
+    `GIT_WORK_TREE`) pointing at the repository being pushed, and those win
+    over `cwd`. A `git init` for a temporary directory then rewrites the
+    developer's shared config instead, setting `core.bare` or `core.worktree`
+    and breaking the main checkout. Git names the variables that locate a
+    repository, so all of them are dropped.
+    """
+    names = subprocess.run(
+        ["git", "rev-parse", "--local-env-vars"],
+        capture_output=True,
+        check=True,
+        text=True,
+    ).stdout.split()
+    return {name: value for name, value in os.environ.items() if name not in names}
 
 
 def ignored_files(root: Path, docs: Path) -> list[Path]:
@@ -28,6 +48,7 @@ def ignored_files(root: Path, docs: Path) -> list[Path]:
     result = subprocess.run(
         ["git", "check-ignore", "-z", "--stdin"],
         cwd=root,
+        env=repository_env(),
         input=payload,
         capture_output=True,
         check=False,
