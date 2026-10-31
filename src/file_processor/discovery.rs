@@ -598,27 +598,39 @@ fn names_literal_include(
 fn take_source_code(files: &mut Vec<String>, #[cfg(unix)] walk: Option<&mut WalkSourcePaths>) -> Vec<String> {
     use rayon::prelude::*;
     #[cfg(unix)]
-    let walk = walk.map(|walk| {
+    let mut walk = walk;
+    #[cfg(unix)]
+    if let Some(walk) = walk.as_deref_mut() {
         walk.prime(files);
-        &*walk
-    });
+    }
     // Classification costs a metadata syscall per file, so it runs in parallel;
     // the indexed collect keeps each verdict beside its file.
-    let is_source: Vec<bool> = files
+    #[cfg(unix)]
+    let shared = walk.as_deref();
+    let verdicts: Vec<(bool, Option<std::path::PathBuf>)> = files
         .par_iter()
         .map(|file| {
             // A regular leaf from this non-following walk has the same filename
             // under its canonical parent. Reuse that resolution for classification;
             // explicit names, symlinks and metadata failures keep the legacy path.
             #[cfg(unix)]
-            let resolved = walk
-                .and_then(|walk| walk.resolve(file))
-                .unwrap_or_else(|| std::path::PathBuf::from(canonicalize_path_safe(file)));
+            let leaf = shared.and_then(|walk| walk.resolve(file));
             #[cfg(not(unix))]
-            let resolved = std::path::PathBuf::from(canonicalize_path_safe(file));
-            rumdl_lib::discovery::classify_file(&resolved) == rumdl_lib::discovery::FileKind::SourceCode
+            let leaf: Option<std::path::PathBuf> = None;
+            let source = match &leaf {
+                Some(resolved) => rumdl_lib::discovery::classify_file(resolved),
+                None => rumdl_lib::discovery::classify_file(Path::new(&canonicalize_path_safe(file))),
+            } == rumdl_lib::discovery::FileKind::SourceCode;
+            (source, leaf)
         })
         .collect();
+    let (is_source, leaves): (Vec<bool>, Vec<_>) = verdicts.into_iter().unzip();
+    #[cfg(unix)]
+    if let Some(walk) = walk {
+        walk.remember(files.iter().cloned().zip(leaves));
+    }
+    #[cfg(not(unix))]
+    drop(leaves);
     let (refused, kept) = std::mem::take(files)
         .into_iter()
         .zip(is_source)
@@ -1670,6 +1682,9 @@ pub(crate) struct WalkSourcePaths {
     cwd: std::path::PathBuf,
     spelled: std::path::PathBuf,
     parents: std::collections::HashMap<std::path::PathBuf, Option<std::path::PathBuf>>,
+    /// Each classified file's resolution, so later passes over the same
+    /// selection reuse it instead of repeating the metadata check.
+    leaves: std::collections::HashMap<String, Option<std::path::PathBuf>>,
 }
 
 #[cfg(unix)]
@@ -1688,6 +1703,7 @@ impl WalkSourcePaths {
             cwd,
             spelled,
             parents: std::collections::HashMap::new(),
+            leaves: std::collections::HashMap::new(),
         })
     }
 
@@ -1730,7 +1746,15 @@ impl WalkSourcePaths {
         self.parents.extend(resolved);
     }
 
+    /// Record resolutions computed by [`Self::resolve`] for later lookups.
+    fn remember(&mut self, resolved: impl IntoIterator<Item = (String, Option<std::path::PathBuf>)>) {
+        self.leaves.extend(resolved);
+    }
+
     pub(crate) fn resolve(&self, file: &str) -> Option<std::path::PathBuf> {
+        if let Some(resolved) = self.leaves.get(file) {
+            return resolved.clone();
+        }
         let absolute = self.walked_leaf(file)?;
         // Directory entries alone do not prove metadata access. In particular
         // an ACL can deny canonicalization of a readable regular file. A
