@@ -352,7 +352,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     };
     // CLI2 selection applies before source-code refusal, like native excludes.
     #[cfg(unix)]
-    let mut canonical_walk_root = discovered.canonical_walk_root;
+    let canonical_walk_root = discovered.canonical_walk_root;
     // Skipped wildcard matches take part in selection like any other file, so a
     // CLI2 or per-directory ignore silences the warning for the files it covers.
     // They are told apart again by the name they were supplied under, since two
@@ -408,7 +408,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 }
                 #[cfg(unix)]
                 let canonical = canonical_walk_root
-                    .as_mut()
+                    .as_ref()
                     .and_then(|root| root.resolve(file))
                     .map_or_else(|| std::fs::canonicalize(file), Ok);
                 #[cfg(not(unix))]

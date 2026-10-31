@@ -595,22 +595,36 @@ fn names_literal_include(
 }
 
 /// Split the files rumdl cannot read out of `files`.
-fn take_source_code(files: &mut Vec<String>, #[cfg(unix)] mut walk: Option<&mut WalkSourcePaths>) -> Vec<String> {
-    let (refused, kept) = std::mem::take(files).into_iter().partition(|file| {
-        // A regular leaf from this non-following walk has the same filename
-        // under its canonical parent. Reuse that resolution for classification;
-        // explicit names, symlinks and metadata failures keep the legacy path.
-        #[cfg(unix)]
-        let resolved = walk
-            .as_deref_mut()
-            .and_then(|walk| walk.resolve(file))
-            .unwrap_or_else(|| std::path::PathBuf::from(canonicalize_path_safe(file)));
-        #[cfg(not(unix))]
-        let resolved = std::path::PathBuf::from(canonicalize_path_safe(file));
-        rumdl_lib::discovery::classify_file(&resolved) == rumdl_lib::discovery::FileKind::SourceCode
+fn take_source_code(files: &mut Vec<String>, #[cfg(unix)] walk: Option<&mut WalkSourcePaths>) -> Vec<String> {
+    use rayon::prelude::*;
+    #[cfg(unix)]
+    let walk = walk.map(|walk| {
+        walk.prime(files);
+        &*walk
     });
-    *files = kept;
-    refused
+    // Classification costs a metadata syscall per file, so it runs in parallel;
+    // the indexed collect keeps each verdict beside its file.
+    let is_source: Vec<bool> = files
+        .par_iter()
+        .map(|file| {
+            // A regular leaf from this non-following walk has the same filename
+            // under its canonical parent. Reuse that resolution for classification;
+            // explicit names, symlinks and metadata failures keep the legacy path.
+            #[cfg(unix)]
+            let resolved = walk
+                .and_then(|walk| walk.resolve(file))
+                .unwrap_or_else(|| std::path::PathBuf::from(canonicalize_path_safe(file)));
+            #[cfg(not(unix))]
+            let resolved = std::path::PathBuf::from(canonicalize_path_safe(file));
+            rumdl_lib::discovery::classify_file(&resolved) == rumdl_lib::discovery::FileKind::SourceCode
+        })
+        .collect();
+    let (refused, kept) = std::mem::take(files)
+        .into_iter()
+        .zip(is_source)
+        .partition::<Vec<_>, _>(|(_, source)| *source);
+    *files = kept.into_iter().map(|(file, _)| file).collect();
+    refused.into_iter().map(|(file, _)| file).collect()
 }
 
 /// Every file reachable from `roots`, streamed in the form the walker produces.
@@ -1454,39 +1468,68 @@ pub fn find_markdown_files(
     };
 
     // --- Execute Walk ---
+    // Directories are read on the parallel walker's threads. Entries and errors
+    // arrive in a nondeterministic order, so both are sorted before use.
 
-    for result in walk_builder.build() {
-        match result {
-            Ok(entry) => {
-                let path = entry.path();
-                // We are primarily interested in files. ignore crate handles dir traversal.
-                // Check if it's a file and if it wasn't explicitly excluded by overrides
-                if entry.file_type().is_some_and(|file_type| file_type.is_file()) {
-                    // The legacy selection stores lossy UTF-8 paths. If any
-                    // entry needs that conversion, retain filesystem resolution
-                    // for the whole walk, including possible spelling collisions.
-                    #[cfg(unix)]
-                    if path.to_str().is_none() {
-                        canonical_walk_root = None;
+    let walked_files = std::sync::Mutex::new(Vec::new());
+    let walk_errors = std::sync::Mutex::new(Vec::new());
+    let saw_non_utf8 = std::sync::atomic::AtomicBool::new(false);
+    // Directory walking is bound by filesystem syscalls, which contend in the
+    // kernel past a few threads: four keeps nearly all of the wall-time gain
+    // while more threads mostly add system CPU.
+    let walk_threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(4));
+    walk_builder.threads(walk_threads);
+    walk_builder.build_parallel().run(|| {
+        // Each walker thread fills its own buffer and hands it over once,
+        // when the walk drops the visitor.
+        let mut local = ThreadFiles {
+            files: Vec::new(),
+            sink: &walked_files,
+        };
+        let (walk_errors, saw_non_utf8) = (&walk_errors, &saw_non_utf8);
+        Box::new(move |result| {
+            match result {
+                Ok(entry) => {
+                    let path = entry.path();
+                    // We are primarily interested in files. ignore crate handles dir traversal.
+                    // Check if it's a file and if it wasn't explicitly excluded by overrides
+                    if entry.file_type().is_some_and(|file_type| file_type.is_file()) {
+                        if path.to_str().is_none() {
+                            saw_non_utf8.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        let file_path = path.to_string_lossy().to_string();
+                        // Clean the path before pushing
+                        let cleaned_path = if let Some(stripped) = file_path.strip_prefix("./") {
+                            stripped.to_string()
+                        } else {
+                            file_path
+                        };
+                        local.files.push(cleaned_path);
                     }
-                    let file_path = path.to_string_lossy().to_string();
-                    // Clean the path before pushing
-                    let cleaned_path = if let Some(stripped) = file_path.strip_prefix("./") {
-                        stripped.to_string()
-                    } else {
-                        file_path
-                    };
-                    file_paths.push(cleaned_path);
+                }
+                Err(err) => {
+                    // Only show generic walking errors for directories, not for missing files
+                    if is_discovery_mode {
+                        walk_errors.lock().unwrap().push(err.to_string());
+                    }
                 }
             }
-            Err(err) => {
-                // Only show generic walking errors for directories, not for missing files
-                if is_discovery_mode {
-                    eprintln!("Error walking directory: {err}");
-                }
-            }
-        }
+            ignore::WalkState::Continue
+        })
+    });
+    let mut walk_errors = walk_errors.into_inner().unwrap();
+    walk_errors.sort();
+    for err in walk_errors {
+        eprintln!("Error walking directory: {err}");
     }
+    // The legacy selection stores lossy UTF-8 paths. If any entry needs that
+    // conversion, retain filesystem resolution for the whole walk, including
+    // possible spelling collisions.
+    #[cfg(unix)]
+    if saw_non_utf8.into_inner() {
+        canonical_walk_root = None;
+    }
+    file_paths.extend(walked_files.into_inner().unwrap());
 
     // Remove duplicate paths if WalkBuilder might yield them (e.g. multiple input paths)
     file_paths.sort();
@@ -1606,6 +1649,18 @@ pub fn find_markdown_files(
     })
 }
 
+/// One walker thread's files, merged into the shared list when dropped.
+struct ThreadFiles<'a> {
+    files: Vec<String>,
+    sink: &'a std::sync::Mutex<Vec<String>>,
+}
+
+impl Drop for ThreadFiles<'_> {
+    fn drop(&mut self) {
+        self.sink.lock().unwrap().append(&mut self.files);
+    }
+}
+
 /// Selected regular leaves from one non-following walk. Explicit names and
 /// unsupported spellings retain filesystem canonicalization. Each selected
 /// leaf is checked for metadata access, and only directory identities are
@@ -1636,14 +1691,14 @@ impl WalkSourcePaths {
         })
     }
 
-    pub(crate) fn resolve(&mut self, file: &str) -> Option<std::path::PathBuf> {
+    /// The absolute spelling of `file` when it names a leaf beneath the walk
+    /// root through plain components only.
+    fn walked_leaf(&self, file: &str) -> Option<std::path::PathBuf> {
         let path = Path::new(file);
-        let joined;
         let absolute = if path.is_absolute() {
-            path
+            path.to_path_buf()
         } else {
-            joined = self.cwd.join(path);
-            &joined
+            self.cwd.join(path)
         };
         let suffix = absolute.strip_prefix(&self.spelled).ok()?;
         if suffix.as_os_str().is_empty()
@@ -1653,19 +1708,43 @@ impl WalkSourcePaths {
         {
             return None;
         }
+        Some(absolute)
+    }
+
+    /// Canonicalize, in parallel, every parent directory of `files` not yet
+    /// known, so that [`Self::resolve`] can then run from any thread.
+    fn prime(&mut self, files: &[String]) {
+        use rayon::prelude::*;
+        let unknown: std::collections::HashSet<std::path::PathBuf> = files
+            .iter()
+            .filter_map(|file| Some(self.walked_leaf(file)?.parent()?.to_path_buf()))
+            .filter(|parent| !self.parents.contains_key(parent))
+            .collect();
+        let resolved: Vec<_> = unknown
+            .into_par_iter()
+            .map(|parent| {
+                let canonical = std::fs::canonicalize(&parent).ok();
+                (parent, canonical)
+            })
+            .collect();
+        self.parents.extend(resolved);
+    }
+
+    pub(crate) fn resolve(&self, file: &str) -> Option<std::path::PathBuf> {
+        let absolute = self.walked_leaf(file)?;
         // Directory entries alone do not prove metadata access. In particular
         // an ACL can deny canonicalization of a readable regular file. A
         // failed check keeps the legacy lookup and its supplied-path fallback.
-        if !std::fs::symlink_metadata(absolute).ok()?.is_file() {
+        if !std::fs::symlink_metadata(&absolute).ok()?.is_file() {
             return None;
         }
         let parent = absolute.parent()?;
         let name = absolute.file_name()?;
-        let canonical = self
-            .parents
-            .entry(parent.to_path_buf())
-            .or_insert_with(|| std::fs::canonicalize(parent).ok());
-        Some(canonical.as_ref()?.join(name))
+        let canonical = match self.parents.get(parent) {
+            Some(canonical) => canonical.clone(),
+            None => std::fs::canonicalize(parent).ok(),
+        };
+        Some(canonical?.join(name))
     }
 }
 
@@ -1713,7 +1792,7 @@ mod walk_source_tests {
     }
 
     fn verify_walk(path: &Path) -> usize {
-        let mut root = WalkSourcePaths::new(path).unwrap();
+        let root = WalkSourcePaths::new(path).unwrap();
         let mut count = 0;
         for entry in WalkBuilder::new(path).follow_links(false).build() {
             let entry = entry.unwrap();
@@ -1747,14 +1826,14 @@ mod walk_source_tests {
         assert_eq!(verify_walk(&alias), 2);
         assert_eq!(verify_walk(&alias.join("nested/..")), 2);
         assert!(WalkSourcePaths::new(&real.join("a.md")).is_none());
-        let mut paths = WalkSourcePaths::new(&real).unwrap();
+        let paths = WalkSourcePaths::new(&real).unwrap();
         assert!(paths.resolve(real.join("alias.md").to_str().unwrap()).is_none());
         assert!(paths.resolve(real.join("absent.md").to_str().unwrap()).is_none());
     }
 
     #[test]
     fn walk_source_handles_cwd_spellings_and_declines_parent_or_unrelated_paths() {
-        let mut root = WalkSourcePaths::new(Path::new(".")).unwrap();
+        let root = WalkSourcePaths::new(Path::new(".")).unwrap();
         for file in ["Cargo.toml", "./Cargo.toml", "src/main.rs", "./src/main.rs"] {
             assert_eq!(root.resolve(file).unwrap(), std::fs::canonicalize(file).unwrap());
         }
