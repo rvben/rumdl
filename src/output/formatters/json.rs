@@ -1,8 +1,8 @@
 //! JSON output formatter
 
 use crate::output::OutputFormatter;
-use crate::rule::LintWarning;
-use serde_json::{Value, json};
+use crate::rule::{LintWarning, Severity};
+use serde::Serialize;
 use std::borrow::Cow;
 
 /// JSON formatter for machine-readable output
@@ -30,7 +30,7 @@ impl OutputFormatter for JsonFormatter {
             return String::new();
         }
 
-        let json_warnings: Vec<Value> = warnings
+        let json_warnings: Vec<JsonWarning> = warnings
             .iter()
             .map(|warning| warning_to_json(warning, file_path))
             .collect();
@@ -39,34 +39,57 @@ impl OutputFormatter for JsonFormatter {
     }
 }
 
-fn warning_to_json(warning: &LintWarning, file_path: &str) -> Value {
-    let mut value = json!({
-        "file": file_path,
-        "line": warning.line,
-        "column": warning.column,
-        "rule": warning.rule_name.as_deref().unwrap_or("unknown"),
-        "message": warning.message,
-        "severity": warning.severity,
-        "fixable": warning.fix.is_some(),
-    });
-    if let Some(fix) = &warning.fix {
-        value["fix"] = fix_to_json(fix);
-    }
-    value
+/// One warning as it appears in JSON output. Fields serialize in declaration
+/// order, which is the key order of the output.
+#[derive(Serialize)]
+struct JsonWarning<'a> {
+    file: &'a str,
+    line: usize,
+    column: usize,
+    rule: &'a str,
+    message: &'a str,
+    severity: Severity,
+    fixable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix: Option<JsonFix<'a>>,
 }
 
-fn fix_to_json(fix: &crate::rule::Fix) -> serde_json::Value {
-    let mut obj = json!({
-        "range": {
-            "start": fix.range.start,
-            "end": fix.range.end,
-        },
-        "replacement": fix.replacement,
-    });
-    if !fix.additional_edits.is_empty() {
-        obj["additional_edits"] = serde_json::Value::Array(fix.additional_edits.iter().map(fix_to_json).collect());
+#[derive(Serialize)]
+struct JsonFix<'a> {
+    range: JsonRange,
+    replacement: &'a str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    additional_edits: Vec<JsonFix<'a>>,
+}
+
+#[derive(Serialize)]
+struct JsonRange {
+    start: usize,
+    end: usize,
+}
+
+fn warning_to_json<'a>(warning: &'a LintWarning, file_path: &'a str) -> JsonWarning<'a> {
+    JsonWarning {
+        file: file_path,
+        line: warning.line,
+        column: warning.column,
+        rule: warning.rule_name.as_deref().unwrap_or("unknown"),
+        message: &warning.message,
+        severity: warning.severity,
+        fixable: warning.fix.is_some(),
+        fix: warning.fix.as_ref().map(fix_to_json),
     }
-    obj
+}
+
+fn fix_to_json(fix: &crate::rule::Fix) -> JsonFix<'_> {
+    JsonFix {
+        range: JsonRange {
+            start: fix.range.start,
+            end: fix.range.end,
+        },
+        replacement: &fix.replacement,
+        additional_edits: fix.additional_edits.iter().map(fix_to_json).collect(),
+    }
 }
 
 /// Remap fixes produced against rumdl's LF-normalized working copy so their
@@ -116,7 +139,8 @@ pub fn format_all_warnings_as_json(all_warnings: &[(String, Vec<LintWarning>)]) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rule::{Fix, Severity};
+    use crate::rule::Fix;
+    use serde_json::Value;
 
     #[test]
     fn test_json_formatter_default() {
@@ -262,6 +286,59 @@ mod tests {
         assert_eq!(extras[0]["range"]["start"], 45);
         assert_eq!(extras[0]["range"]["end"], 45);
         assert_eq!(extras[0]["replacement"], "\n[docs]: https://example.com\n");
+    }
+
+    #[test]
+    fn test_output_text_keeps_key_order_and_layout() {
+        // Consumers diff and grep this output, so its exact text is part of
+        // the interface, not only the values a parser recovers from it.
+        let warnings = vec![(
+            "doc.md".to_string(),
+            vec![LintWarning {
+                line: 1,
+                column: 5,
+                end_line: 1,
+                end_column: 32,
+                rule_name: Some("MD054".to_string()),
+                message: "Inconsistent \"link\" style".to_string(),
+                severity: Severity::Error,
+                fix: Some(Fix::with_additional_edits(
+                    4..31,
+                    "[docs]".to_string(),
+                    vec![Fix::new(45..45, "\n[docs]: https://example.com\n".to_string())],
+                )),
+            }],
+        )];
+
+        let expected = r#"[
+  {
+    "file": "doc.md",
+    "line": 1,
+    "column": 5,
+    "rule": "MD054",
+    "message": "Inconsistent \"link\" style",
+    "severity": "error",
+    "fixable": true,
+    "fix": {
+      "range": {
+        "start": 4,
+        "end": 31
+      },
+      "replacement": "[docs]",
+      "additional_edits": [
+        {
+          "range": {
+            "start": 45,
+            "end": 45
+          },
+          "replacement": "\n[docs]: https://example.com\n"
+        }
+      ]
+    }
+  }
+]"#;
+        assert_eq!(format_all_warnings_as_json(&warnings), expected);
+        assert_eq!(JsonFormatter::new().format_warnings(&warnings[0].1, "doc.md"), expected);
     }
 
     #[test]
