@@ -23,7 +23,8 @@ uv = "latest"
 # Zensical builds the documentation site. Pinned because its output is what the
 # docs checks read: a new release can change the generated HTML, and the site
 # checks then fail on main with no change in this repository. The pre-push docs
-# hook and the Documentation workflow both install this version.
+# hook runs it through `mise exec`, and the Documentation workflow installs it
+# and puts it on PATH.
 "pipx:zensical" = "0.0.74"
 
 "github:jdx/jactionlint" = "2.1.0"

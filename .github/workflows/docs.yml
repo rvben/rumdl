@@ -99,6 +99,13 @@ jobs:
       - name: Install Rust toolchain and Zensical
         run: ./scripts/mise-install.sh rust python uv pipx:zensical
 
+      # The build calls zensical and cargo directly rather than through
+      # `mise exec`, which first installs every tool in .mise.toml that is
+      # missing, most of them unused here. See the same step in release.yml.
+      - name: Put the installed tools ahead of the mise shims on PATH
+        shell: bash
+        run: mise bin-paths >> "$GITHUB_PATH"
+
       - name: Install wasm-pack
         uses: taiki-e/install-action@wasm-pack
 
@@ -108,7 +115,7 @@ jobs:
           save-if: false
 
       - name: Build and check documentation site
-        run: mise exec -- make docs-site
+        run: make docs-site
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
