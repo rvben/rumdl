@@ -43,6 +43,7 @@ mod cli_md027_quoted_list_test;
 mod cli_md030_paragraph_text_test;
 mod cli_md031_bare_marker_fix_test;
 mod cli_md035_setext_test;
+mod cli_md051_anchor_hint_test;
 mod cli_md051_repo_absolute_links_issue_862_test;
 mod cli_md051_unicode_whitespace_test;
 mod cli_md056_extra_cells_test;

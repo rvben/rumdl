@@ -1266,6 +1266,30 @@ impl FileIndex {
         false
     }
 
+    /// Every anchor name [`Self::has_anchor_with_case`] can match: heading
+    /// anchors, HTML anchors and attribute anchors, from the lowercase or the
+    /// case-preserving storage. A name defined more than once is yielded once
+    /// per set that holds it.
+    pub fn anchor_names(&self, ignore_case: bool) -> Box<dyn Iterator<Item = &str> + '_> {
+        if ignore_case {
+            Box::new(
+                self.anchor_to_heading
+                    .keys()
+                    .chain(self.html_anchors.iter())
+                    .chain(self.attribute_anchors.iter())
+                    .map(String::as_str),
+            )
+        } else {
+            Box::new(
+                self.anchor_to_heading_exact
+                    .keys()
+                    .chain(self.html_anchors_exact.iter())
+                    .chain(self.attribute_anchors_exact.iter())
+                    .map(String::as_str),
+            )
+        }
+    }
+
     /// Direct anchor lookup, dispatching to the lowercase or exact-case
     /// storage based on `ignore_case`.
     fn lookup_anchor(&self, anchor: &str, ignore_case: bool) -> bool {

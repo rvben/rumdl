@@ -3844,3 +3844,165 @@ mod percent_encoded_fragments {
         assert!(messages.is_empty(), "{messages:?}");
     }
 }
+
+/// The warning names the anchor that does exist when the link is a near miss.
+mod anchor_hint {
+    use super::*;
+    use rumdl_lib::config::MarkdownFlavor;
+
+    fn messages(content: &str) -> Vec<String> {
+        messages_with(&MD051LinkFragments::new(), content)
+    }
+
+    fn messages_with(rule: &MD051LinkFragments, content: &str) -> Vec<String> {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        rule.check(&ctx).unwrap().into_iter().map(|w| w.message).collect()
+    }
+
+    #[test]
+    fn heading_ending_in_a_comment_points_at_the_trailing_hyphen_anchor() {
+        let content = "## Purpose <!-- note -->\n\n[Purpose](#purpose)\n";
+        assert_eq!(
+            messages(content),
+            ["Link anchor '#purpose' does not exist in document headings (did you mean '#purpose-'?)"]
+        );
+    }
+
+    #[test]
+    fn the_anchor_the_hint_names_is_accepted() {
+        assert!(messages("## Purpose <!-- note -->\n\n[Purpose](#purpose-)\n").is_empty());
+    }
+
+    #[test]
+    fn the_comment_text_variants_from_the_report_point_at_the_same_anchor() {
+        for fragment in ["purpose-note", "purpose----note---", "purpose--note--"] {
+            let content = format!("## Purpose <!-- note -->\n\n[Purpose](#{fragment})\n");
+            assert_eq!(
+                messages(&content),
+                [format!("Link anchor '#{fragment}' does not exist in document headings")],
+                "{fragment} is not within reach of the real anchor and gets no hint"
+            );
+        }
+    }
+
+    #[test]
+    fn a_typo_points_at_the_closest_heading() {
+        let content = "# Installation\n\n[Install](#instalation)\n";
+        assert_eq!(
+            messages(content),
+            ["Link anchor '#instalation' does not exist in document headings (did you mean '#installation'?)"]
+        );
+    }
+
+    #[test]
+    fn adjacent_transposition_counts_as_one_edit() {
+        let content = "# Installation\n\n[Install](#instlalation)\n";
+        assert_eq!(
+            messages(content),
+            ["Link anchor '#instlalation' does not exist in document headings (did you mean '#installation'?)"]
+        );
+    }
+
+    #[test]
+    fn an_unrelated_fragment_keeps_the_original_message() {
+        let content = "# Installation\n\n## Usage\n\n[Other](#completely-different)\n";
+        assert_eq!(
+            messages(content),
+            ["Link anchor '#completely-different' does not exist in document headings"]
+        );
+    }
+
+    #[test]
+    fn a_short_fragment_is_never_matched_by_edit_distance() {
+        let content = "# FAQ\n\n[Q](#faz)\n";
+        assert_eq!(
+            messages(content),
+            ["Link anchor '#faz' does not exist in document headings"]
+        );
+    }
+
+    #[test]
+    fn each_typo_points_at_its_own_heading() {
+        let content = "# Setup one\n\n# Setup two\n\n[Go](#setup-ona)\n[Go](#setup-twa)\n[Go](#setup-xxx)\n";
+        assert_eq!(
+            messages(content),
+            [
+                "Link anchor '#setup-ona' does not exist in document headings (did you mean '#setup-one'?)",
+                "Link anchor '#setup-twa' does not exist in document headings (did you mean '#setup-two'?)",
+                "Link anchor '#setup-xxx' does not exist in document headings",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_nearest_of_several_candidates_wins_and_a_tie_gives_no_hint() {
+        let content = "# Alpha one\n\n# Alpha two\n\n[Go](#alpha-xne)\n";
+        // `alpha-xne` is one substitution from `alpha-one` and two from `alpha-two`.
+        assert_eq!(
+            messages(content),
+            ["Link anchor '#alpha-xne' does not exist in document headings (did you mean '#alpha-one'?)"]
+        );
+        let tied = "# Alpha one\n\n# Alpha owe\n\n[Go](#alpha-ose)\n";
+        assert_eq!(
+            messages(tied),
+            ["Link anchor '#alpha-ose' does not exist in document headings"],
+            "alpha-one and alpha-owe are both one edit from alpha-ose"
+        );
+    }
+
+    #[test]
+    fn several_anchors_with_the_same_trimmed_form_give_no_hint() {
+        let content = "# Purpose\n\n## Purpose <!-- a -->\n\n[Go](#-purpose)\n";
+        // `purpose` and `purpose-` both trim to `purpose`.
+        assert_eq!(
+            messages(content),
+            ["Link anchor '#-purpose' does not exist in document headings"]
+        );
+    }
+
+    #[test]
+    fn a_case_only_miss_is_named_when_matching_is_case_sensitive() {
+        let rule =
+            MD051LinkFragments::from_config_struct(serde_json::from_str(r#"{"ignore-case": false}"#).expect("config"));
+        assert_eq!(
+            messages_with(&rule, "# faq\n\n[Q](#FAQ)\n"),
+            ["Link anchor '#FAQ' does not exist in document headings (did you mean '#faq'?)"]
+        );
+    }
+
+    #[test]
+    fn a_case_sensitive_hint_is_spelled_as_the_anchor_is_defined() {
+        let rule =
+            MD051LinkFragments::from_config_struct(serde_json::from_str(r#"{"ignore-case": false}"#).expect("config"));
+        assert_eq!(
+            messages_with(&rule, "# Title {#Custom-Id}\n\n[A](#Custom-Idd)\n"),
+            ["Link anchor '#Custom-Idd' does not exist in document headings (did you mean '#Custom-Id'?)"]
+        );
+        assert!(messages_with(&rule, "# Title {#Custom-Id}\n\n[A](#Custom-Id)\n").is_empty());
+    }
+
+    #[test]
+    fn custom_ids_and_html_anchors_are_candidates() {
+        let content = "# Title {#custom-section}\n\n<a id=\"manual-anchor\"></a>\n\n\
+                       [A](#custom-secton)\n[B](#manual-anchr)\n";
+        assert_eq!(
+            messages(content),
+            [
+                "Link anchor '#custom-secton' does not exist in document headings (did you mean '#custom-section'?)",
+                "Link anchor '#manual-anchr' does not exist in document headings (did you mean '#manual-anchor'?)",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_frontmatter_fragment_gets_the_hint() {
+        let rule = MD051LinkFragments::from_config_struct(
+            serde_json::from_str(r#"{"check-frontmatter": true}"#).expect("config"),
+        );
+        let content = "---\nanchor: '#purpose'\n---\n\n## Purpose <!-- note -->\n";
+        assert_eq!(
+            messages_with(&rule, content),
+            ["Link anchor '#purpose' does not exist in document headings (did you mean '#purpose-'?)"]
+        );
+    }
+}

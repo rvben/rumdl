@@ -3,6 +3,7 @@ use crate::rule::{CrossFileScope, FixCapability, LintError, LintResult, LintWarn
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::{LinkResolution, LinkResolver};
 use crate::utils::anchor_styles::AnchorStyle;
+use crate::utils::anchor_suggestions::AnchorSuggester;
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
@@ -10,7 +11,7 @@ use pulldown_cmark::LinkType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::OnceCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Configuration for MD051 (Link fragments)
@@ -116,6 +117,19 @@ struct AnchorSets {
     markdown_headings_exact: HashSet<String>,
     html_anchors: HashSet<String>,
     html_anchors_exact: HashSet<String>,
+}
+
+impl AnchorSets {
+    /// Every anchor name the same-document lookup can match, in the case the
+    /// lookup compares: lowercase under `ignore_case`, as written otherwise.
+    fn names(&self, ignore_case: bool) -> impl Iterator<Item = &str> {
+        let (markdown, html) = if ignore_case {
+            (&self.markdown_headings, &self.html_anchors)
+        } else {
+            (&self.markdown_headings_exact, &self.html_anchors_exact)
+        };
+        markdown.iter().chain(html.iter()).map(String::as_str)
+    }
 }
 
 impl Default for MD051LinkFragments {
@@ -368,6 +382,22 @@ impl MD051LinkFragments {
         false
     }
 
+    /// The suggestion text for a same-document fragment that resolved to nothing.
+    fn anchor_hint(
+        &self,
+        ctx: &LintContext,
+        fragment: &str,
+        anchors: &OnceCell<AnchorSets>,
+        suggester: &OnceCell<AnchorSuggester>,
+    ) -> String {
+        suggester
+            .get_or_init(|| {
+                let anchors = anchors.get_or_init(|| self.extract_headings_from_context(ctx));
+                AnchorSuggester::new(anchors.names(self.config.ignore_case))
+            })
+            .hint(fragment)
+    }
+
     /// Report frontmatter fragments that name no anchor in this document.
     ///
     /// Only a fragment-only value is resolved here. A value that carries a path
@@ -379,6 +409,7 @@ impl MD051LinkFragments {
         ctx: &crate::lint_context::LintContext,
         links: &[frontmatter_values::FrontMatterLink],
         anchors: &OnceCell<AnchorSets>,
+        suggester: &OnceCell<AnchorSuggester>,
         warnings: &mut Vec<LintWarning>,
     ) {
         for link in links {
@@ -397,7 +428,10 @@ impl MD051LinkFragments {
             let column = byte_to_char_count(line, link.range.start);
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
-                message: format!("Link anchor '#{fragment}' does not exist in document headings"),
+                message: format!(
+                    "Link anchor '#{fragment}' does not exist in document headings{}",
+                    self.anchor_hint(ctx, fragment, anchors, suggester)
+                ),
                 line: link.line,
                 column,
                 end_line: link.line,
@@ -448,6 +482,7 @@ impl Rule for MD051LinkFragments {
         // External, cross-file and exempt fragments do not need local anchors.
         // Share one extraction between body and frontmatter lookups that do.
         let anchors = OnceCell::new();
+        let suggester = OnceCell::new();
 
         for link in ctx.links() {
             if link.is_reference {
@@ -529,7 +564,10 @@ impl Rule for MD051LinkFragments {
             if !self.fragment_resolves(ctx, fragment, &anchors) {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
-                    message: format!("Link anchor '#{fragment}' does not exist in document headings"),
+                    message: format!(
+                        "Link anchor '#{fragment}' does not exist in document headings{}",
+                        self.anchor_hint(ctx, fragment, &anchors, &suggester)
+                    ),
                     line: link.line,
                     column: link.start_col + 1,
                     end_line: link.end_line,
@@ -540,7 +578,7 @@ impl Rule for MD051LinkFragments {
             }
         }
 
-        self.check_front_matter(ctx, &front_matter_links, &anchors, &mut warnings);
+        self.check_front_matter(ctx, &front_matter_links, &anchors, &suggester, &mut warnings);
 
         Ok(warnings)
     }
@@ -704,6 +742,9 @@ impl Rule for MD051LinkFragments {
         // with a fragment to check.
         let mut document_links = None;
         let policy = workspace_index.link_target_policy();
+        // One suggester per target file: it is built from that file's anchors
+        // on the first broken link into it and shared by the rest.
+        let mut suggesters: HashMap<*const FileIndex, AnchorSuggester> = HashMap::new();
 
         // Check each cross-file link in this file
         for cross_link in &file_index.cross_file_links {
@@ -781,8 +822,13 @@ impl Rule for MD051LinkFragments {
                             + 1
                             + cross_link.fragment.chars().count(),
                         message: format!(
-                            "Link fragment '{}' not found in '{}'",
-                            cross_link.fragment, cross_link.target_path
+                            "Link fragment '{}' not found in '{}'{}",
+                            cross_link.fragment,
+                            cross_link.target_path,
+                            suggesters
+                                .entry(std::ptr::from_ref(target_file_index))
+                                .or_insert_with(|| AnchorSuggester::new(target_file_index.anchor_names(ignore_case)))
+                                .hint(&cross_link.fragment)
                         ),
                         severity: Severity::Error,
                         fix: None,
@@ -1270,6 +1316,50 @@ See [link](#nonexistent) for details."#;
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("nonexistent"));
         assert!(warnings[0].message.contains("install.md"));
+    }
+
+    #[test]
+    fn test_cross_file_check_names_a_close_anchor_of_the_target() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD051LinkFragments::new();
+        let mut workspace_index = WorkspaceIndex::new();
+        let mut target_file_index = FileIndex::new();
+        target_file_index.add_heading(HeadingIndex {
+            text: "Purpose".to_string(),
+            auto_anchor: "purpose-".to_string(),
+            custom_anchor: None,
+            line: 1,
+            text_lines: 1,
+            is_setext: false,
+        });
+        let (_dir, root) = files_on_disk(&["docs/readme.md", "docs/install.md"]);
+        workspace_index.insert_file(root.join("docs/install.md"), target_file_index);
+
+        let mut current_file_index = FileIndex::new();
+        for (fragment, line) in [("purpose", 3), ("unrelated-thing", 4)] {
+            current_file_index.add_cross_file_link(CrossFileLinkIndex {
+                target_path: "install.md".to_string(),
+                fragment: fragment.to_string(),
+                line,
+                column: 5,
+                origin: LinkOrigin::Body,
+            });
+        }
+
+        let messages: Vec<String> = rule
+            .cross_file_check(&root.join("docs/readme.md"), &current_file_index, &workspace_index)
+            .unwrap()
+            .into_iter()
+            .map(|w| w.message)
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                "Link fragment 'purpose' not found in 'install.md' (did you mean '#purpose-'?)",
+                "Link fragment 'unrelated-thing' not found in 'install.md'",
+            ]
+        );
     }
 
     #[test]
