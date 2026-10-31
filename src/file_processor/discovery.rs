@@ -1727,23 +1727,50 @@ impl WalkSourcePaths {
         Some(absolute)
     }
 
-    /// Canonicalize, in parallel, every parent directory of `files` not yet
-    /// known, so that [`Self::resolve`] can then run from any thread.
+    /// Canonicalize every parent directory of `files` not yet known, so that
+    /// [`Self::resolve`] can then run from any thread.
+    ///
+    /// Canonicalizing a path costs a lookup per component, which dominates
+    /// discovery in trees with a directory per document. Below the root, a
+    /// directory that is not a symlink is canonical under its canonical parent,
+    /// so each one costs a single metadata check instead. Any directory that
+    /// check does not confirm keeps full canonicalization.
     fn prime(&mut self, files: &[String]) {
         use rayon::prelude::*;
-        let unknown: std::collections::HashSet<std::path::PathBuf> = files
-            .iter()
-            .filter_map(|file| Some(self.walked_leaf(file)?.parent()?.to_path_buf()))
-            .filter(|parent| !self.parents.contains_key(parent))
-            .collect();
-        let resolved: Vec<_> = unknown
+        let mut unknown = std::collections::HashSet::new();
+        for file in files {
+            let Some(leaf) = self.walked_leaf(file) else {
+                continue;
+            };
+            let mut ancestors = leaf.ancestors().skip(1);
+            // Walked leaves lie beneath the root, so the ancestors reach it.
+            while let Some(dir) = ancestors.next()
+                && !self.parents.contains_key(dir)
+                && unknown.insert(dir.to_path_buf())
+                && dir != self.spelled
+            {}
+        }
+        let mut checked: Vec<(std::path::PathBuf, bool)> = unknown
             .into_par_iter()
-            .map(|parent| {
-                let canonical = std::fs::canonicalize(&parent).ok();
-                (parent, canonical)
+            .map(|dir| {
+                let real = dir != self.spelled
+                    && std::fs::symlink_metadata(&dir).is_ok_and(|metadata| metadata.file_type().is_dir());
+                (dir, real)
             })
             .collect();
-        self.parents.extend(resolved);
+        // Parents sort before their children, so each derivation finds its
+        // parent already resolved.
+        checked.sort_by_cached_key(|(dir, _)| dir.components().count());
+        for (dir, real) in checked {
+            let derived = real
+                .then(|| {
+                    let parent = self.parents.get(dir.parent()?)?.as_ref()?;
+                    Some(parent.join(dir.file_name()?))
+                })
+                .flatten();
+            let canonical = derived.or_else(|| std::fs::canonicalize(&dir).ok());
+            self.parents.insert(dir, canonical);
+        }
     }
 
     /// Record resolutions computed by [`Self::resolve`] for later lookups.
@@ -1815,22 +1842,47 @@ mod walk_source_tests {
         }
     }
 
+    /// Resolve every regular file a non-following walk of `path` yields, both
+    /// on demand and from primed parents, against full canonicalization.
     fn verify_walk(path: &Path) -> usize {
-        let root = WalkSourcePaths::new(path).unwrap();
-        let mut count = 0;
-        for entry in WalkBuilder::new(path).follow_links(false).build() {
-            let entry = entry.unwrap();
-            if entry.file_type().is_some_and(|kind| kind.is_file()) {
-                let raw = entry.path().to_str().unwrap();
-                assert_eq!(
-                    root.resolve(raw).unwrap(),
-                    std::fs::canonicalize(entry.path()).unwrap(),
-                    "{raw}"
-                );
-                count += 1;
-            }
+        let files: Vec<String> = WalkBuilder::new(path)
+            .follow_links(false)
+            .build()
+            .map(Result::unwrap)
+            .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+            .map(|entry| entry.path().to_str().unwrap().to_owned())
+            .collect();
+        verify_resolution(path, &files);
+        files.len()
+    }
+
+    fn verify_resolution(root: &Path, files: &[String]) {
+        let on_demand = WalkSourcePaths::new(root).unwrap();
+        let mut primed = WalkSourcePaths::new(root).unwrap();
+        primed.prime(files);
+        for file in files {
+            let expected = std::fs::canonicalize(file).unwrap();
+            assert_eq!(on_demand.resolve(file).unwrap(), expected, "{file}");
+            assert_eq!(primed.resolve(file).unwrap(), expected, "primed {file}");
         }
-        count
+    }
+
+    #[test]
+    fn primed_parents_resolve_through_a_directory_that_became_a_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let real = temp.path().join("real");
+        std::fs::create_dir_all(real.join("moved/deeper")).unwrap();
+        std::fs::write(real.join("moved/deeper/a.md"), "a").unwrap();
+        std::fs::write(real.join("moved/b.md"), "b").unwrap();
+        symlink(real.join("moved"), real.join("walked")).unwrap();
+        // The walk saw `walked` as a directory; it is a symlink by the time the
+        // selection resolves, so neither it nor anything under it is derived.
+        let files = [
+            real.join("walked/deeper/a.md").to_str().unwrap().to_owned(),
+            real.join("walked/b.md").to_str().unwrap().to_owned(),
+            real.join("moved/b.md").to_str().unwrap().to_owned(),
+        ];
+        verify_resolution(&real, &files);
     }
 
     #[test]
