@@ -450,3 +450,81 @@ fn per_file_ignores_suppresses_cross_file_rule_on_cache_hit() {
         "per-file-ignores must suppress cross-file MD051 on a cache hit, got:\n{out}"
     );
 }
+
+/// The index cache is replaced by an atomic rename, so a rewrite gives the
+/// file a new inode.
+#[cfg(unix)]
+fn workspace_index_inode(dir: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(dir.join(".rumdl_cache").join("workspace_index.bin"))
+        .expect("workspace index cache must exist")
+        .ino()
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_index_cache_is_kept_when_no_file_changed() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    fs::write(dir.join(".rumdl.toml"), "").unwrap();
+    write_target(dir);
+    fs::write(dir.join("a.md"), "# Source\n\n[link](b.md#nonexistent)\n").unwrap();
+
+    let first = run(dir, &["check", "."]);
+    assert!(first.contains("MD051"), "broken fragment must be reported:\n{first}");
+    let saved = workspace_index_inode(dir);
+
+    // Every file hits both caches: the cross-file verdict comes from the
+    // loaded index alone, and that index is left as it was.
+    let second = run(dir, &["check", "."]);
+    assert_eq!(
+        second.matches("MD051").count(),
+        first.matches("MD051").count(),
+        "got:\n{second}"
+    );
+    assert_eq!(
+        workspace_index_inode(dir),
+        saved,
+        "an unchanged workspace must not rewrite the index cache"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_index_cache_is_saved_when_files_change() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    fs::write(dir.join(".rumdl.toml"), "").unwrap();
+    write_target(dir);
+    fs::write(dir.join("a.md"), "# Source\n\n[link](b.md#added-heading)\n").unwrap();
+    fs::write(dir.join("c.md"), "# Other\n").unwrap();
+
+    let first = run(dir, &["check", "."]);
+    assert!(first.contains("MD051"), "missing heading must be reported:\n{first}");
+    let saved = workspace_index_inode(dir);
+
+    // An edited target updates the index, and the next fully cached run
+    // reads the saved update.
+    fs::write(dir.join("b.md"), "# Target\n\n## Added Heading\n").unwrap();
+    let edited = run(dir, &["check", "."]);
+    assert!(!edited.contains("MD051"), "the added heading must resolve:\n{edited}");
+    let after_edit = workspace_index_inode(dir);
+    assert_ne!(after_edit, saved, "an edited file must be saved to the index cache");
+    let cached = run(dir, &["check", "."]);
+    assert!(
+        !cached.contains("MD051"),
+        "the saved index must hold the edit:\n{cached}"
+    );
+
+    // A deleted file is pruned from the index, which is then saved too.
+    fs::remove_file(dir.join("c.md")).unwrap();
+    let pruned = run(dir, &["check", "."]);
+    assert!(!pruned.contains("MD051"), "got:\n{pruned}");
+    assert_ne!(
+        workspace_index_inode(dir),
+        after_edit,
+        "a pruned file must be saved to the index cache"
+    );
+}

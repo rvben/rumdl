@@ -334,6 +334,18 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         return CheckRunOutcome::empty();
     }
 
+    // Loading the workspace index cache depends on nothing discovery decides,
+    // so it runs beside the walk. Only a run with cross-file rules uses it.
+    let index_load = workspace_cache_dir.map(|cache_dir| {
+        let cache_dir = cache_dir.to_path_buf();
+        std::thread::spawn(move || {
+            rumdl_lib::time_function!(
+                "workspace: load index cache",
+                WorkspaceIndex::load_from_cache(&cache_dir)
+            )
+        })
+    });
+
     // Find all markdown files to check
     let discovered = match rumdl_lib::time_function!(
         "check: discover markdown files",
@@ -541,16 +553,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
 
     // Load the workspace index before file processing so cache-hit files can reuse
     // their existing FileIndex when the content hash still matches.
-    let cached_workspace_index = if needs_cross_file {
-        Some(Arc::new(rumdl_lib::time_function!(
-            "workspace: load index cache",
-            workspace_cache_dir
-                .and_then(WorkspaceIndex::load_from_cache)
-                .unwrap_or_default()
-        )))
-    } else {
-        None
-    };
+    let cached_workspace_index = needs_cross_file.then(|| {
+        let loaded = index_load.and_then(|load| load.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
+        Arc::new(loaded.unwrap_or_default())
+    });
 
     // Batch output formats need to collect all warnings before formatting
     let needs_collection = output_format.is_batch() || args.preflight;
@@ -581,8 +587,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     // Collect all warnings for statistics if requested
     let mut all_warnings_for_stats = Vec::new();
 
-    // For cross-file analysis, we collect FileIndex data during linting (no second pass needed)
-    let mut file_indices: HashMap<PathBuf, (rumdl_lib::workspace_index::FileIndex, bool)> = HashMap::new();
+    // For cross-file analysis, we collect FileIndex data during linting (no second pass needed).
+    // Files whose index the loaded snapshot already holds contribute nothing.
+    let mut file_indices: Vec<(PathBuf, rumdl_lib::workspace_index::FileIndex)> = Vec::new();
 
     // Track files that already have issues from Phase 1 to avoid double-counting in Phase 2
     let mut files_already_with_issues: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -780,8 +787,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     all_warnings_for_stats.extend(warnings);
                 }
 
-                if needs_cross_file {
-                    file_indices.insert(PathBuf::from(&file_path), (file_index, file_index_reused));
+                if needs_cross_file && !file_index_reused {
+                    file_indices.push((PathBuf::from(&file_path), file_index));
                 }
             }
         });
@@ -859,8 +866,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 }
                 config_warning |= file_config_warning;
 
-                if needs_cross_file {
-                    file_indices.insert(PathBuf::from(file_path), (file_index, file_index_reused));
+                if needs_cross_file && !file_index_reused {
+                    file_indices.push((PathBuf::from(file_path), file_index));
                 }
 
                 total_files_processed += 1;
@@ -925,14 +932,14 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     };
 
     // Phase 2: Run cross-file checks if needed
-    if needs_cross_file && !file_indices.is_empty() {
+    if needs_cross_file && total_files_processed > 0 {
         let index_start = Instant::now();
 
         // Reuse the workspace index snapshot loaded before file processing.
-        let mut workspace_index = cached_workspace_index
-            .as_ref()
-            .map(|index| (**index).clone())
-            .unwrap_or_default();
+        // The workers have released their handles by now, so this takes the
+        // snapshot over instead of copying it.
+        let mut workspace_index = cached_workspace_index.map(Arc::unwrap_or_clone).unwrap_or_default();
+        let loaded_version = workspace_index.version();
 
         let loaded_from_cache = workspace_index.file_count() > 0;
         if args.verbose && !args.silent && loaded_from_cache {
@@ -942,17 +949,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             );
         }
 
-        // Incremental update: only update files that have changed (stale)
-        let mut updated_count = 0;
-        let mut skipped_count = 0;
+        // Incremental update: only files the snapshot did not already hold
+        let updated_count = file_indices.len();
+        let skipped_count = total_files_processed - updated_count;
         rumdl_lib::time_section!("workspace: update stale file indexes", {
-            for (path, (file_index, file_index_reused)) in file_indices {
-                if !file_index_reused || workspace_index.is_file_stale(&path, &file_index.content_hash) {
-                    workspace_index.update_file(&path, file_index);
-                    updated_count += 1;
-                } else {
-                    skipped_count += 1;
-                }
+            for (path, file_index) in file_indices {
+                workspace_index.update_file(&path, file_index);
             }
         });
 
@@ -978,17 +980,36 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         // Run cross-file checks using per-file config group rules
         let formatter = output_format.create_formatter();
         rumdl_lib::time_section!("workspace: run cross-file checks", {
-            // Iterate in path order so cross-file diagnostics are emitted in a
+            // Files are checked in parallel against the read-only index, then
+            // reported in path order so cross-file diagnostics are emitted in a
             // stable order across runs (the workspace index is a HashMap).
-            for (file_path, file_index) in workspace_index.files_sorted() {
-                // Use the file's own config group for cross-file rules
-                let (cf_rules, cf_config) = match file_group_map.get(file_path) {
-                    Some(&gi) => (&config_groups[gi].rule_sets.document, &config_groups[gi].config),
-                    None => continue,
-                };
-
-                if let Ok(cross_file_warnings) =
-                    rumdl_lib::run_cross_file_checks(file_path, file_index, cf_rules, &workspace_index, Some(cf_config))
+            let checked: Vec<_> = workspace_index
+                .files_sorted()
+                .into_par_iter()
+                .filter_map(|(file_path, file_index)| {
+                    let _source_scope = canonical_sources.enter();
+                    // Use the file's own config group for cross-file rules
+                    let group = &config_groups[*file_group_map.get(file_path)?];
+                    let result = rumdl_lib::run_cross_file_checks(
+                        file_path,
+                        file_index,
+                        &group.rule_sets.document,
+                        &workspace_index,
+                        Some(&group.config),
+                    );
+                    Some((file_path, result))
+                })
+                .collect();
+            // Batch entries by display path, so attaching cross-file warnings to
+            // a file's existing entry does not rescan every collected file.
+            let mut batch_positions: HashMap<String, usize> = HashMap::new();
+            if needs_collection {
+                for (position, (path, _)) in batch_file_warnings.iter().enumerate() {
+                    batch_positions.entry(path.clone()).or_insert(position);
+                }
+            }
+            for (file_path, result) in checked {
+                if let Ok(cross_file_warnings) = result
                     && !cross_file_warnings.is_empty()
                 {
                     has_issues = true;
@@ -1016,9 +1037,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
 
                     if needs_collection {
                         // Collect cross-file warnings for batch output
-                        if let Some((_, warnings)) = batch_file_warnings.iter_mut().find(|(p, _)| p == &display_path) {
-                            warnings.extend(cross_file_warnings.clone());
+                        if let Some(&position) = batch_positions.get(&display_path) {
+                            batch_file_warnings[position].1.extend(cross_file_warnings.clone());
                         } else {
+                            batch_positions.insert(display_path.clone(), batch_file_warnings.len());
                             batch_file_warnings.push((display_path, cross_file_warnings.clone()));
                         }
                     } else {
@@ -1048,8 +1070,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             }
         });
 
-        // Save workspace index to cache
-        if let Some(cache_dir) = workspace_cache_dir {
+        // Save workspace index to cache. An index no file changed is already
+        // what the cache holds, so rewriting it would only cost a full
+        // serialization and a synced write.
+        if let Some(cache_dir) = workspace_cache_dir
+            && workspace_index.version() != loaded_version
+        {
             if let Err(e) =
                 rumdl_lib::time_function!("workspace: save index cache", workspace_index.save_to_cache(cache_dir))
             {
@@ -1061,6 +1087,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 );
             }
         }
+
+        // Freeing an index of every workspace file takes measurable time and
+        // nothing waits on it, so it happens off the main thread.
+        std::thread::spawn(move || drop(workspace_index));
     }
 
     // An aborted traversal is incomplete, irrespective of finding severity filters.
