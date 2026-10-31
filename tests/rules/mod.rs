@@ -68,6 +68,7 @@ mod md051_comprehensive_test;
 mod md051_critical_edge_cases_test;
 mod md051_edge_cases_test;
 mod md051_issue_39_regression_test;
+mod undefined_reference_candidates_test;
 // mod md051_kramdown_official_test;
 mod md051_performance_edge_cases_test;
 mod md051_property_based_test;

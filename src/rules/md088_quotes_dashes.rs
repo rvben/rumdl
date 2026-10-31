@@ -110,7 +110,10 @@ impl Rule for MD088QuotesDashes {
                 }
 
                 let column = byte_to_char_count(line.content, byte_idx);
-                let fix = if ctx.is_in_link(absolute_byte) || ctx.is_in_bare_url(absolute_byte) {
+                let fix = if ctx.is_in_link(absolute_byte)
+                    || ctx.is_in_bare_url(absolute_byte)
+                    || ctx.is_in_unresolved_autoref_identifier(absolute_byte)
+                {
                     None
                 } else {
                     Some(Fix::new(

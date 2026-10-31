@@ -1389,8 +1389,8 @@ mod tests {
             "[x]:\n  https://example.com\n",
             "[x]: https://example.com\n  \"name@example.com\"\n",
             "> [x]:\n>   https://example.com\n",
-            "![www.example.com][r]\n\n[r]: <>\n",
-            "[https://example.com][r]\n\n[r]: <>\n",
+            "![www.example.com][r]\n",
+            "[https://example.com][r]\n",
         ] {
             let context = LintContext::new(source, MarkdownFlavor::Standard, None);
             assert_ne!(rule.fix(&context).unwrap(), source);

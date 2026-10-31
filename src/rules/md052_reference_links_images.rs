@@ -341,8 +341,17 @@ impl MD052ReferenceLinkImages {
         // Get code spans and HTML tags once for the entire function
         let html_tags = ctx.html_tags();
 
+        // Reference candidates without a definition are not rendered links, so they
+        // live in the unresolved collections; merge them back in document order.
+        let mut all_links: Vec<&crate::lint_context::ParsedLink> =
+            ctx.links().iter().chain(ctx.unresolved_links()).collect();
+        all_links.sort_by_key(|link| link.byte_offset);
+        let mut all_images: Vec<&crate::lint_context::ParsedImage> =
+            ctx.images().iter().chain(ctx.unresolved_images()).collect();
+        all_images.sort_by_key(|image| image.byte_offset);
+
         // Use cached data for reference links and images
-        for link in ctx.links() {
+        for link in all_links {
             if !link.is_reference {
                 continue; // Skip inline links
             }
@@ -462,7 +471,7 @@ impl MD052ReferenceLinkImages {
         }
 
         // Use cached data for reference images
-        for image in ctx.images() {
+        for image in all_images {
             if !image.is_reference {
                 continue; // Skip inline images
             }
@@ -562,13 +571,13 @@ impl MD052ReferenceLinkImages {
         // Build a set of byte ranges that are already covered by parsed links/images
         let mut covered_ranges: Vec<(usize, usize)> = Vec::new();
 
-        // Add ranges from parsed links
-        for link in ctx.links() {
+        // Add ranges from parsed links, including unresolved candidates
+        for link in ctx.links().iter().chain(ctx.unresolved_links()) {
             covered_ranges.push((link.byte_offset, link.byte_end));
         }
 
-        // Add ranges from parsed images
-        for image in ctx.images() {
+        // Add ranges from parsed images, including unresolved candidates
+        for image in ctx.images().iter().chain(ctx.unresolved_images()) {
             covered_ranges.push((image.byte_offset, image.byte_end));
         }
 

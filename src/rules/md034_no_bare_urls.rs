@@ -638,10 +638,7 @@ impl MD034NoBareUrls {
             let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
             let absolute_pos = line_start_byte + start;
 
-            if ctx
-                .image_containing(absolute_pos)
-                .is_some_and(|image| !(image.is_reference && image.url.is_empty()))
-            {
+            if ctx.image_containing(absolute_pos).is_some() {
                 continue;
             }
 
@@ -773,10 +770,7 @@ impl MD034NoBareUrls {
                     let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
                     let absolute_pos = line_start_byte + start;
 
-                    if ctx
-                        .image_containing(absolute_pos)
-                        .is_some_and(|image| !(image.is_reference && image.url.is_empty()))
-                    {
+                    if ctx.image_containing(absolute_pos).is_some() {
                         continue;
                     }
 

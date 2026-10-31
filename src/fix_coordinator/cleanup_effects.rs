@@ -155,6 +155,14 @@ pub(super) fn capture_with_native(
                     .broken_links()
                     .iter()
                     .any(|link| link.span.start < at && at < link.span.end)
+                || ctx
+                    .unresolved_links()
+                    .iter()
+                    .any(|link| link.byte_offset < at && at < link.byte_end)
+                || ctx
+                    .unresolved_images()
+                    .iter()
+                    .any(|image| image.byte_offset < at && at < image.byte_end)
             {
                 return None;
             }

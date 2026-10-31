@@ -73,6 +73,7 @@ mod cli_stdin_batch_targets_test;
 mod cli_stdin_batch_test;
 mod cli_stdin_cross_file_test;
 mod cli_stdin_exclude_issue_871_test;
+mod cli_unresolved_references_issue_974_test;
 mod cli_wikilink_empty_label_test;
 mod config_shadow_warning_test;
 mod diff_output_applies_test;

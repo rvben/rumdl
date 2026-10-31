@@ -265,7 +265,7 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
         if source.allowed(cfg) {
             continue;
         }
-        // Skip broken references — same guard as check().
+        // Empty-destination references cannot be rewritten losslessly — same guard as check().
         if matches!(source, Style::Full | Style::Collapsed | Style::Shortcut) && link.url.is_empty() {
             continue;
         }

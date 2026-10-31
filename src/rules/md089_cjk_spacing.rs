@@ -28,12 +28,14 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::config::MarkdownFlavor;
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::{LintContext, SourcePositions};
 use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::obsidian_tag::TAG_PATTERN;
 use crate::utils::unicode::is_cjk_letter;
 use md089_config::MD089Config;
+use pulldown_cmark::LinkType;
 
 /// Rule MD089: CJK spacing.
 #[derive(Debug, Clone)]
@@ -260,6 +262,17 @@ fn footnote_marker_end(content: &str, start: usize) -> Option<usize> {
     rest.find(']').map(|offset| start + offset + 1)
 }
 
+/// Whether the byte at `pos` is preceded by an odd number of backslashes.
+fn is_escaped(content: &str, pos: usize) -> bool {
+    content.as_bytes()[..pos]
+        .iter()
+        .rev()
+        .take_while(|&&b| b == b'\\')
+        .count()
+        % 2
+        == 1
+}
+
 /// The `[^id]:` label of a footnote definition, as byte offsets into `line`.
 /// Indentation and blockquote markers may stand before the label; a
 /// continuation line of the same definition has none.
@@ -385,6 +398,34 @@ fn collect_specials(ctx: &LintContext) -> Vec<Unit> {
         };
         push(link.byte_offset, link.byte_end, kind);
     }
+    // Bracket text with no definition is prose in CommonMark, so it is walked.
+    // Three readings give it another meaning and stay whole: a footnote marker
+    // (`[^id]`), a Pandoc implicit heading reference, and a MkDocs autoref
+    // (`[text][identifier]`, `[identifier][]`). Spacing any of them renames a
+    // target. In every other case only the `[label]` of a full reference is a
+    // name, while its text is prose.
+    let unresolved_candidates = ctx
+        .unresolved_links()
+        .iter()
+        .map(|link| (link.byte_offset, link.byte_end, link.link_type, false))
+        .chain(
+            ctx.unresolved_images()
+                .iter()
+                .map(|image| (image.byte_offset, image.byte_end, image.link_type, true)),
+        );
+    for (start, end, link_type, is_image) in unresolved_candidates {
+        let marker = start + usize::from(is_image);
+        let shortcut = matches!(link_type, LinkType::Shortcut | LinkType::ShortcutUnknown);
+        let footnote_like = ctx.content[marker..end].starts_with("[^");
+        let autoref = ctx.flavor == MarkdownFlavor::MkDocs && !is_image && !shortcut;
+        if footnote_like || ctx.flavor.is_pandoc_compatible() || autoref {
+            push(start, end, Kind::Opaque);
+        } else if matches!(link_type, LinkType::Reference | LinkType::ReferenceUnknown)
+            && let Some(open) = crate::lint_context::reference_label_start(&ctx.content[start..end])
+        {
+            push(start + open, end, Kind::Opaque);
+        }
+    }
     for url in ctx.bare_urls().iter() {
         push(url.byte_offset, url.byte_end, Kind::Opaque);
     }
@@ -408,6 +449,30 @@ fn collect_specials(ctx: &LintContext) -> Vec<Unit> {
     for footnote in ctx.footnote_references() {
         if let Some(end) = footnote_marker_end(ctx.content, footnote.byte_offset) {
             push(footnote.byte_offset, end, Kind::Wall);
+        }
+    }
+    // A marker with no definition is literal text to the parser, but it still names
+    // the footnote a later edit may define, so it is protected like a defined one.
+    let known: HashSet<usize> = ctx.footnote_references().iter().map(|f| f.byte_offset).collect();
+    // The nearest `]` and the end of the line are looked up by binary search in
+    // positions collected once, so a run of unmatched openers stays linear.
+    let closers: Vec<usize> = ctx.content.match_indices(']').map(|(i, _)| i).collect();
+    let newlines: Vec<usize> = ctx.content.match_indices('\n').map(|(i, _)| i).collect();
+    for (start, _) in ctx.content.match_indices("[^") {
+        if known.contains(&start)
+            || is_escaped(ctx.content, start)
+            || ctx.is_byte_offset_in_code_span(start)
+            || ctx.is_in_html_tag(start)
+        {
+            continue;
+        }
+        let close = closers.get(closers.partition_point(|&c| c < start)).copied();
+        let line_end = newlines.get(newlines.partition_point(|&n| n < start)).copied();
+        if let Some(close) = close
+            && line_end.is_none_or(|n| close < n)
+            && !ctx.content[close + 1..].starts_with(':')
+        {
+            push(start, close + 1, Kind::Wall);
         }
     }
     // Only the `[^id]:` label of a definition is a marker; the body after the

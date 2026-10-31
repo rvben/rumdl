@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn test_reference_links() {
         let rule = MD059LinkText::default();
-        let ctx = LintContext::new("[click here][ref]\n[ref]: url", MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new("[click here][ref]\n\n[ref]: url", MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1, "Should check reference links");

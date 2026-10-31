@@ -455,6 +455,12 @@ impl MD044ProperNames {
                     continue;
                 }
 
+                // MkDocs resolves `[text][identifier]` as an autoref whose identifier is
+                // case-sensitive, so the label of an undefined full reference is a name.
+                if ctx.is_in_unresolved_autoref_identifier(byte_pos) {
+                    continue;
+                }
+
                 // Skip if inside an angle-bracket URL (e.g., <https://...>)
                 // The link parser skips autolinks inside HTML comments,
                 // so we detect them directly in the line text.

@@ -730,10 +730,18 @@ mod tests {
             "MD042 should NOT flag [text][undefined] - undefined refs are MD052's job. Got: {result:?}"
         );
 
-        // But empty text with undefined reference SHOULD be flagged
+        // `[][undefined]` is literal text in CommonMark, not a link with empty text
         let ctx = LintContext::new("[][undefined]", crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Empty text in reference link should still be flagged");
+        assert!(
+            result.is_empty(),
+            "literal bracket text is not an empty link: {result:?}"
+        );
+
+        // A defined reference with empty text is a real link and not an empty one
+        let ctx = LintContext::new("[][r]\n\n[r]: /x", crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "{result:?}");
     }
 
     #[test]
@@ -958,7 +966,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         );
 
         // Should still flag truly empty links even in MkDocs mode
-        let ctx = LintContext::new("[][]", crate::config::MarkdownFlavor::MkDocs, None);
+        let ctx = LintContext::new("[]()", crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),

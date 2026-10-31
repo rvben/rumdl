@@ -2,7 +2,7 @@ pub mod types;
 
 pub(crate) use heading_detection::atx_display_text_for_proof;
 pub(crate) use heading_detection::is_paragraph_text_line;
-pub(crate) use link_parser::{image_pattern, link_pattern};
+pub(crate) use link_parser::{image_pattern, link_pattern, reference_label_start};
 pub(crate) use list_blocks::{column_after, column_at};
 pub use types::*;
 
@@ -407,6 +407,8 @@ pub struct LintContext<'a> {
     rendered_link_ends_cache: OnceLock<Vec<usize>>, // Prefix maxima for containment queries
     parsed_link_ranges: Vec<(usize, usize)>,        // Native links, without undefined-reference fallbacks
     images: Vec<ParsedImage<'a>>,                   // Pre-parsed images
+    unresolved_links: Vec<ParsedLink<'a>>,          // Reference candidates with no definition (literal text)
+    unresolved_images: Vec<ParsedImage<'a>>,        // Image reference candidates with no definition (literal text)
     broken_links: Vec<BrokenLinkInfo>,              // Broken/undefined references
     footnote_refs: Vec<FootnoteRef>,                // Pre-parsed footnote references
     reference_defs: Vec<ReferenceDef>,              // Reference definitions
@@ -1513,7 +1515,14 @@ impl<'a> LintContext<'a> {
                 parser_has_math,
             } = structure;
             // Finalize links and images: filter by code_spans and run regex fallbacks
-            let (links, images, broken_links, footnote_refs) = profile_section!(
+            let link_parser::FinalizedLinks {
+                links,
+                images,
+                unresolved_links,
+                unresolved_images,
+                broken_links,
+                footnote_refs,
+            } = profile_section!(
                 "Links & images finalize",
                 profile,
                 link_parser::finalize_links_and_images(
@@ -1672,6 +1681,14 @@ impl<'a> LintContext<'a> {
                 .filter(|link| !lines.get(link.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
                 .collect::<Vec<_>>();
             let images = images
+                .into_iter()
+                .filter(|img| !lines.get(img.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+                .collect::<Vec<_>>();
+            let unresolved_links = unresolved_links
+                .into_iter()
+                .filter(|link| !lines.get(link.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+                .collect::<Vec<_>>();
+            let unresolved_images = unresolved_images
                 .into_iter()
                 .filter(|img| !lines.get(img.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
                 .collect::<Vec<_>>();
@@ -1904,6 +1921,8 @@ impl<'a> LintContext<'a> {
                 rendered_link_ends_cache: OnceLock::new(),
                 parsed_link_ranges,
                 images,
+                unresolved_links,
+                unresolved_images,
                 broken_links,
                 footnote_refs,
                 reference_defs,
@@ -2516,9 +2535,27 @@ impl<'a> LintContext<'a> {
             .get_or_init(|| anchors::DocumentAnchors::new(self))
     }
 
-    /// Parsed links in document order.
+    /// Rendered links in document order. A reference whose label has no
+    /// definition is literal text in CommonMark and is not listed here; see
+    /// [`Self::unresolved_links`].
     pub fn links(&self) -> &[ParsedLink<'a>] {
         &self.links
+    }
+
+    /// Reference-link candidates (`[t]`, `[t][]`, `[t][label]`) whose label has
+    /// no definition, in document order. They render as literal text, so only a
+    /// reader that must know where such brackets are (the undefined-reference
+    /// rule, line wrapping, fix-safety guards) should use this.
+    pub fn unresolved_links(&self) -> &[ParsedLink<'a>] {
+        &self.unresolved_links
+    }
+
+    /// The unresolved link candidate that opens at `byte_offset`, if any.
+    pub fn unresolved_link_starting_at(&self, byte_offset: usize) -> Option<&ParsedLink<'a>> {
+        self.unresolved_links
+            .binary_search_by_key(&byte_offset, |link| link.byte_offset)
+            .ok()
+            .map(|index| &self.unresolved_links[index])
     }
 
     /// Whether a byte belongs to a native link, excluding undefined-reference
@@ -2535,9 +2572,23 @@ impl<'a> LintContext<'a> {
         self.parsed_link_ranges.get(index).is_some_and(|&(open, _)| open < end)
     }
 
-    /// Parsed images in document order.
+    /// Rendered images in document order. Unresolved image references are
+    /// literal text and are listed by [`Self::unresolved_images`] instead.
     pub fn images(&self) -> &[ParsedImage<'a>] {
         &self.images
+    }
+
+    /// Image reference candidates whose label has no definition, in document order.
+    pub fn unresolved_images(&self) -> &[ParsedImage<'a>] {
+        &self.unresolved_images
+    }
+
+    /// The unresolved image candidate that opens at `byte_offset`, if any.
+    pub fn unresolved_image_starting_at(&self, byte_offset: usize) -> Option<&ParsedImage<'a>> {
+        self.unresolved_images
+            .binary_search_by_key(&byte_offset, |image| image.byte_offset)
+            .ok()
+            .map(|index| &self.unresolved_images[index])
     }
 
     /// Broken or undefined reference links in document order.
@@ -2607,9 +2658,43 @@ impl<'a> LintContext<'a> {
         &self.links[..end]
     }
 
+    /// Whether a byte position is inside a MkDocs autoref identifier: the
+    /// `[label]` of an unresolved full reference (`[text][label]`) or the
+    /// bracketed text of an unresolved collapsed one (`[label][]`). The
+    /// identifier is case-sensitive and names a target in another document, so
+    /// rules that rewrite prose must leave it alone. Always false outside MkDocs,
+    /// where those brackets are plain text.
+    pub(crate) fn is_in_unresolved_autoref_identifier(&self, byte_pos: usize) -> bool {
+        use pulldown_cmark::LinkType;
+        if self.flavor != MarkdownFlavor::MkDocs {
+            return false;
+        }
+        let links = &self.unresolved_links;
+        let end = links.partition_point(|link| link.byte_offset <= byte_pos);
+        links[..end].iter().rev().take(8).any(|link| {
+            if byte_pos >= link.byte_end {
+                return false;
+            }
+            match link.link_type {
+                LinkType::Reference | LinkType::ReferenceUnknown => {
+                    let source = &self.content[link.byte_offset..link.byte_end];
+                    // The markdown-container fallback records a collapsed reference as a
+                    // full one with an empty label; its identifier is the text.
+                    if source.ends_with("[]") {
+                        return byte_pos < link.byte_end.saturating_sub(2);
+                    }
+                    link_parser::reference_label_start(source).is_some_and(|open| byte_pos > link.byte_offset + open)
+                }
+                LinkType::Collapsed | LinkType::CollapsedUnknown => byte_pos < link.byte_end.saturating_sub(2),
+                _ => false,
+            }
+        })
+    }
+
     /// Whether one rendered link contains the whole byte range. Undefined
-    /// references remain prose. Prefix maxima also handle overlapping fallback
-    /// records without scanning all preceding links for every candidate.
+    /// references are not in `links`, so they remain prose. Prefix maxima also
+    /// handle overlapping fallback records without scanning all preceding links
+    /// for every candidate.
     pub(crate) fn is_range_in_rendered_link(&self, range: &Range<usize>) -> bool {
         let count = self.links.partition_point(|link| link.byte_offset <= range.start);
         if count == 0 {
@@ -2620,9 +2705,7 @@ impl<'a> LintContext<'a> {
             self.links
                 .iter()
                 .map(|link| {
-                    if !(link.is_reference && link.url.is_empty()) {
-                        end = end.max(link.byte_end);
-                    }
+                    end = end.max(link.byte_end);
                     end
                 })
                 .collect()

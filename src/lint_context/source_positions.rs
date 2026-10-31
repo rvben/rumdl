@@ -222,11 +222,14 @@ mod tests {
                 )
                 .replace('\n', newline);
                 let ctx = LintContext::new(&content, flavor, None);
-                assert!(ctx.links().len() >= 4, "{flavor:?}");
-                assert!(ctx.images().len() >= 3, "{flavor:?}");
+                assert!(ctx.links().len() >= 3, "{flavor:?}");
+                assert!(ctx.images().len() >= 2, "{flavor:?}");
+                assert_eq!(ctx.unresolved_links().len(), 1, "{flavor:?}");
+                assert_eq!(ctx.unresolved_images().len(), 1, "{flavor:?}");
                 let spans = ctx
                     .links()
                     .iter()
+                    .chain(ctx.unresolved_links())
                     .map(|link| {
                         (
                             link.byte_offset,
@@ -237,7 +240,7 @@ mod tests {
                             link.end_col,
                         )
                     })
-                    .chain(ctx.images().iter().map(|image| {
+                    .chain(ctx.images().iter().chain(ctx.unresolved_images()).map(|image| {
                         (
                             image.byte_offset,
                             image.byte_end,

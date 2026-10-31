@@ -898,6 +898,7 @@ impl<'ctx, 'src> EmphasisContext<'ctx, 'src> {
             || ctx.is_in_code_block_or_span(span_start)
             || in_line_markup
             || ctx.is_in_link(span_start)
+            || ctx.is_in_unresolved_autoref_identifier(span_start)
             || is_byte_in_html_tag(&self.html_tags, span_start)
             || ctx.is_in_jsx_component_tag(span_start)
             || ctx.is_in_jsx_component_tag(span_end.saturating_sub(1))

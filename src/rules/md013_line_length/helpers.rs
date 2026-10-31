@@ -733,8 +733,7 @@ fn is_safe_trailing(c: char) -> bool {
 }
 
 fn has_matching_link_or_image(ctx: &LintContext, start: usize, end: usize) -> bool {
-    ctx.link_starting_at(start)
-        .is_some_and(|link| link.byte_end == end && !(link.link_type == LinkType::Shortcut && link.url.is_empty()))
+    ctx.link_starting_at(start).is_some_and(|link| link.byte_end == end)
         || ctx.image_starting_at(start).is_some_and(|image| image.byte_end == end)
 }
 
@@ -762,13 +761,12 @@ fn is_link_with_optional_emphasis(ctx: &LintContext, s: &str, s_offset: usize) -
         }
 
         // Fallback for links with spaces in destination (not parsed by pulldown-cmark as a single
-        // link). A destination holding a space leaves the link text parsed as an empty-url
-        // shortcut, and that is what marks the trailing group as the destination rather than
+        // link). A destination holding a space leaves the link text as an unresolved shortcut
+        // candidate, and that is what marks the trailing group as the destination rather than
         // prose following a complete link.
-        if let Some(l) = ctx.link_starting_at(s_start)
+        if let Some(l) = ctx.unresolved_link_starting_at(s_start)
             && l.byte_end < s_end
             && l.link_type == LinkType::Shortcut
-            && l.url.is_empty()
         {
             let remaining = &s[l.byte_end - s_start..];
             if is_destination_group(remaining) {
@@ -777,10 +775,9 @@ fn is_link_with_optional_emphasis(ctx: &LintContext, s: &str, s_offset: usize) -
         }
 
         // Fallback for images with spaces in destination
-        if let Some(i) = ctx.image_starting_at(s_start)
+        if let Some(i) = ctx.unresolved_image_starting_at(s_start)
             && i.byte_end < s_end
             && i.link_type == LinkType::Shortcut
-            && i.url.is_empty()
         {
             let remaining = &s[i.byte_end - s_start..];
             if is_destination_group(remaining) {
@@ -1265,13 +1262,13 @@ mod tests {
     #[test]
     fn test_standalone_link_reference_style() {
         assert!(check_standalone("[text][]\n\n[text]: url"));
-        assert!(check_standalone("[text][ref]"));
-        assert!(check_standalone("![alt][ref]"));
-        assert!(check_standalone("- [text][ref]"));
-        assert!(check_standalone("> [text][ref]"));
+        assert!(check_standalone("[text][ref]\n\n[ref]: url"));
+        assert!(check_standalone("![alt][ref]\n\n[ref]: url"));
+        assert!(check_standalone("- [text][ref]\n\n[ref]: url"));
+        assert!(check_standalone("> [text][ref]\n\n[ref]: url"));
         // Collapsed reference link
-        assert!(check_standalone("[text][]"));
-        assert!(check_standalone("- [text][]"));
+        assert!(check_standalone("[text][]\n\n[text]: url"));
+        assert!(check_standalone("- [text][]\n\n[text]: url"));
     }
 
     #[test]
@@ -1334,9 +1331,9 @@ mod tests {
         assert!(check_standalone("  - **[text](url)**;"));
 
         // Reference style
-        assert!(check_standalone("[text][ref],"));
-        assert!(check_standalone("![alt][ref]."));
-        assert!(check_standalone("- ***[text][ref]***!"));
+        assert!(check_standalone("[text][ref],\n\n[ref]: url"));
+        assert!(check_standalone("![alt][ref].\n\n[ref]: url"));
+        assert!(check_standalone("- ***[text][ref]***!\n\n[ref]: url"));
 
         // Standalone image with trailing punctuation
         assert!(check_standalone("![alt](url),"));

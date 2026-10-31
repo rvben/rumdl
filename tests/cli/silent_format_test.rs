@@ -51,8 +51,8 @@ fn silent_format_keeps_native_urls_in_reference_continuations_and_empty_labels()
         for source in [
             format!("[x]:\n  {atom}\n"),
             format!("[x]: https://example.org\n  \"{atom}\"\n"),
-            format!("![{atom}][r]\n\n[r]: <>\n"),
-            format!("[{atom}][r]\n\n[r]: <>\n"),
+            format!("![{atom}][r]\n"),
+            format!("[{atom}][r]\n"),
         ] {
             let expected = source.replace(atom, replacement);
             fs::write(&path, &source).unwrap();

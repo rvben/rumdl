@@ -248,7 +248,7 @@ Final empty: [empty text]()"#;
 fn test_md042_reference_links_in_code() {
     let content = r#"# Test Document
 
-Regular empty reference: [][empty-ref]
+Regular empty link: [](#)
 
 Code block with reference:
 ```
@@ -336,7 +336,11 @@ fn test_md042_reference_links() {
     let content = "[][]";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1); // Empty URL (no matching reference)
+    assert!(result.is_empty()); // Literal text: no definition makes it a link
+    let content = "[]()";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1); // Empty URL
 }
 
 #[test]

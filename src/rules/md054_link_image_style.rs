@@ -182,7 +182,9 @@ impl Rule for MD054LinkImageStyle {
 
         // Process links from pre-parsed data
         for link in ctx.links() {
-            // Skip broken references (empty URL means unresolved reference)
+            // A reference whose destination is empty (a `[r]: <>` definition, or a
+            // container match whose destination was never resolved) cannot be
+            // rewritten to another style without losing the reference.
             if matches!(
                 link.link_type,
                 LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
@@ -226,7 +228,9 @@ impl Rule for MD054LinkImageStyle {
 
         // Process images from pre-parsed data
         for image in ctx.images() {
-            // Skip broken references (empty URL means unresolved reference)
+            // A reference whose destination is empty (a `[r]: <>` definition, or a
+            // container match whose destination was never resolved) cannot be
+            // rewritten to another style without losing the reference.
             if matches!(
                 image.link_type,
                 LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut

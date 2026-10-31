@@ -36,7 +36,7 @@ impl MD049EmphasisStyle {
     /// Check if a byte position is within a link (inline links, reference links, or reference definitions).
     /// Delegates to LintContext::is_in_link which uses O(log n) binary search.
     fn is_in_link(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
-        ctx.is_in_link(byte_pos)
+        ctx.is_in_link(byte_pos) || ctx.is_in_unresolved_autoref_identifier(byte_pos)
     }
 
     fn collect_emphasis_from_line<'a>(

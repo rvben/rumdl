@@ -3944,7 +3944,7 @@ fn test_reference_image_in_a_markdown_attribute_block_is_still_parsed() {
 #[test]
 fn test_reference_link_after_an_html_block_is_still_parsed() {
     // The suppression is per line, not "everything below the first tag".
-    let content = "<details>\n<summary>[dead][ref]</summary>\n</details>\n\n[live][ref]\n";
+    let content = "<details>\n<summary>[dead][ref]</summary>\n</details>\n\n[live][ref]\n\n[ref]: /x\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     assert_eq!(ctx.links().len(), 1, "unexpected links: {:?}", ctx.links());
     assert_eq!(ctx.links()[0].text, "live");
@@ -6389,24 +6389,21 @@ fn test_definitions_sharing_a_label_all_count_as_definitions() {
 fn rendered_link_range_index_matches_exhaustive_containment() {
     let mut ctx = LintContext::new("[link](target.md)", MarkdownFlavor::Standard, None);
     let template = ctx.links()[0].clone();
-    ctx.links = [(0, 40, false), (5, 20, false), (15, 50, true), (40, 60, false)]
+    ctx.links = [(0, 40), (5, 20), (15, 50), (40, 60)]
         .into_iter()
-        .map(|(start, end, undefined)| {
+        .map(|(start, end)| {
             let mut link = template.clone();
             link.byte_offset = start;
             link.byte_end = end;
-            link.is_reference = undefined;
-            if undefined {
-                link.url = "".into();
-            }
             link
         })
         .collect();
     for start in 0..=65 {
         for end in start..=65 {
-            let expected = ctx.links().iter().any(|link| {
-                !(link.is_reference && link.url.is_empty()) && start >= link.byte_offset && end <= link.byte_end
-            });
+            let expected = ctx
+                .links()
+                .iter()
+                .any(|link| start >= link.byte_offset && end <= link.byte_end);
             assert_eq!(ctx.is_range_in_rendered_link(&(start..end)), expected, "{start}..{end}");
         }
     }
@@ -6824,5 +6821,105 @@ fn html_block_byte_ranges_are_half_open_and_flavor_aware() {
     ] {
         let ctx = LintContext::new(content, flavor, None);
         assert_eq!(ctx.html_block_range_at(content.find("<div>").unwrap()), None);
+    }
+}
+
+mod unresolved_reference_candidates {
+    use super::*;
+
+    fn ctx(content: &str) -> LintContext<'_> {
+        LintContext::new(content, MarkdownFlavor::Standard, None)
+    }
+
+    fn texts(links: &[ParsedLink<'_>]) -> Vec<String> {
+        links.iter().map(|l| l.text.to_string()).collect()
+    }
+
+    #[test]
+    fn undefined_forms_are_candidates_and_never_links() {
+        let c = ctx("[a] [b][] [c][missing] ![d][nope]\n");
+        assert_eq!(texts(c.links()), Vec::<String>::new());
+        assert!(c.images().is_empty());
+        assert_eq!(texts(c.unresolved_links()), ["a", "b", "c"]);
+        assert_eq!(c.unresolved_images().len(), 1);
+        assert_eq!(c.unresolved_images()[0].alt_text, "d");
+        assert!(c.unresolved_link_starting_at(0).is_some());
+        assert!(
+            c.unresolved_image_starting_at(c.unresolved_images()[0].byte_offset)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn defined_forms_are_links_and_never_candidates() {
+        let c = ctx("[a] [b][] [c][r] ![d][r]\n\n[a]: /1\n[b]: /2\n[r]: /3\n");
+        assert_eq!(texts(c.links()), ["a", "b", "c"]);
+        assert_eq!(c.images().len(), 1);
+        assert!(c.unresolved_links().is_empty());
+        assert!(c.unresolved_images().is_empty());
+    }
+
+    #[test]
+    fn empty_destination_definition_defines_the_label() {
+        let c = ctx("[a][r]\n\n[r]: <>\n");
+        assert_eq!(texts(c.links()), ["a"]);
+        assert!(c.unresolved_links().is_empty());
+    }
+
+    #[test]
+    fn labels_match_by_whitespace_collapse_and_unicode_fold_inside_containers() {
+        for (reference, definition) in [("a  b", "a b"), ("STRASSE", "straße"), ("R", "r")] {
+            let content = format!("<div markdown=\"1\">\n[t][{reference}]\n</div>\n\n[{definition}]: /x\n");
+            for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs] {
+                let c = LintContext::new(&content, flavor, None);
+                assert_eq!(texts(c.links()), ["t"], "{flavor:?} {content}");
+                assert!(c.unresolved_links().is_empty(), "{flavor:?} {content}");
+            }
+        }
+    }
+
+    #[test]
+    fn labels_defined_inside_a_container_match_by_unicode_fold() {
+        let content = "<div markdown=\"1\">\n[t][STRASSE]\n[u][a  b]\n[straße]: /x\n[a b]: /y\n</div>\n";
+        let c = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        assert_eq!(texts(c.links()), ["t", "u"], "{:?}", c.unresolved_links());
+        assert!(c.unresolved_links().is_empty());
+    }
+
+    #[test]
+    fn container_matches_without_a_definition_are_candidates() {
+        let content = "<div markdown=\"1\">\n[t][missing]\n</div>\n\n[r]: /x\n";
+        let c = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        assert!(c.links().is_empty());
+        assert_eq!(texts(c.unresolved_links()), ["t"]);
+    }
+
+    #[test]
+    fn nested_real_link_survives_an_unresolved_outer_image() {
+        let c = ctx("![[link](missing.md)][absent]\n");
+        assert_eq!(texts(c.links()), ["link"]);
+        assert_eq!(c.unresolved_images().len(), 1);
+    }
+
+    #[test]
+    fn code_comments_escapes_and_footnotes_are_not_candidates() {
+        let c = ctx(
+            "`[a]` \\[b] <!-- [c] -->\n\n```\n[d]\n```\n\n- [ ] task\n\n> [!NOTE]\n> x\n\n[[wiki]] ![[embed.png]]\n\nnote[^1]\n\n[^1]: text\n",
+        );
+        assert_eq!(texts(c.unresolved_links()), Vec::<String>::new());
+        assert!(c.unresolved_images().is_empty());
+    }
+
+    #[test]
+    fn headings_keep_defined_links_and_demote_undefined_ones() {
+        let c = ctx("# A [d] and [u]\n\nSetext [d] [u]\n===\n\n[go](#a-d-and-u)\n\n[d]: /x\n");
+        assert_eq!(texts(c.links()), ["d", "d", "go"]);
+        assert_eq!(texts(c.unresolved_links()), ["u", "u"]);
+    }
+
+    #[test]
+    fn kramdown_filtering_applies_to_candidates() {
+        let c = LintContext::new("{::comment}\n[u]\n{:/comment}\n\n[v]\n", MarkdownFlavor::Kramdown, None);
+        assert_eq!(texts(c.unresolved_links()), ["v"]);
     }
 }
