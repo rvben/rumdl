@@ -761,7 +761,7 @@ docs-search-test:
 # sources change. Steps run one at a time because each reads what the previous
 # one wrote to site/.
 docs-site:
-	@command -v zensical >/dev/null || { echo "zensical not found; install it with 'pip install zensical'"; exit 1; }
+	@command -v zensical >/dev/null || { echo "zensical not found; install the pinned version with 'mise install pipx:zensical'"; exit 1; }
 	$(MAKE) docs-sanitize-test
 	$(MAKE) docs-sitemap-test
 	$(MAKE) docs-benchmark-test

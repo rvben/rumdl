@@ -96,8 +96,8 @@ jobs:
           experimental: true
           install: false
 
-      - name: Install Rust toolchain
-        run: ./scripts/mise-install.sh rust
+      - name: Install Rust toolchain and Zensical
+        run: ./scripts/mise-install.sh rust python uv pipx:zensical
 
       - name: Install wasm-pack
         uses: taiki-e/install-action@wasm-pack
@@ -107,11 +107,8 @@ jobs:
           shared-key: ci-wasm
           save-if: false
 
-      - name: Install Zensical
-        run: pip install zensical
-
       - name: Build and check documentation site
-        run: make docs-site
+        run: mise exec -- make docs-site
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

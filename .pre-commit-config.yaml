@@ -177,12 +177,13 @@ repos:
         stages: [pre-push]
 
       # The Documentation workflow's build and checks, so a docs failure is
-      # caught before it reaches main. Runs only when documentation sources
-      # change; changes to src/ and other build inputs stay covered by CI.
+      # caught before it reaches main. Runs when documentation sources change,
+      # and when .mise.toml does, since it pins the Zensical that builds the
+      # site; changes to src/ and other build inputs stay covered by CI.
       - id: docs-site-check
         name: build and check the documentation site
         entry: mise exec -- make docs-site
         language: system
-        files: ^(docs/|overrides/|functions/|web/playground/|zensical\.toml$|wrangler\.toml$|assets/benchmark\.svg$|scripts/(docs_|complete_docs_sitemap|sanitize_docs_site|benchmark_docs_test|generate_benchmark_chart))
+        files: ^(docs/|overrides/|functions/|web/playground/|zensical\.toml$|\.mise\.toml$|wrangler\.toml$|assets/benchmark\.svg$|scripts/(docs_|complete_docs_sitemap|sanitize_docs_site|benchmark_docs_test|generate_benchmark_chart))
         pass_filenames: false
         stages: [pre-push]
