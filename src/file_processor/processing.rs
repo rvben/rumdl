@@ -1637,7 +1637,12 @@ pub fn process_file_with_index(
             )
         ) {
             Ok(cached_warnings) => {
-                if let Some(state) = &config.code_block_tools.run_state {
+                // Building a processor resolves project paths, so it is only
+                // built for a hit that has tool verdicts to replay.
+                if let Some(state) = &config.code_block_tools.run_state
+                    && config.code_block_tools.enabled
+                    && rule_sets.auxiliary.lint
+                {
                     let processor =
                         rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(&config.code_block_tools, flavor)
                             .with_document_config(config)
@@ -1645,11 +1650,9 @@ pub fn process_file_with_index(
                             .with_builtin_checks(
                                 !rule_sets.for_file(&ignored_rules_for_file).embedded_markdown.is_empty(),
                             );
-                    if config.code_block_tools.enabled && rule_sets.auxiliary.lint {
-                        processor.replay_cached_warnings(strip_bom(content));
-                        if processor.has_lint_work(strip_bom(content)) {
-                            state.record_cached_check();
-                        }
+                    processor.replay_cached_warnings(strip_bom(content));
+                    if processor.has_lint_work(strip_bom(content)) {
+                        state.record_cached_check();
                     }
                 }
                 if verbose && !quiet {
