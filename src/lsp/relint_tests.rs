@@ -184,6 +184,97 @@ impl LspTestClient {
         .await
     }
 
+    async fn did_save(&self, path: &Path) {
+        self.notify(
+            "textDocument/didSave",
+            json!({"textDocument": {"uri": Url::from_file_path(path).unwrap()}}),
+        )
+        .await;
+    }
+
+    async fn did_close(&self, path: &Path) {
+        self.notify(
+            "textDocument/didClose",
+            json!({"textDocument": {"uri": Url::from_file_path(path).unwrap()}}),
+        )
+        .await;
+    }
+
+    /// Block until the server holds `text` as the open content of a document,
+    /// so a request sent next is answered against that text rather than racing
+    /// the notification that carries it.
+    async fn wait_for_stored_text(&self, text: &str) {
+        let deadline = Instant::now() + WAIT_TIMEOUT;
+        loop {
+            {
+                let documents = self.server.documents.read().await;
+                if documents
+                    .values()
+                    .any(|entry| !entry.from_disk && entry.content == text)
+                {
+                    return;
+                }
+            }
+            assert!(Instant::now() < deadline, "the server never stored the new text");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Ask for `path`'s diagnostics the way a pull client does and answer with
+    /// their rule codes, sorted.
+    async fn pull_codes(&self, path: &Path) -> Vec<String> {
+        let response = self
+            .request(
+                "textDocument/diagnostic",
+                json!({"textDocument": {"uri": Url::from_file_path(path).unwrap()}}),
+            )
+            .await;
+        let mut codes: Vec<String> = response
+            .pointer("/result/items")
+            .and_then(Value::as_array)
+            .unwrap_or_else(|| panic!("a full diagnostic report was expected, got {response}"))
+            .iter()
+            .filter_map(|d| d.get("code").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        codes.sort();
+        codes
+    }
+
+    /// Every publish for `path` so far, as the rule codes each carried, sorted.
+    async fn publishes_for(&self, path: &Path) -> Vec<Vec<String>> {
+        let uri = Url::from_file_path(path).unwrap().to_string();
+        let messages = self.received.lock().await;
+        messages
+            .iter()
+            .filter(|m| m.get("method").and_then(Value::as_str) == Some("textDocument/publishDiagnostics"))
+            .filter(|m| publish_uri(m).as_deref() == Some(uri.as_str()))
+            .map(|m| {
+                let mut codes: Vec<String> = m
+                    .pointer("/params/diagnostics")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|d| d.get("code").and_then(Value::as_str).map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                codes.sort();
+                codes
+            })
+            .collect()
+    }
+
+    async fn wait_for_refresh_request(&self) {
+        self.wait_for("a workspace/diagnostic/refresh request", |messages| {
+            messages
+                .iter()
+                .find(|m| m.get("method").and_then(Value::as_str) == Some("workspace/diagnostic/refresh"))
+                .cloned()
+        })
+        .await;
+    }
+
     /// Wait until a publish for `path` carries a diagnostic matching `needle`.
     async fn wait_for_diagnostic(&self, path: &Path, needle: &str) -> Vec<String> {
         let uri = Url::from_file_path(path).unwrap().to_string();
@@ -443,20 +534,190 @@ async fn test_pull_client_is_asked_to_refresh_when_the_index_becomes_ready() {
     client.initialize(&root, pull_capabilities()).await;
     client.did_open(&b, "# B\n\nSee [target](./a.md#missing).\n").await;
 
-    // A pull client's documents are answered with an empty publish, which is
-    // also the signal that the open has been processed and so precedes the
-    // rescan the next notification triggers.
-    client.wait_for_publishes(&b, 1).await;
+    // The open must be stored before `initialized` triggers the rescan, or the
+    // rescan could finish with no open document to ask a refresh for. A pull
+    // request answered against the stored text proves it is there.
+    client
+        .wait_for_stored_text("# B\n\nSee [target](./a.md#missing).\n")
+        .await;
+    client.pull_codes(&b).await;
     client.notify("initialized", json!({})).await;
 
+    client.wait_for_refresh_request().await;
+}
+
+/// A document with a trailing-space line and no top-level heading, which trips
+/// exactly MD009 and MD041 under the default rules.
+const WARNING_TEXT: &str = "no heading   \n";
+const WARNING_CODES: [&str; 2] = ["MD009", "MD041"];
+
+/// How long to watch for a publish that must not come. Handlers run
+/// concurrently, so no response orders itself after an earlier notification's
+/// publish; the stored-text wait and this window are what bound the check. A
+/// failure of the window can only hide a publish, never invent one.
+const QUIET_WINDOW: Duration = Duration::from_millis(300);
+
+async fn open_edit_save(client: &LspTestClient, path: &Path) {
+    client.did_open(path, "# Fine\n").await;
+    client.wait_for_stored_text("# Fine\n").await;
+    client.did_change(path, 2, WARNING_TEXT).await;
+    client.wait_for_stored_text(WARNING_TEXT).await;
+    client.did_save(path).await;
+}
+
+/// A push client is told its diagnostics: the control that shows the harness
+/// sees a publish when one is sent, which the pull test's silence relies on.
+#[tokio::test]
+async fn test_push_client_is_published_diagnostics_on_open_change_and_save() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ""), ("t.md", "# Fine\n")]);
+    let t = root.join("t.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    open_edit_save(&client, &t).await;
+
+    // open (clean), change (warnings), save (warnings)
+    client.wait_for_publishes(&t, 3).await;
+    let expected: Vec<String> = WARNING_CODES.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        client.publishes_for(&t).await,
+        vec![Vec::<String>::new(), expected.clone(), expected]
+    );
+}
+
+/// A pull client must never be sent publishDiagnostics for an open
+/// document. Clients that keep pushed and pulled results together (ALE) treat
+/// an empty push as "no diagnostics" and nothing makes them pull again.
+#[tokio::test]
+async fn test_pull_client_is_not_published_diagnostics_on_open_change_and_save() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ""), ("t.md", "# Fine\n")]);
+    let t = root.join("t.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, pull_capabilities()).await;
+    open_edit_save(&client, &t).await;
+
+    assert_eq!(
+        client.pull_codes(&t).await,
+        WARNING_CODES,
+        "the pull must answer the warnings"
+    );
+    tokio::time::sleep(QUIET_WINDOW).await;
+    let publishes = client.publishes_for(&t).await;
+    assert!(
+        publishes.is_empty(),
+        "a pull client is asked, never told; the server published {publishes:?}"
+    );
+}
+
+/// Closing still clears whatever the client holds for the document.
+#[tokio::test]
+async fn test_pull_client_still_has_its_diagnostics_cleared_on_close() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ""), ("t.md", "# Fine\n")]);
+    let t = root.join("t.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, pull_capabilities()).await;
+    open_edit_save(&client, &t).await;
+    tokio::time::sleep(QUIET_WINDOW).await;
+    assert!(
+        client.publishes_for(&t).await.is_empty(),
+        "control: nothing before close"
+    );
+
+    client.did_close(&t).await;
+    let publishes = client.wait_for_publishes(&t, 1).await;
+    assert_eq!(publishes, vec![Vec::<String>::new()], "close publishes one empty set");
+}
+
+/// A configuration change reaches a pull client as a refresh request through
+/// the workspace rescan, and publishes nothing.
+#[tokio::test]
+async fn test_pull_client_is_asked_to_refresh_after_a_configuration_change() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ""), ("t.md", WARNING_TEXT)]);
+    let t = root.join("t.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, pull_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+    client.did_open(&t, WARNING_TEXT).await;
+    client.wait_for_stored_text(WARNING_TEXT).await;
+
+    // The initial scan may already have asked once; count from here.
+    tokio::time::sleep(QUIET_WINDOW).await;
+    let before = refresh_count(&client).await;
+
     client
-        .wait_for("a workspace/diagnostic/refresh request", |messages| {
-            messages
-                .iter()
-                .find(|m| m.get("method").and_then(Value::as_str) == Some("workspace/diagnostic/refresh"))
-                .cloned()
+        .notify(
+            "workspace/didChangeConfiguration",
+            json!({"settings": {"disable": ["MD009"]}}),
+        )
+        .await;
+    client
+        .wait_for("a refresh request after the configuration change", |messages| {
+            (count_refreshes(messages) > before).then_some(())
         })
         .await;
+    tokio::time::sleep(QUIET_WINDOW).await;
+    assert!(client.publishes_for(&t).await.is_empty(), "nothing may be published");
+    assert_eq!(
+        client.pull_codes(&t).await,
+        ["MD041"],
+        "the new setting applies to the next pull"
+    );
+}
+
+/// The same for a config file that changes on disk.
+#[tokio::test]
+async fn test_pull_client_is_asked_to_refresh_after_a_watched_config_file_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ""), ("t.md", WARNING_TEXT)]);
+    let t = root.join("t.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, pull_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+    client.did_open(&t, WARNING_TEXT).await;
+    client.wait_for_stored_text(WARNING_TEXT).await;
+    tokio::time::sleep(QUIET_WINDOW).await;
+    let before = refresh_count(&client).await;
+
+    std::fs::write(root.join(".rumdl.toml"), "[global]\ndisable = [\"MD009\"]\n").unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(root.join(".rumdl.toml")).unwrap(), "type": 2}]}),
+        )
+        .await;
+    client
+        .wait_for("a refresh request after the config file changed", |messages| {
+            (count_refreshes(messages) > before).then_some(())
+        })
+        .await;
+    tokio::time::sleep(QUIET_WINDOW).await;
+    assert!(client.publishes_for(&t).await.is_empty(), "nothing may be published");
+    assert_eq!(
+        client.pull_codes(&t).await,
+        ["MD041"],
+        "the new config applies to the next pull"
+    );
+}
+
+fn count_refreshes(messages: &[Value]) -> usize {
+    messages
+        .iter()
+        .filter(|m| m.get("method").and_then(Value::as_str) == Some("workspace/diagnostic/refresh"))
+        .count()
+}
+
+async fn refresh_count(client: &LspTestClient) -> usize {
+    count_refreshes(&client.received.lock().await)
 }
 
 /// Diagnostics belong to documents the editor has open. Files read from disk to

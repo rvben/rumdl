@@ -256,14 +256,15 @@ impl RumdlLanguageServer {
     /// Update diagnostics for a document
     ///
     /// This method pushes diagnostics to the client via publishDiagnostics.
-    /// When the client supports pull diagnostics (textDocument/diagnostic),
-    /// we skip pushing to avoid duplicate diagnostics.
+    /// A client that supports pull diagnostics (textDocument/diagnostic) is
+    /// never pushed to: it asks after each open, change and save, and a push
+    /// of any kind, an empty one included, replaces what such a client holds
+    /// for the document without prompting it to ask again. When the answers
+    /// change without an edit, as after a config change or an index update,
+    /// the client is told through `workspace/diagnostic/refresh`, sent once the
+    /// workspace rescan or index update completes.
     pub(super) async fn update_diagnostics(&self, uri: Url, text: String, run_external_tools: bool) {
-        // When client supports pull diagnostics, publish empty diagnostics to
-        // invalidate the client cache so it refetches via the pull model
         if *self.client_supports_pull_diagnostics.read().await {
-            log::debug!("Invalidating diagnostics for {uri} - client supports pull model");
-            self.client.publish_diagnostics(uri, Vec::new(), None).await;
             return;
         }
 
