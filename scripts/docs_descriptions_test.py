@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import sys
 import tomllib
+from html import unescape
 from pathlib import Path
 
 MIN_LENGTH = 110
@@ -78,7 +79,9 @@ def main() -> int:
         if not found:
             problems.append(f"{page}: no meta description at all")
             continue
-        description = found.group(1)
+        # Measured and compared as a reader sees it: the generator is free to
+        # encode characters as entities (`/` as `&#x2f;`) without changing it.
+        description = unescape(found.group(1))
         if description == site_description:
             problems.append(f"{page}: still serving the site-wide description")
             continue
