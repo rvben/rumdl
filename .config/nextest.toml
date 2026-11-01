@@ -41,6 +41,12 @@ success-output = "never"
 status-level = "slow"
 final-status-level = "slow"
 
+# Kill a test that runs past three minutes instead of letting it hold the job
+# until the workflow timeout. Every CI test finishes well under one minute, so
+# a test still running at three is hung; terminating it fails the run with the
+# test named, where a hung subprocess otherwise reports only a cancelled job.
+slow-timeout = { period = "60s", terminate-after = 3 }
+
 # No retries in CI to catch flaky tests
 retries = 0
 
