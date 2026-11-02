@@ -932,6 +932,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     };
 
     // Phase 2: Run cross-file checks if needed
+    // Joined before returning: see the spawn below.
+    let mut index_drop: Option<std::thread::JoinHandle<()>> = None;
     if needs_cross_file && total_files_processed > 0 {
         let index_start = Instant::now();
 
@@ -1088,9 +1090,13 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             }
         }
 
-        // Freeing an index of every workspace file takes measurable time and
-        // nothing waits on it, so it happens off the main thread.
-        std::thread::spawn(move || drop(workspace_index));
+        // Freeing an index of every workspace file takes measurable time, so it
+        // runs off the main thread while results are printed, and is joined
+        // before this function returns. A caller may call `process::exit` right
+        // after; on Windows that terminates other threads first, and a thread
+        // killed mid-free leaves mimalloc's delayed-free state set, so its exit
+        // cleanup spins forever.
+        index_drop = Some(std::thread::spawn(move || drop(workspace_index)));
     }
 
     // An aborted traversal is incomplete, irrespective of finding severity filters.
@@ -1251,6 +1257,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 }
             }
         }
+    }
+
+    if let Some(handle) = index_drop
+        && let Err(panic) = handle.join()
+    {
+        std::panic::resume_unwind(panic);
     }
 
     CheckRunOutcome {
