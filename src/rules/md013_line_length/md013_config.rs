@@ -222,6 +222,18 @@ pub struct MD013Config {
     #[serde(default, alias = "reflow_break_link_text")]
     pub reflow_break_link_text: bool,
 
+    /// Whether reflow keeps two spaces after the end of a sentence
+    /// (default: false).
+    ///
+    /// On, two or more spaces after sentence-ending punctuation, as MD064's
+    /// `allow-sentence-double-space` recognizes it, stay two spaces where the
+    /// words share a line after reflow, and a line break that ends a sentence
+    /// with `.`, `!` or `?` becomes two spaces where reflow joins the lines.
+    /// Any other run of spaces still becomes one. Off, every gap becomes one
+    /// space.
+    #[serde(default, alias = "reflow_sentence_double_space")]
+    pub reflow_sentence_double_space: bool,
+
     /// Whether reflow may wrap inside inline code spans when `atomic-spans` is
     /// `false` (default: true).
     ///
@@ -332,6 +344,7 @@ impl Default for MD013Config {
             require_sentence_capital: default_require_sentence_capital(),
             atomic_spans: default_atomic_spans(),
             reflow_break_link_text: false,
+            reflow_sentence_double_space: false,
             reflow_break_code_spans: default_reflow_break_code_spans(),
             reflow_length_exemptions: false,
             cjk_soft_break: CjkSoftBreak::default(),
@@ -462,6 +475,7 @@ impl MD013Config {
             atomic_spans: self.atomic_spans,
             wrap_code_spans: self.reflow_break_code_spans,
             break_link_text: self.reflow_break_link_text,
+            sentence_double_space: self.reflow_sentence_double_space,
             length_exemptions: self.length_exemptions_for_reflow(),
             cjk_soft_break: self.cjk_soft_break,
         }
@@ -662,6 +676,22 @@ mod tests {
         // snake_case alias also works.
         let config: MD013Config = toml::from_str("reflow_break_link_text = true").unwrap();
         assert!(config.reflow_break_link_text);
+    }
+
+    #[test]
+    fn test_reflow_sentence_double_space_default_false_and_parses() {
+        assert!(
+            !MD013Config::default().reflow_sentence_double_space,
+            "reflow-sentence-double-space defaults to false"
+        );
+        assert!(!MD013Config::default().to_reflow_options().sentence_double_space);
+
+        let config: MD013Config = toml::from_str("reflow-sentence-double-space = true").unwrap();
+        assert!(config.reflow_sentence_double_space);
+        assert!(config.to_reflow_options().sentence_double_space);
+        // snake_case alias also works.
+        let config: MD013Config = toml::from_str("reflow_sentence_double_space = true").unwrap();
+        assert!(config.reflow_sentence_double_space);
     }
 
     #[test]

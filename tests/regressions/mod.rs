@@ -27,6 +27,7 @@ mod md013_reflow_length_exemptions_test;
 mod md013_reflow_link_text_breaking_test;
 mod md013_reflow_math_blocks_issue_762_test;
 mod md013_reflow_ordered_lookalike_issue_760_test;
+mod md013_reflow_sentence_double_space_test;
 mod md013_reflow_setext_heading_issue_825_test;
 mod md013_reflow_span_shapes_issue_816_test;
 mod md013_reflow_span_spacing_issue_767_test;

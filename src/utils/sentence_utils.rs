@@ -220,7 +220,7 @@ pub fn is_after_sentence_ending(text: &str, match_start: usize) -> bool {
 ///
 /// Note: `match_start` is a byte position (from regex). This function handles
 /// multi-byte UTF-8 characters correctly by working with character iterators.
-fn is_after_sentence_ending_with_abbreviations(
+pub(crate) fn is_after_sentence_ending_with_abbreviations(
     text: &str,
     match_start: usize,
     abbreviations: &HashSet<String>,

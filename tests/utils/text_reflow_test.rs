@@ -104,6 +104,7 @@ fn test_list_item_trailing_whitespace_removal() {
         atomic_spans: true,
         wrap_code_spans: true,
         break_link_text: false,
+        sentence_double_space: false,
         length_exemptions: Default::default(),
         cjk_soft_break: Default::default(),
     };
@@ -583,6 +584,7 @@ fn test_sentence_per_line_reflow() {
         atomic_spans: true,
         wrap_code_spans: true,
         break_link_text: false,
+        sentence_double_space: false,
         length_exemptions: Default::default(),
         cjk_soft_break: Default::default(),
     };
@@ -1180,6 +1182,7 @@ fn test_ie_abbreviation_preserves_sentence() {
         atomic_spans: true,
         wrap_code_spans: true,
         break_link_text: false,
+        sentence_double_space: false,
         length_exemptions: Default::default(),
         cjk_soft_break: Default::default(),
     };
@@ -1219,6 +1222,7 @@ fn test_ie_abbreviation_paragraph() {
         atomic_spans: true,
         wrap_code_spans: true,
         break_link_text: false,
+        sentence_double_space: false,
         length_exemptions: Default::default(),
         cjk_soft_break: Default::default(),
     };
@@ -1309,6 +1313,7 @@ fn test_definition_list_with_paragraphs() {
         atomic_spans: true,
         wrap_code_spans: true,
         break_link_text: false,
+        sentence_double_space: false,
         length_exemptions: Default::default(),
         cjk_soft_break: Default::default(),
     };
