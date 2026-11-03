@@ -154,13 +154,14 @@ impl Rule for MD067FootnoteDefinitionOrder {
         // is unsafe. Retain that full diagnostic span for suppression/MD087.
         warnings.truncate(1);
         if let Some(warning) = warnings.first_mut() {
-            let mut last = definition_order
+            let def_start = definition_order
                 .iter()
                 .rev()
                 .find(|(id, _, _)| seen_refs.contains_key(id))
                 .unwrap()
                 .1
                 - 1;
+            let mut last = def_start;
             while let Some(line) = ctx.lines.get(last + 1) {
                 if !line.in_footnote_definition
                     || FOOTNOTE_DEF_PATTERN.is_match(strip_blockquote_prefix(line.content(ctx.content)))
@@ -168,6 +169,11 @@ impl Rule for MD067FootnoteDefinitionOrder {
                     break;
                 }
                 last += 1;
+            }
+            // Blank lines after the definition's last content line are not part
+            // of the definition, so the range ends on that content line.
+            while last > def_start && ctx.lines[last].is_blank {
+                last -= 1;
             }
             warning.end_line = last + 1;
             warning.end_column = ctx.lines[warning.end_line - 1].content(ctx.content).chars().count() + 1;
@@ -497,6 +503,28 @@ mod tests {
         // definition suppresses the complete operation.
         assert_eq!(warnings[0].end_line, 4);
         assert_eq!(warnings[0].end_column, 23);
+    }
+
+    /// Blank lines after the last definition are not part of it, so the range
+    /// ends at the end of that definition's last content line.
+    #[test]
+    fn test_out_of_order_range_excludes_trailing_blank_lines() {
+        let content = "Text with [^1] and [^2].\n\n[^2]: Second definition\n[^1]: First definition\n\n## Next\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!((warnings[0].line, warnings[0].end_line), (3, 4));
+        assert_eq!(warnings[0].end_column, 23);
+    }
+
+    /// A multi-paragraph definition keeps its continuation lines in the range,
+    /// but not the blank lines that follow it.
+    #[test]
+    fn test_out_of_order_range_keeps_continuation_paragraphs() {
+        let content = "Text with [^1] and [^2].\n\n[^2]: Second definition\n[^1]: First definition\n\n    More about one.\n\n## Next\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!((warnings[0].line, warnings[0].end_line), (3, 6));
+        assert_eq!(warnings[0].end_column, 20);
     }
 
     #[test]
