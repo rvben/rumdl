@@ -53,6 +53,25 @@ pub struct LintWarning {
     pub rule_name: Option<String>,
 }
 
+impl LintWarning {
+    /// The 1-indexed lines whose content this warning covers, used to decide
+    /// whether an inline disable comment suppresses it.
+    ///
+    /// `end_column` is exclusive, so a range ending at column 1 of a later line
+    /// stops at that line's start and covers none of it: a warning spanning
+    /// whole lines with their terminators ends there. That line is excluded,
+    /// so a `disable-line` comment on the content after a flagged run does not
+    /// suppress the run. An `end_line` before `line` falls back to `line` alone.
+    pub fn covered_lines(&self) -> std::ops::RangeInclusive<usize> {
+        let end = if self.end_line > self.line && self.end_column <= 1 {
+            self.end_line - 1
+        } else {
+            self.end_line.max(self.line)
+        };
+        self.line..=end
+    }
+}
+
 /// One atomic fix attached to a `LintWarning`.
 ///
 /// `range`/`replacement` describe the primary edit. `additional_edits`

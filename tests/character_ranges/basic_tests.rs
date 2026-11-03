@@ -43,7 +43,7 @@ fn test_md009_trailing_spaces() {
 
 #[test]
 fn test_md012_multiple_blank_lines() {
-    let test = simple_test("MD012", "Line 1\n\n\nLine 2", ExpectedWarning::new(3, 1, 3, 1, ""));
+    let test = simple_test("MD012", "Line 1\n\n\nLine 2", ExpectedWarning::new(3, 1, 4, 1, ""));
     test_character_ranges(test);
 }
 

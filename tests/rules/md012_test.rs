@@ -17,13 +17,18 @@ fn test_md012_invalid() {
     let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3);
-    assert_eq!(result[0].line, 3);
-    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
-    assert_eq!(result[1].line, 6);
-    assert_eq!(result[1].message, "Multiple consecutive blank lines between content");
-    assert_eq!(result[2].line, 7);
-    assert_eq!(result[2].message, "Multiple consecutive blank lines between content");
+    // One warning per run, covering exactly the excess lines (end exclusive).
+    assert_eq!(result.len(), 2);
+    assert_eq!((result[0].line, result[0].end_line), (3, 4));
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines between content (2 found, 1 allowed)"
+    );
+    assert_eq!((result[1].line, result[1].end_line), (6, 8));
+    assert_eq!(
+        result[1].message,
+        "Multiple consecutive blank lines between content (3 found, 1 allowed)"
+    );
 }
 
 #[test]
@@ -33,10 +38,14 @@ fn test_md012_start_end() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Multiple consecutive blank lines at start of file");
-    assert_eq!(result[1].line, 6);
-    assert_eq!(result[1].message, "Multiple consecutive blank lines at end of file");
+    assert_eq!((result[0].line, result[0].end_line), (2, 3));
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines at start of file (2 found, 1 allowed)"
+    );
+    // The end-of-file warning starts at the first trailing blank and runs to EOF.
+    assert_eq!((result[1].line, result[1].end_line), (5, 7));
+    assert_eq!(result[1].message, "Blank lines at end of file (2 found, 0 allowed)");
 }
 
 #[test]
@@ -66,7 +75,10 @@ fn test_md012_custom_maximum() {
     // Only the second group (3 blanks > maximum 2) is invalid, reporting 1 excess line
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 7); // The third blank line in the second sequence
-    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines between content (3 found, 2 allowed)"
+    );
 }
 
 #[test]
@@ -106,7 +118,10 @@ fn test_md012_whitespace_lines() {
     // Expects 1 warning for the excess whitespace line
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 3); // The second whitespace line is excess
-    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines between content (2 found, 1 allowed)"
+    );
 }
 
 #[test]
@@ -209,7 +224,10 @@ fn test_md012_blanks_before_fenced_code_block_at_eof() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
     assert_eq!(result[0].line, 5);
-    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines between content (2 found, 1 allowed)"
+    );
 }
 
 #[test]
@@ -220,7 +238,10 @@ fn test_md012_blanks_before_indented_code_block_at_eof() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
     assert_eq!(result[0].line, 3);
-    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines between content (2 found, 1 allowed)"
+    );
 }
 
 #[test]
@@ -231,7 +252,10 @@ fn test_md012_blanks_before_fenced_code_block_followed_by_content() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
     assert_eq!(result[0].line, 5);
-    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
+    assert_eq!(
+        result[0].message,
+        "Multiple consecutive blank lines between content (2 found, 1 allowed)"
+    );
 }
 
 #[test]

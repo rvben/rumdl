@@ -15,7 +15,8 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-/// Two blank-line runs too many: `MD012` fires twice, and `fmt` rewrites it.
+/// Three blank lines where one is allowed: `MD012` fires once for the run, and
+/// `fmt` rewrites it.
 const DOCUMENT: &str = "# Title\n\na\n\n\n\nb\n";
 
 const EXCLUDED_NOTICE: &str = "1 by exclude patterns; pass --no-exclude to keep them";
@@ -93,7 +94,7 @@ fn assert_linted(output: &Output) {
     assert_eq!(output.status.code(), Some(1), "{}", describe(output));
     assert_eq!(
         text(&output.stdout).matches("[MD012]").count(),
-        2,
+        1,
         "{}",
         describe(output)
     );
@@ -323,7 +324,7 @@ fn a_batch_lints_only_the_documents_exclude_leaves() {
     let output = batch(temp.path(), input.as_bytes(), &[]);
     let stdout = text(&output.stdout);
     assert_eq!(output.status.code(), Some(1), "{}", describe(&output));
-    assert_eq!(stdout.matches("top.md:").count(), 2, "{}", describe(&output));
+    assert_eq!(stdout.matches("top.md:").count(), 1, "{}", describe(&output));
     assert!(!stdout.contains("docs/x.md"), "{}", describe(&output));
 }
 
@@ -365,7 +366,7 @@ fn a_batch_with_no_exclude_lints_every_document() {
     let output = batch(temp.path(), input.as_bytes(), &["--no-exclude"]);
     let stdout = text(&output.stdout);
     assert_eq!(output.status.code(), Some(1), "{}", describe(&output));
-    assert_eq!(stdout.matches("[MD012]").count(), 4, "{}", describe(&output));
+    assert_eq!(stdout.matches("[MD012]").count(), 2, "{}", describe(&output));
 }
 
 #[test]
@@ -448,6 +449,6 @@ fn per_file_ignores_apply_to_batch_paths_relative_to_a_subdirectory() {
     let output = batch(&temp.path().join("docs"), input.as_bytes(), &[]);
     let stdout = text(&output.stdout);
     assert_eq!(output.status.code(), Some(1), "{}", describe(&output));
-    assert_eq!(stdout.matches("[MD012]").count(), 2, "{}", describe(&output));
+    assert_eq!(stdout.matches("[MD012]").count(), 1, "{}", describe(&output));
     assert!(!stdout.contains("x.md:"), "{}", describe(&output));
 }

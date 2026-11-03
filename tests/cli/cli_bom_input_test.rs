@@ -334,7 +334,7 @@ fn stdin_check_and_fmt_handle_the_mark() {
             .iter()
             .map(|w| (w.0.as_str().to_string(), w.1, w.2))
             .collect::<Vec<_>>(),
-        vec![("MD012".to_string(), 3, 1), ("MD012".to_string(), 4, 1)],
+        vec![("MD012".to_string(), 3, 1)],
         "the heading is recognised, so MD041 stays quiet: {warnings:?}"
     );
     let (_, stdout, _) = stdin(&["fmt", "--no-cache", "--isolated", "--stdin"], input.as_bytes());

@@ -1,8 +1,6 @@
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 use crate::lint_context::types::HeadingStyle;
-use crate::utils::range_utils::calculate_line_range;
-use std::collections::HashSet;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 
@@ -79,51 +77,46 @@ impl MD012NoMultipleBlanks {
         self.config.maximum.get().max(self.heading_blanks_below)
     }
 
-    /// Generate warnings for excess blank lines beyond the given maximum.
-    fn generate_excess_warnings(
+    /// Build the single warning for one run of consecutive blank lines that
+    /// exceeds `effective_max`.
+    ///
+    /// `blank_start` is the 0-based index of the run's first blank line. The
+    /// warning covers exactly the excess lines, as the half-open range from the
+    /// first excess line's start to the start of the line after the last one,
+    /// which is also the byte range its fix deletes. Editors therefore highlight
+    /// the lines the fix removes, line terminators included.
+    fn excess_run_warning(
         &self,
         blank_start: usize,
         blank_count: usize,
         effective_max: usize,
-        lines: &[&str],
-        lines_to_check: &HashSet<usize>,
         ctx: &LintContext,
-    ) -> Vec<LintWarning> {
-        let mut warnings = Vec::new();
-
+    ) -> LintWarning {
         let location = if blank_start == 0 {
             "at start of file"
         } else {
             "between content"
         };
 
-        for i in effective_max..blank_count {
-            let excess_line_num = blank_start + i;
-            if lines_to_check.contains(&excess_line_num) {
-                let excess_line = excess_line_num + 1;
-                let excess_line_content = lines.get(excess_line_num).unwrap_or(&"");
-                let (start_line, start_col, end_line, end_col) = calculate_line_range(excess_line, excess_line_content);
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    severity: Severity::Warning,
-                    message: format!("Multiple consecutive blank lines {location}"),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    fix: Some(Fix::new(
-                        {
-                            let line_start = ctx.line_start_byte(excess_line).unwrap_or(0);
-                            let line_end = ctx.line_start_byte(excess_line + 1).unwrap_or(line_start + 1);
-                            line_start..line_end
-                        },
-                        String::new(),
-                    )),
-                });
-            }
-        }
+        // 1-based line numbers of the first and last excess line.
+        let first_excess = blank_start + effective_max + 1;
+        let last_excess = blank_start + blank_count;
 
-        warnings
+        let fix_start = ctx.line_start_byte(first_excess).unwrap_or(0);
+        let fix_end = ctx.line_start_byte(last_excess + 1).unwrap_or(ctx.content.len());
+
+        LintWarning {
+            rule_name: Some(self.name().to_string()),
+            severity: Severity::Warning,
+            message: format!(
+                "Multiple consecutive blank lines {location} ({blank_count} found, {effective_max} allowed)"
+            ),
+            line: first_excess,
+            column: 1,
+            end_line: last_excess + 1,
+            end_column: 1,
+            fix: Some(Fix::new(fix_start..fix_end, String::new())),
+        }
     }
 }
 
@@ -218,9 +211,6 @@ impl Rule for MD012NoMultipleBlanks {
         // Track the last non-blank content line for heading adjacency checks
         let mut prev_content_line_num: Option<usize> = None;
 
-        // Use HashSet for O(1) lookups of lines that need to be checked
-        let mut lines_to_check: HashSet<usize> = HashSet::new();
-
         // Use filtered_lines to automatically skip front-matter, code blocks, Quarto divs, math blocks,
         // PyMdown blocks, and Obsidian comments.
         // The in_code_block field in LineInfo is pre-computed using pulldown-cmark
@@ -264,17 +254,9 @@ impl Rule for MD012NoMultipleBlanks {
                     self.config.maximum.get()
                 };
                 if blank_count > effective_max {
-                    warnings.extend(self.generate_excess_warnings(
-                        blank_start,
-                        blank_count,
-                        effective_max,
-                        lines,
-                        &lines_to_check,
-                        ctx,
-                    ));
+                    warnings.push(self.excess_run_warning(blank_start, blank_count, effective_max, ctx));
                 }
                 blank_count = 0;
-                lines_to_check.clear();
                 // Reset heading context across skipped regions (code blocks, etc.)
                 prev_content_line_num = None;
             }
@@ -285,10 +267,6 @@ impl Rule for MD012NoMultipleBlanks {
                     blank_start = line_num;
                 }
                 blank_count += 1;
-                // Store line numbers that exceed the limit
-                if blank_count > self.config.maximum.get() {
-                    lines_to_check.insert(line_num);
-                }
             } else {
                 // Determine effective maximum for this blank run.
                 // Heading-adjacent blanks use the higher of MD012's maximum
@@ -309,17 +287,9 @@ impl Rule for MD012NoMultipleBlanks {
                 };
 
                 if blank_count > effective_max {
-                    warnings.extend(self.generate_excess_warnings(
-                        blank_start,
-                        blank_count,
-                        effective_max,
-                        lines,
-                        &lines_to_check,
-                        ctx,
-                    ));
+                    warnings.push(self.excess_run_warning(blank_start, blank_count, effective_max, ctx));
                 }
                 blank_count = 0;
-                lines_to_check.clear();
                 prev_content_line_num = Some(line_num);
             }
         }
@@ -341,14 +311,7 @@ impl Rule for MD012NoMultipleBlanks {
                 self.config.maximum.get()
             };
             if blank_count > effective_max {
-                warnings.extend(self.generate_excess_warnings(
-                    blank_start,
-                    blank_count,
-                    effective_max,
-                    lines,
-                    &lines_to_check,
-                    ctx,
-                ));
+                warnings.push(self.excess_run_warning(blank_start, blank_count, effective_max, ctx));
             }
         }
 
@@ -356,25 +319,35 @@ impl Rule for MD012NoMultipleBlanks {
         // EOF semantics: ANY blank line at EOF should be flagged (stricter than mid-document)
         // Only fire if the actual last line(s) of the file are blank
         if blank_count > 0 && last_line_is_blank {
-            let location = "at end of file";
-
-            // Report on the last line (which is blank)
-            let report_line = lines.len();
-
-            // Calculate fix: remove all trailing blank lines
-            // Find where the trailing blanks start (blank_count tells us how many consecutive blanks)
-            let fix_start = ctx.line_start_byte(report_line - blank_count + 1).unwrap_or(0);
+            // 1-based line number of the first trailing blank line.
+            let first_blank = lines.len() - blank_count + 1;
+            let fix_start = ctx.line_start_byte(first_blank).unwrap_or(0);
             let fix_end = content.len();
 
-            // Report one warning for the excess blank lines at EOF
+            // The range ends where the fix does, at end of file. After a final
+            // line terminator that is the start of the (empty) next line;
+            // otherwise it is just past the last character of the final line.
+            let (end_line, end_column) = if content.ends_with('\n') {
+                (lines.len() + 1, 1)
+            } else {
+                let last = lines.last().copied().unwrap_or("");
+                (lines.len(), last.chars().count() + 1)
+            };
+
+            let message = if blank_count == 1 {
+                "Blank line at end of file (1 found, 0 allowed)".to_string()
+            } else {
+                format!("Blank lines at end of file ({blank_count} found, 0 allowed)")
+            };
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 severity: Severity::Warning,
-                message: format!("Multiple consecutive blank lines {location}"),
-                line: report_line,
+                message,
+                line: first_blank,
                 column: 1,
-                end_line: report_line,
-                end_column: 1,
+                end_line,
+                end_column,
                 fix: Some(Fix::new(fix_start..fix_end, String::new())),
             });
         }
@@ -463,10 +436,12 @@ mod tests {
         let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 3); // 1 extra in first gap, 2 extra in second gap
-        assert_eq!(result[0].line, 3);
-        assert_eq!(result[1].line, 6);
-        assert_eq!(result[2].line, 7);
+        // One warning per run: the first gap has 1 excess line, the second 2.
+        let spans: Vec<_> = result
+            .iter()
+            .map(|w| (w.line, w.column, w.end_line, w.end_column))
+            .collect();
+        assert_eq!(spans, [(3, 1, 4, 1), (6, 1, 8, 1)]);
     }
 
     #[test]
@@ -476,7 +451,7 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1); // Only the fourth blank line is excessive
-        assert_eq!(result[0].line, 7);
+        assert_eq!((result[0].line, result[0].end_line), (7, 8));
     }
 
     #[test]
@@ -539,7 +514,8 @@ mod tests {
         let content = "\n\n\nContent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
+        assert_eq!(result.len(), 1, "one warning for the whole leading run");
+        assert_eq!((result[0].line, result[0].end_line), (2, 4));
         assert!(result[0].message.contains("at start of file"));
     }
 
@@ -613,8 +589,9 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let rule = MD012NoMultipleBlanks::default();
         let warnings = rule.check(&ctx).unwrap();
-        // There are 3 blank lines after the code block, so 2 extra should be flagged
-        assert_eq!(warnings.len(), 2, "Should flag blanks after indented code block ends");
+        // 3 blank lines after the code block: one warning covering the 2 extra lines
+        assert_eq!(warnings.len(), 1, "Should flag blanks after indented code block ends");
+        assert_eq!((warnings[0].line, warnings[0].end_line), (5, 7));
     }
 
     #[test]
@@ -831,8 +808,13 @@ mod tests {
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(
             warnings.len(),
-            2,
+            1,
             "Excess heading-adjacent blanks flagged with default limits"
+        );
+        assert_eq!((warnings[0].line, warnings[0].end_line), (3, 5));
+        assert_eq!(
+            crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap(),
+            "# Heading\n\nParagraph\n"
         );
     }
 
@@ -883,7 +865,8 @@ mod tests {
         let content = "# Heading\n\n\n\n\nParagraph\n"; // 4 blanks, limit is 2
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2, "Excess beyond heading limit should be flagged");
+        assert_eq!(result.len(), 1, "Excess beyond heading limit should be flagged");
+        assert_eq!((result[0].line, result[0].end_line), (4, 6));
     }
 
     #[test]
@@ -1001,9 +984,10 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            2,
+            1,
             "Start-of-file blanks should be flagged even before heading"
         );
+        assert_eq!((result[0].line, result[0].end_line), (2, 4));
         assert!(result[0].message.contains("at start of file"));
     }
 
@@ -1039,7 +1023,8 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         // The blanks are between code block and "More text" (not heading-adjacent)
-        assert_eq!(result.len(), 2, "Non-heading blanks after code block should be flagged");
+        assert_eq!(result.len(), 1, "Non-heading blanks after code block should be flagged");
+        assert_eq!((result[0].line, result[0].end_line), (7, 9));
     }
 
     #[test]
@@ -1458,5 +1443,201 @@ Some more text for this section.
         let src = "a\n\n \t\n\n\u{a0}\nb\n";
         let ctx = LintContext::new(src, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(rule.fix(&ctx).unwrap(), "a\n\n\u{a0}\nb\n");
+    }
+
+    /// One run of blank lines is one problem, so it is reported once.
+    mod run_reporting {
+        use super::*;
+        use crate::config::MarkdownFlavor;
+
+        /// (line, column, end_line, end_column) of a warning.
+        fn span(warning: &LintWarning) -> (usize, usize, usize, usize) {
+            (warning.line, warning.column, warning.end_line, warning.end_column)
+        }
+
+        fn check(rule: &MD012NoMultipleBlanks, content: &str) -> Vec<LintWarning> {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            rule.check(&ctx).unwrap()
+        }
+
+        #[test]
+        fn mid_document_run_is_one_warning_covering_every_excess_line() {
+            // Lines 2-4 are blank; with maximum 1, lines 3 and 4 are excess.
+            let warnings = check(&MD012NoMultipleBlanks::default(), "Line 1\n\n\n\nLine 2\n");
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!(span(&warnings[0]), (3, 1, 5, 1));
+            assert_eq!(
+                warnings[0].message,
+                "Multiple consecutive blank lines between content (3 found, 1 allowed)"
+            );
+        }
+
+        #[test]
+        fn single_excess_line_still_has_a_non_empty_range() {
+            let warnings = check(&MD012NoMultipleBlanks::default(), "Line 1\n\n\nLine 2\n");
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!(span(&warnings[0]), (3, 1, 4, 1));
+            assert_eq!(
+                warnings[0].message,
+                "Multiple consecutive blank lines between content (2 found, 1 allowed)"
+            );
+        }
+
+        #[test]
+        fn separate_runs_are_separate_warnings() {
+            let warnings = check(&MD012NoMultipleBlanks::default(), "a\n\n\nb\n\n\n\nc\n");
+            let spans: Vec<_> = warnings.iter().map(span).collect();
+            assert_eq!(spans, [(3, 1, 4, 1), (6, 1, 8, 1)], "{warnings:?}");
+        }
+
+        #[test]
+        fn warning_fix_deletes_exactly_the_excess_lines() {
+            for (source, expected) in [
+                ("Line 1\n\n\n\nLine 2\n", "Line 1\n\nLine 2\n"),
+                ("Line 1\r\n\r\n\r\n\r\nLine 2\r\n", "Line 1\r\n\r\nLine 2\r\n"),
+                ("Line 1\n\n \t\n  \nLine 2\n", "Line 1\n\nLine 2\n"),
+            ] {
+                let rule = MD012NoMultipleBlanks::default();
+                let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "{source:?}: {warnings:?}");
+                let fixed = crate::utils::fix_utils::apply_warning_fixes(source, &warnings).unwrap();
+                assert_eq!(fixed, expected, "{source:?}");
+            }
+        }
+
+        #[test]
+        fn custom_maximum_reports_the_configured_allowance() {
+            let warnings = check(&MD012NoMultipleBlanks::new(2), "a\n\n\n\n\nb\n");
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!(span(&warnings[0]), (4, 1, 6, 1));
+            assert_eq!(
+                warnings[0].message,
+                "Multiple consecutive blank lines between content (4 found, 2 allowed)"
+            );
+        }
+
+        #[test]
+        fn heading_adjacent_run_reports_the_md022_derived_allowance() {
+            let rule = MD012NoMultipleBlanks::default().with_heading_limits(1, 2);
+            let warnings = check(&rule, "# Title\n\n\n\n\nText\n");
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!(span(&warnings[0]), (4, 1, 6, 1));
+            assert_eq!(
+                warnings[0].message,
+                "Multiple consecutive blank lines between content (4 found, 2 allowed)"
+            );
+        }
+
+        #[test]
+        fn start_of_file_run_is_one_warning() {
+            let warnings = check(&MD012NoMultipleBlanks::default(), "\n\n\nText\n");
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!(span(&warnings[0]), (2, 1, 4, 1));
+            assert_eq!(
+                warnings[0].message,
+                "Multiple consecutive blank lines at start of file (3 found, 1 allowed)"
+            );
+        }
+
+        #[test]
+        fn run_before_a_skipped_region_is_one_warning() {
+            let warnings = check(&MD012NoMultipleBlanks::default(), "Text\n\n\n\n```\ncode\n```\n");
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!(span(&warnings[0]), (3, 1, 5, 1));
+        }
+
+        #[test]
+        fn end_of_file_range_starts_at_the_first_trailing_blank_and_ends_at_eof() {
+            for (source, expected_span, message) in [
+                (
+                    "Text\n\n",
+                    (2, 1, 3, 1),
+                    "Blank line at end of file (1 found, 0 allowed)",
+                ),
+                (
+                    "Text\n\n\n",
+                    (2, 1, 4, 1),
+                    "Blank lines at end of file (2 found, 0 allowed)",
+                ),
+                (
+                    "Text\r\n\r\n\r\n",
+                    (2, 1, 4, 1),
+                    "Blank lines at end of file (2 found, 0 allowed)",
+                ),
+                // An unterminated final line ends the range after its last character.
+                (
+                    "Text\n\n  ",
+                    (2, 1, 3, 3),
+                    "Blank lines at end of file (2 found, 0 allowed)",
+                ),
+            ] {
+                let warnings = check(&MD012NoMultipleBlanks::default(), source);
+                assert_eq!(warnings.len(), 1, "{source:?}: {warnings:?}");
+                assert_eq!(span(&warnings[0]), expected_span, "{source:?}");
+                assert_eq!(warnings[0].message, message, "{source:?}");
+            }
+        }
+
+        /// A `disable-line` on the content line after a run must not hide the run:
+        /// the range ends at column 1 of that line and covers none of its text.
+        #[test]
+        fn disable_line_on_the_following_content_line_does_not_suppress_the_run() {
+            let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD012NoMultipleBlanks::default())];
+            let source = "Para\n\n\n\nNext <!-- rumdl-disable-line MD012 -->\n";
+            let warnings = crate::lint(source, &rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!(span(&warnings[0]), (3, 1, 5, 1));
+
+            let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+            assert_eq!(
+                MD012NoMultipleBlanks::default().fix(&ctx).unwrap(),
+                "Para\n\nNext <!-- rumdl-disable-line MD012 -->\n"
+            );
+        }
+
+        /// Control for the test above: a disable that does cover the run still applies.
+        #[test]
+        fn disable_block_around_the_run_suppresses_it() {
+            let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD012NoMultipleBlanks::default())];
+            let source = "Para\n<!-- rumdl-disable MD012 -->\n\n\n\nNext\n<!-- rumdl-enable MD012 -->\n";
+            let warnings = crate::lint(source, &rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+            assert!(warnings.is_empty(), "{warnings:?}");
+            let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+            assert_eq!(MD012NoMultipleBlanks::default().fix(&ctx).unwrap(), source);
+        }
+
+        /// At end of file every trailing blank is excess, so a `disable-next-line`
+        /// directly above them targets the first line the warning covers and
+        /// suppresses the run, however many blank lines it holds.
+        #[test]
+        fn disable_next_line_above_trailing_blanks_suppresses_them() {
+            let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD012NoMultipleBlanks::default())];
+            for source in [
+                "Text\n<!-- rumdl-disable-next-line MD012 -->\n\n",
+                "Text\n<!-- rumdl-disable-next-line MD012 -->\n\n\n\n",
+            ] {
+                let warnings = crate::lint(source, &rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+                assert!(warnings.is_empty(), "{source:?}: {warnings:?}");
+                let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+                assert_eq!(MD012NoMultipleBlanks::default().fix(&ctx).unwrap(), source);
+            }
+        }
+
+        #[test]
+        fn lsp_diagnostic_covers_the_excess_lines_with_their_line_endings() {
+            let source = "Line 1\n\n\n\nLine 2\n";
+            let warnings = check(&MD012NoMultipleBlanks::default(), source);
+            let diagnostic = crate::lsp::types::warning_to_diagnostic(&warnings[0], source);
+            assert_eq!(
+                (
+                    diagnostic.range.start.line,
+                    diagnostic.range.start.character,
+                    diagnostic.range.end.line,
+                    diagnostic.range.end.character
+                ),
+                (2, 0, 4, 0)
+            );
+        }
     }
 }

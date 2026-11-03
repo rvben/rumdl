@@ -34,8 +34,9 @@ pub(crate) fn warning_is_enabled(warning: &LintWarning, inline_config: &InlineCo
         rule_name
     };
 
-    let end = warning.end_line.max(warning.line);
-    !(warning.line..=end).any(|line| inline_config.is_rule_disabled(base_rule_name, line))
+    !warning
+        .covered_lines()
+        .any(|line| inline_config.is_rule_disabled(base_rule_name, line))
 }
 
 /// Apply a list of warning fixes to content, simulating how the LSP client would apply them

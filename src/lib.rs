@@ -452,17 +452,10 @@ pub(crate) fn retain_reportable_warnings(
             rule_name_to_check
         };
 
-        // Check if the rule is disabled at any line in the warning's range.
+        // Check if the rule is disabled at any line the warning covers.
         // Multi-line warnings (e.g., reflow) report on the first line,
         // but inline disable comments may appear later in the range.
-        // Guard: if end_line < line (e.g., end_line=0), fall back to
-        // checking only the warning's line to match original behavior.
-        let end = if warning.end_line >= warning.line {
-            warning.end_line
-        } else {
-            warning.line
-        };
-        let disabled_at = (warning.line..=end).find_map(|line| {
+        let disabled_at = warning.covered_lines().find_map(|line| {
             inline_config
                 .disabling_layer(base_rule_name, line)
                 .map(|layer| (line, layer))

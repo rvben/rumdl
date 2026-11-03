@@ -766,12 +766,14 @@ impl Rule for MD073TocValidation {
                 .into_iter()
                 .any(|line| ctx.line_info(line).is_some_and(|info| info.blockquote.is_some()));
 
+            // The range is half-open and ends at the start of the stop marker
+            // line, so it covers every TOC entry line, the last one included.
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 message,
                 line: region.start_line,
                 column: 1,
-                end_line: region.end_line,
+                end_line: stop_marker_line,
                 end_column: 1,
                 severity: Severity::Warning,
                 fix: (!in_blockquote).then(|| Fix::new(fix_range, new_toc)),
@@ -2339,6 +2341,38 @@ Content here.
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content, "TOC in a disabled region should be preserved exactly");
+    }
+
+    /// The warning range is half-open and ends at the start of the stop marker
+    /// line, so it covers every TOC entry line, the last one included.
+    #[test]
+    fn test_warning_range_ends_at_stop_marker_line() {
+        let rule = create_enabled_rule();
+        let content = "# Title\n\n<!-- toc -->\n- [Alpha](#alpha)\n- [Stale](#stale)\n<!-- tocstop -->\n\n## Alpha\n";
+        let ctx = create_ctx(content);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        let w = &warnings[0];
+        assert_eq!((w.line, w.column, w.end_line, w.end_column), (4, 1, 6, 1));
+        assert_eq!(w.covered_lines(), 4..=5);
+    }
+
+    /// A `disable-line` comment on the last entry of a TOC suppresses MD073 in
+    /// both check and fix, as it does on any other entry.
+    #[test]
+    fn test_disable_line_on_last_toc_entry_suppresses() {
+        let content = "# Title\n\n<!-- toc -->\n- [Alpha](#alpha)\n- [Stale](#stale) <!-- rumdl-disable-line MD073 -->\n<!-- tocstop -->\n\n## Alpha\n\n## Beta\n";
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(create_enabled_rule())];
+
+        let warnings = crate::lint(content, &rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "disable-line on the last entry must suppress: {warnings:?}"
+        );
+
+        let fixed = create_enabled_rule().fix(&create_ctx(content)).unwrap();
+        assert_eq!(fixed, content, "a suppressed TOC must not be rewritten");
     }
 
     // ========== Inline Formatting Preservation Tests (#634) ==========

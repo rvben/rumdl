@@ -269,10 +269,7 @@ fn fmt_removing_blank_doc_lines_keeps_each_remaining_lines_prefix() {
     assert_eq!(fixed, "//! text\n//!\n//! more\n\npub fn f() {}\n", "stdout:\n{stdout}");
     assert_eq!(
         diagnostics(&stdout),
-        [
-            "lib.rs:3:4: [MD012] Multiple consecutive blank lines between content [fixed]",
-            "lib.rs:4:4: [MD012] Multiple consecutive blank lines between content [fixed]",
-        ],
+        ["lib.rs:3:4: [MD012] Multiple consecutive blank lines between content (3 found, 1 allowed) [fixed]"],
         "stdout:\n{stdout}"
     );
 }
