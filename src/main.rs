@@ -273,6 +273,22 @@ enum Color {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // Skip mimalloc's cleanup at process exit. On Windows, ExitProcess
+    // terminates every other thread before that cleanup runs; a thread stopped
+    // while freeing memory owned by the main thread leaves the page marked as
+    // being freed, and the cleanup then retries it forever, so the process
+    // spins at 100% CPU instead of exiting. The cleanup only returns memory to
+    // the OS, which reclaims it anyway. A `destroy_on_exit` value above 1 makes
+    // mimalloc's exit hook return immediately (`_mi_auto_process_done` in
+    // init.c). The bindings have no constant for this option: 22 is its
+    // position in `mi_option_e` in the vendored mimalloc.h.
+    #[cfg(target_env = "msvc")]
+    {
+        const MI_OPTION_DESTROY_ON_EXIT: libmimalloc_sys::mi_option_t = 22;
+        // SAFETY: sets a plain integer option; no memory is touched.
+        unsafe { libmimalloc_sys::mi_option_set(MI_OPTION_DESTROY_ON_EXIT, 2) };
+    }
+
     // Reset SIGPIPE to default behavior on Unix so piping to `head` etc. works correctly.
     // Without this, Rust ignores SIGPIPE and `println!` panics on broken pipe.
     #[cfg(unix)]
