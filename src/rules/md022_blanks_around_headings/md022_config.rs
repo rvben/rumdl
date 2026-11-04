@@ -187,6 +187,13 @@ pub struct MD022Config {
     #[serde(default, alias = "lines_above_mode")]
     pub lines_above_mode: HeadingBlankMode,
 
+    #[serde(
+        default,
+        alias = "nested_heading_lines_above",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub nested_heading_lines_above: Option<HeadingLevelConfig>,
+
     /// Number of blank lines required below headings (default: 1 for all levels)
     /// Can be a single integer (applies to all levels) or an array of 6 integers (one per level 1-6)
     #[serde(default = "default_lines_below", alias = "lines_below")]
@@ -214,6 +221,7 @@ impl Default for MD022Config {
         Self {
             lines_above: default_lines_above(),
             lines_above_mode: HeadingBlankMode::default(),
+            nested_heading_lines_above: None,
             lines_below: default_lines_below(),
             allowed_at_start: default_allowed_at_start(),
         }
@@ -300,12 +308,27 @@ mod tests {
     }
 
     #[test]
+    fn nested_heading_spacing_accepts_scalar_and_per_level_values() {
+        let scalar: MD022Config = toml::from_str("nested-heading-lines-above = 1").unwrap();
+        let scalar = scalar.nested_heading_lines_above.unwrap();
+        for level in 1..=6 {
+            assert_eq!(scalar.get_for_level(level).required_count(), Some(1));
+        }
+
+        let per_level: MD022Config = toml::from_str("nested_heading_lines_above = [0, 1, 1, 2, 2, 2]").unwrap();
+        let per_level = per_level.nested_heading_lines_above.unwrap();
+        assert_eq!(per_level.get_for_level(1).required_count(), Some(0));
+        assert_eq!(per_level.get_for_level(6).required_count(), Some(2));
+    }
+
+    #[test]
     fn test_serialization_roundtrip_scalar() {
         let config = MD022Config {
             lines_above: HeadingLevelConfig::scalar(2),
             lines_below: HeadingLevelConfig::scalar(1),
             allowed_at_start: false,
             lines_above_mode: HeadingBlankMode::Minimum,
+            nested_heading_lines_above: None,
         };
 
         let serialized = toml::to_string(&config).unwrap();
@@ -321,6 +344,7 @@ mod tests {
             lines_below: HeadingLevelConfig::per_level([1, 1, 1, 1, 1, 1]),
             allowed_at_start: true,
             lines_above_mode: HeadingBlankMode::Minimum,
+            nested_heading_lines_above: None,
         };
 
         let serialized = toml::to_string(&config).unwrap();

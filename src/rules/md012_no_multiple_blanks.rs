@@ -402,9 +402,13 @@ impl Rule for MD012NoMultipleBlanks {
             (rule_config.maximum.get(), rule_config.maximum.get())
         } else {
             let md022_config = crate::rule_config_serde::load_rule_config::<MD022Config>(config);
+            let nested_limit = md022_config
+                .nested_heading_lines_above
+                .as_ref()
+                .map_or(0, max_heading_limit);
             (
-                max_heading_limit(&md022_config.lines_above),
-                max_heading_limit(&md022_config.lines_below),
+                max_heading_limit(&md022_config.lines_above).max(nested_limit),
+                max_heading_limit(&md022_config.lines_below).max(nested_limit),
             )
         };
 
@@ -1060,6 +1064,21 @@ mod tests {
             result.is_empty(),
             "2 blanks above heading allowed when MD022 lines-above=2"
         );
+    }
+
+    #[test]
+    fn test_heading_aware_from_config_reads_nested_md022_limit() {
+        let mut config = crate::config::Config::default();
+        let mut md022_config = crate::config::RuleConfig::default();
+        md022_config
+            .values
+            .insert("nested-heading-lines-above".to_string(), toml::Value::Integer(3));
+        config.rules.insert("MD022".to_string(), md022_config);
+
+        let rule = MD012NoMultipleBlanks::from_config(&config);
+        let content = "# Parent\n\n\n\n## Child";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
     }
 
     #[test]
