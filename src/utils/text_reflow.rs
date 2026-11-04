@@ -11,8 +11,9 @@ use crate::utils::regex_cache::{
     WIKI_LINK_REGEX,
 };
 use crate::utils::sentence_utils::{
-    get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_bracket, is_closing_quote, is_opening_quote,
-    text_ends_with_abbreviation, text_ends_with_numbered_abbreviation,
+    get_abbreviations, is_after_sentence_ending_with_abbreviations, is_cjk_char, is_cjk_sentence_ending,
+    is_closing_bracket, is_closing_quote, is_opening_quote, text_ends_with_abbreviation,
+    text_ends_with_numbered_abbreviation,
 };
 use crate::utils::unicode::joins_cjk_soft_break;
 use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
@@ -101,6 +102,47 @@ pub(crate) fn trim_breakable_whitespace(text: &str) -> &str {
 /// Split text into wrappable tokens on breakable whitespace only.
 fn split_breakable_words(text: &str) -> impl Iterator<Item = &str> {
     text.split(is_breakable_whitespace).filter(|word| !word.is_empty())
+}
+
+/// Split text into wrappable tokens as [`split_breakable_words`] does, each
+/// with the breakable whitespace in front of it in the source. The first
+/// token's gap is the text's leading whitespace.
+fn split_breakable_words_with_gaps(text: &str) -> Vec<(&str, &str)> {
+    let mut tokens = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(|c| !is_breakable_whitespace(c)) {
+        let (gap, from_word) = rest.split_at(start);
+        let end = from_word.find(is_breakable_whitespace).unwrap_or(from_word.len());
+        let (word, after) = from_word.split_at(end);
+        tokens.push((word, gap));
+        rest = after;
+    }
+    tokens
+}
+
+/// The space to write between `line` and a token that follows it on the same
+/// line, where the source has `gap` between them. With `abbreviations`, given
+/// when [`ReflowOptions::sentence_double_space`] is on, a gap of two or more
+/// after the end of a sentence stays two spaces; every other gap is one.
+fn gap_separator(line: &str, gap: &str, abbreviations: Option<&HashSet<String>>) -> &'static str {
+    match abbreviations {
+        Some(abbreviations)
+            if gap.len() >= 2 && is_after_sentence_ending_with_abbreviations(line, line.len(), abbreviations) =>
+        {
+            "  "
+        }
+        _ => " ",
+    }
+}
+
+/// The breakable whitespace that ends the text element before `idx`: the gap
+/// the source has in front of the element at `idx`, or nothing when no text
+/// element precedes it.
+fn gap_before_element(elements: &[Element], idx: usize) -> &str {
+    match idx.checked_sub(1).map(|previous| &elements[previous]) {
+        Some(Element::Text(previous)) => &previous[previous.trim_end_matches(is_breakable_whitespace).len()..],
+        _ => "",
+    }
 }
 
 /// Whether an inline code span's content can be word-wrapped without altering it.
@@ -549,6 +591,14 @@ pub struct ReflowOptions {
     /// whose tail rules out a useful break stays whole; see
     /// `link_text_break_units`.
     pub break_link_text: bool,
+    /// Whether to keep two spaces after the end of a sentence, the spacing
+    /// that marks a sentence end apart from an abbreviation. When true, two
+    /// or more spaces after sentence-ending punctuation, as MD064's
+    /// `allow-sentence-double-space` recognizes it, stay two spaces when the
+    /// words share a line, and a line break that ends a sentence becomes two
+    /// spaces when reflow joins the lines. When false (default), every gap
+    /// becomes one space.
+    pub sentence_double_space: bool,
     /// Which of the checker's line-length exemptions reflow mirrors when it
     /// measures a line. Empty measures the markdown as written.
     pub length_exemptions: LengthExemptions,
@@ -601,6 +651,7 @@ impl Default for ReflowOptions {
             atomic_spans: true,
             wrap_code_spans: true,
             break_link_text: false,
+            sentence_double_space: false,
             length_exemptions: LengthExemptions::default(),
             cjk_soft_break: CjkSoftBreak::default(),
         }
@@ -2313,6 +2364,16 @@ pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S], cjk: CjkSoftBrea
     join_soft_break_lines_with_sentences(lines, cjk, None, LinkTextPunctuation::Ignore, None)
 }
 
+/// What a joined line break that ends a sentence becomes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SentenceJoin {
+    /// A newline, so the next sentence starts a line of its own.
+    Break,
+    /// Two spaces after a sentence that ends with `.`, `!` or `?`, the
+    /// traditional sentence spacing. CJK sentence enders take no spaces.
+    DoubleSpace,
+}
+
 /// Join hard-wrapped continuations while retaining existing sentence breaks.
 /// The newline reaches the shared sentence splitter as source evidence; it is
 /// never introduced where the author wrote a space.
@@ -2326,7 +2387,27 @@ pub(crate) fn join_sentence_lines<S: AsRef<str>>(
     join_soft_break_lines_with_sentences(
         lines,
         cjk,
-        Some(abbreviations),
+        Some((abbreviations, SentenceJoin::Break)),
+        link_text_punctuation,
+        references.filter(|_| link_text_punctuation == LinkTextPunctuation::Trailing),
+    )
+}
+
+/// Join hard-wrapped continuations, writing two spaces where a line break
+/// ends a sentence with `.`, `!` or `?`. The break is the source evidence of
+/// the sentence end that [`join_sentence_lines`] keeps as a newline; every
+/// other break becomes one space, as in [`join_soft_break_lines`].
+pub(crate) fn join_double_spaced_sentence_lines<S: AsRef<str>>(
+    lines: &[S],
+    cjk: CjkSoftBreak,
+    abbreviations: &Option<Vec<String>>,
+    link_text_punctuation: LinkTextPunctuation,
+    references: Option<&HashSet<String>>,
+) -> String {
+    join_soft_break_lines_with_sentences(
+        lines,
+        cjk,
+        Some((abbreviations, SentenceJoin::DoubleSpace)),
         link_text_punctuation,
         references.filter(|_| link_text_punctuation == LinkTextPunctuation::Trailing),
     )
@@ -2341,6 +2422,14 @@ fn join_reflow_lines<S: AsRef<str>>(lines: &[S], options: &ReflowOptions) -> Str
             options.link_text_punctuation,
             options.defined_references.as_ref(),
         )
+    } else if options.sentence_double_space {
+        join_double_spaced_sentence_lines(
+            lines,
+            options.cjk_soft_break,
+            &options.abbreviations,
+            options.link_text_punctuation,
+            options.defined_references.as_ref(),
+        )
     } else {
         join_soft_break_lines(lines, options.cjk_soft_break)
     }
@@ -2349,7 +2438,7 @@ fn join_reflow_lines<S: AsRef<str>>(lines: &[S], options: &ReflowOptions) -> Str
 fn join_soft_break_lines_with_sentences<S: AsRef<str>>(
     lines: &[S],
     cjk: CjkSoftBreak,
-    sentence_abbreviations: Option<&Option<Vec<String>>>,
+    sentences: Option<(&Option<Vec<String>>, SentenceJoin)>,
     link_text_punctuation: LinkTextPunctuation,
     references: Option<&HashSet<String>>,
 ) -> String {
@@ -2361,7 +2450,7 @@ fn join_soft_break_lines_with_sentences<S: AsRef<str>>(
     if joins.is_empty() {
         return joined;
     }
-    let sentence_ends = sentence_abbreviations.map(|abbreviations| {
+    let sentence_ends = sentences.map(|(abbreviations, _)| {
         // A newline and the joining space occupy the same byte, so all source
         // offsets and code-span ranges still apply.
         for &join in &joins {
@@ -2388,7 +2477,7 @@ fn join_soft_break_lines_with_sentences<S: AsRef<str>>(
     let mut trimmed = String::with_capacity(joined.len());
     let mut copied = 0;
     let mut space_pending = false;
-    let mut sentence_break_pending = false;
+    let mut separator = " ";
     let mut spans = code_spans.iter().copied().peekable();
     for (k, &join) in joins.iter().enumerate() {
         while spans.next_if(|&(_, end)| end <= join).is_some() {}
@@ -2401,7 +2490,7 @@ fn join_soft_break_lines_with_sentences<S: AsRef<str>>(
         let wrote_text = content_end > copied;
         if wrote_text {
             if space_pending {
-                trimmed.push(if sentence_break_pending { '\n' } else { ' ' });
+                trimmed.push_str(separator);
             }
             trimmed.push_str(&joined[copied..content_end]);
         }
@@ -2420,10 +2509,15 @@ fn join_soft_break_lines_with_sentences<S: AsRef<str>>(
                 .is_some_and(joins_cjk_soft_break)
             && next_content.chars().next().is_some_and(joins_cjk_soft_break);
         space_pending = !break_removed || (space_pending && !wrote_text);
-        sentence_break_pending = sentence_ends.as_ref().is_some_and(|ends| ends.contains(&content_end));
+        let ends_sentence = sentence_ends.as_ref().is_some_and(|ends| ends.contains(&content_end));
+        separator = match sentences.map(|(_, join)| join) {
+            Some(SentenceJoin::Break) if ends_sentence => "\n",
+            Some(SentenceJoin::DoubleSpace) if ends_sentence && ends_latin_sentence(&joined[..content_end]) => "  ",
+            _ => " ",
+        };
     }
     if space_pending {
-        trimmed.push(if sentence_break_pending { '\n' } else { ' ' });
+        trimmed.push_str(separator);
     }
     trimmed.push_str(&joined[copied..]);
     trimmed
@@ -2432,6 +2526,12 @@ fn join_soft_break_lines_with_sentences<S: AsRef<str>>(
 /// Check if text ends with sentence-terminating punctuation (. ! ?)
 fn ends_with_sentence_punct(text: &str) -> bool {
     text.ends_with('.') || text.ends_with('!') || text.ends_with('?')
+}
+
+/// Whether `text` ends with `.`, `!` or `?` before any brackets or quotes
+/// that close the sentence, as in `done.` or `(“done.”)`.
+fn ends_latin_sentence(text: &str) -> bool {
+    ends_with_sentence_punct(text.trim_end_matches(|c| is_closing_bracket(c) || is_closing_quote(c)))
 }
 
 /// Whether `text` ends with a CJK sentence ender followed by the brackets or
@@ -4225,18 +4325,26 @@ struct SentencePackUnit {
 /// boundary both appear as adjacent text, while an authored space remains in
 /// the paragraph. Preserve the exact authored separator instead of
 /// manufacturing or normalizing spaces between CJK sentences.
+///
+/// Other sentences are separated by one space, or by two after `.`, `!` or `?`
+/// when [`ReflowOptions::sentence_double_space`] is on.
 fn sentence_pack_separators(
     elements: &[Element],
     sentences: &[String],
     options: &ReflowOptions,
 ) -> Vec<SentencePackSeparator> {
-    let mut separators = vec![
-        SentencePackSeparator {
-            text: " ".to_string(),
+    let mut separators: Vec<SentencePackSeparator> = sentences
+        .windows(2)
+        .map(|pair| SentencePackSeparator {
+            text: if options.sentence_double_space && ends_latin_sentence(&pair[0]) {
+                "  "
+            } else {
+                " "
+            }
+            .to_string(),
             preserve_inline: false,
-        };
-        sentences.len().saturating_sub(1)
-    ];
+        })
+        .collect();
     if options.cjk_soft_break != CjkSoftBreak::Join {
         return separators;
     }
@@ -5347,6 +5455,10 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     let mut current_line_element_spans: Vec<ElementSpan> = Vec::new();
     let length_mode = options.length_mode;
     let exemptions = options.length_exemptions;
+    // Abbreviations that end no sentence, when double spaces after sentences stay
+    let sentence_spacing = options
+        .sentence_double_space
+        .then(|| get_abbreviations(&options.abbreviations));
 
     for (idx, element) in elements.iter().enumerate() {
         let element_len = element.display_len(length_mode);
@@ -5376,11 +5488,14 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             // Check if original text had leading breakable whitespace
             let has_leading_space = text.starts_with(is_breakable_whitespace);
             // If this is a text element, always process it word by word
-            let words: Vec<&str> = split_breakable_words(text).collect();
+            let words = split_breakable_words_with_gaps(text);
 
-            for (i, word) in words.iter().enumerate() {
+            for (i, &(word, gap)) in words.iter().enumerate() {
                 // A bare word carries no construct the checker exempts.
                 let word_width = LineWidth::plain(display_len(word, length_mode));
+                // Space in front of the word, should it stay on this line
+                let separator = gap_separator(&current_line, gap, sentence_spacing.as_ref());
+                let separator_width = LineWidth::plain(separator.len());
                 // A token that is only punctuation (optionally led by
                 // significant whitespace, e.g. French "\u{00A0}:") must never be
                 // hoisted to the start of a line. Tokens are never empty
@@ -5421,7 +5536,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         current_width += word_width;
                     }
                 } else if !current_width.is_empty()
-                    && !(current_width + LineWidth::plain(1) + word_width).fits(options.line_length)
+                    && !(current_width + separator_width + word_width).fits(options.line_length)
                 {
                     if is_trailing_punct {
                         // The overflowing token is bare punctuation, which must
@@ -5438,15 +5553,15 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             Attached {
                                 text: word,
                                 width: word_width,
-                                separator: " ",
+                                separator,
                             },
                             options,
                         )
                         .is_none()
                         {
-                            current_line.push(' ');
+                            current_line.push_str(separator);
                             current_line.push_str(word);
-                            current_width += LineWidth::plain(1) + word_width;
+                            current_width += separator_width + word_width;
                         }
                     } else if !starts_block_construct(word)
                         && !ends_with_unescaped_backslash(current_line.trim_end_matches(is_breakable_whitespace))
@@ -5464,7 +5579,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         Attached {
                             text: word,
                             width: word_width,
-                            separator: " ",
+                            separator,
                         },
                         options,
                     )
@@ -5479,8 +5594,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         // No safe earlier break point — keep the marker attached and
                         // accept the long line rather than corrupt the structure.
                         if i > 0 || has_leading_space {
-                            current_line.push(' ');
-                            current_width += LineWidth::plain(1);
+                            current_line.push_str(separator);
+                            current_width += separator_width;
                         }
                         current_line.push_str(word);
                         current_width += word_width;
@@ -5499,14 +5614,21 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     // handled above by `is_first_adjacent`.
                     let add_space = !current_width.is_empty() && (i > 0 || has_leading_space);
                     if add_space {
-                        current_line.push(' ');
-                        current_width += LineWidth::plain(1);
+                        current_line.push_str(separator);
+                        current_width += separator_width;
                     }
                     current_line.push_str(word);
                     current_width += word_width;
                 }
             }
         } else {
+            // Space in front of the element, should it follow on this line
+            let separator = gap_separator(
+                &current_line,
+                gap_before_element(elements, idx),
+                sentence_spacing.as_ref(),
+            );
+            let separator_width = LineWidth::plain(separator.len());
             let link_parts = link_text_parts(element, options.break_link_text);
             let span_info = match element {
                 Element::Italic { content, underscore } => {
@@ -5567,8 +5689,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     let full = format!("{prefix}{suffix}");
                     let full_width = LineWidth::plain(display_len(&full, length_mode));
                     if !is_adjacent_to_prev && !current_width.is_empty() {
-                        current_line.push(' ');
-                        current_width += LineWidth::plain(1);
+                        current_line.push_str(separator);
+                        current_width += separator_width;
                     }
                     current_line.push_str(&full);
                     current_width += full_width;
@@ -5611,9 +5733,15 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         } else {
                             !current_width.is_empty()
                         };
+                        // Only the first word follows the source gap before the span
+                        let (space, space_width) = if is_first {
+                            (separator, separator_width)
+                        } else {
+                            (" ", LineWidth::plain(1))
+                        };
 
                         if needs_space
-                            && !(current_width + LineWidth::plain(1) + word_width).fits(options.line_length)
+                            && !(current_width + space_width + word_width).fits(options.line_length)
                             && !starts_block_construct(&word_str)
                         {
                             lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
@@ -5635,9 +5763,9 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         } else {
                             let mut start_pos = current_line.len();
                             if needs_space {
-                                current_line.push(' ');
-                                current_width += LineWidth::plain(1);
-                                start_pos += 1;
+                                current_line.push_str(space);
+                                current_width += space_width;
+                                start_pos += space.len();
                             }
                             current_line.push_str(&word_str);
                             current_width += word_width;
@@ -5702,7 +5830,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         ));
                     }
                 } else if !current_width.is_empty()
-                    && !(current_width + LineWidth::plain(1) + element_width).fits(options.line_length)
+                    && !(current_width + separator_width + element_width).fits(options.line_length)
                 {
                     if !starts_block_construct(&element_str) {
                         // Not adjacent, would exceed — start new line
@@ -5725,14 +5853,14 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         Attached {
                             text: &element_str,
                             width: element_width,
-                            separator: " ",
+                            separator,
                         },
                         options,
                     ) {
                         // The overflowing element would open a block construct at
                         // line start (e.g. an HtmlTag like `<div>`). Broke one word
                         // earlier instead so the element stays mid-line.
-                        let start = carried + 1;
+                        let start = carried + separator.len();
                         current_line_element_spans.push(ElementSpan::new(
                             start,
                             element_str.len(),
@@ -5746,8 +5874,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         let ends_with_opener =
                             current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
                         if !ends_with_opener {
-                            current_line.push(' ');
-                            current_width += LineWidth::plain(1);
+                            current_line.push_str(separator);
+                            current_width += separator_width;
                         }
                         let start = current_line.len();
                         current_line.push_str(&element_str);
@@ -5765,8 +5893,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     let ends_with_opener =
                         current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
                     if !current_width.is_empty() && !ends_with_opener {
-                        current_line.push(' ');
-                        current_width += LineWidth::plain(1);
+                        current_line.push_str(separator);
+                        current_width += separator_width;
                     }
                     let start = current_line.len();
                     current_line.push_str(&element_str);
@@ -6904,6 +7032,70 @@ mod tests {
             ),
             "First sentence.\nlowercase follows."
         );
+    }
+
+    #[test]
+    fn double_spaced_sentence_lines_put_two_spaces_only_where_a_break_ends_a_sentence() {
+        let join = |lines: &[&str], cjk| {
+            join_double_spaced_sentence_lines(lines, cjk, &None, LinkTextPunctuation::Ignore, None)
+        };
+        assert_eq!(
+            join(&["First sentence.", "Second one."], CjkSoftBreak::Space),
+            "First sentence.  Second one."
+        );
+        assert_eq!(
+            join(&["Is it?", "It is!", "Done."], CjkSoftBreak::Space),
+            "Is it?  It is!  Done."
+        );
+        // A closing quote ends the sentence with it
+        assert_eq!(
+            join(&["He said “done.”", "Then he left."], CjkSoftBreak::Space),
+            "He said “done.”  Then he left."
+        );
+        // A full stop inside parentheses does not end the outer sentence for
+        // the splitter, so its break is one space, as sentence-per-line keeps
+        // no break there either
+        assert_eq!(
+            join(&["Then (he left.)", "End."], CjkSoftBreak::Space),
+            "Then (he left.) End."
+        );
+        // A break inside a sentence, or after an abbreviation, is one space
+        assert_eq!(
+            join(&["A sentence that", "goes on."], CjkSoftBreak::Space),
+            "A sentence that goes on."
+        );
+        assert_eq!(
+            join(&["Ask e.g.", "the team."], CjkSoftBreak::Space),
+            "Ask e.g. the team."
+        );
+        // CJK sentence enders take no extra space
+        assert_eq!(
+            join(&["完成了。", "下一句。"], CjkSoftBreak::Space),
+            "完成了。 下一句。"
+        );
+        assert_eq!(join(&["完成了。", "下一句。"], CjkSoftBreak::Join), "完成了。下一句。");
+    }
+
+    #[test]
+    fn gap_separator_keeps_two_spaces_only_after_a_sentence_end() {
+        let abbreviations = get_abbreviations(&None);
+        let on = Some(&abbreviations);
+        assert_eq!(gap_separator("It ended.", "  ", on), "  ");
+        assert_eq!(gap_separator("It ended.)", "   ", on), "  ");
+        assert_eq!(gap_separator("It ended.", " ", on), " ");
+        assert_eq!(gap_separator("It goes", "  ", on), " ");
+        assert_eq!(gap_separator("Ask Dr.", "  ", on), " ");
+        assert_eq!(gap_separator("It ended.", "  ", None), " ");
+    }
+
+    #[test]
+    fn breakable_words_come_with_the_gaps_before_them() {
+        assert_eq!(
+            split_breakable_words_with_gaps(" One.  Two\tthree  "),
+            vec![("One.", " "), ("Two", "  "), ("three", "\t")]
+        );
+        assert_eq!(split_breakable_words_with_gaps("word"), vec![("word", "")]);
+        assert!(split_breakable_words_with_gaps("  ").is_empty());
     }
 
     /// `preserves_content` is the last line of defense against a reflow writing

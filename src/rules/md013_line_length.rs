@@ -12,8 +12,9 @@ use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::{
     BlockquoteLineData, blockquote_continuation_style, code_span_crosses_last_break, code_span_runs_into_indentation,
-    dominant_blockquote_prefix, is_self_contained_display_math_line, join_sentence_lines, join_soft_break_lines,
-    reflow_blockquote_content, semantic_sentence_count, split_into_sentences_with_link_text, trim_breakable_whitespace,
+    dominant_blockquote_prefix, is_self_contained_display_math_line, join_double_spaced_sentence_lines,
+    join_sentence_lines, join_soft_break_lines, reflow_blockquote_content, semantic_sentence_count,
+    split_into_sentences_with_link_text, trim_breakable_whitespace,
 };
 use pulldown_cmark::LinkType;
 use toml;
@@ -325,6 +326,7 @@ impl MD013LineLength {
                 ignore_link_urls: true,
                 atomic_spans: true,
                 reflow_break_link_text: false,
+                reflow_sentence_double_space: false,
                 reflow_break_code_spans: true,
                 reflow_length_exemptions: false,
                 cjk_soft_break: CjkSoftBreak::default(),
@@ -398,6 +400,7 @@ impl MD013LineLength {
             // paragraph path can prove that no literal indentation is added.
             wrap_code_spans: false,
             break_link_text: config.reflow_break_link_text,
+            sentence_double_space: config.reflow_sentence_double_space,
             length_exemptions: config.length_exemptions_for_reflow(),
             cjk_soft_break: config.cjk_soft_break,
         }
@@ -514,6 +517,14 @@ impl MD013LineLength {
     ) -> String {
         if config.reflow_mode == ReflowMode::SentencePerLine {
             join_sentence_lines(
+                lines,
+                config.cjk_soft_break,
+                &config.abbreviations_for_reflow(),
+                config.link_text_punctuation,
+                Some(references),
+            )
+        } else if config.reflow_sentence_double_space {
+            join_double_spaced_sentence_lines(
                 lines,
                 config.cjk_soft_break,
                 &config.abbreviations_for_reflow(),
