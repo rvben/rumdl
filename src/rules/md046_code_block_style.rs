@@ -1140,22 +1140,35 @@ impl MD046CodeBlockStyle {
 
         let block_lines = Self::indented_block_lines(lines, ctx);
 
-        let mut fenced_count = 0;
-        let mut indented_count = 0;
-
         // Count all code block occurrences (prevalence-based approach).
         //
-        // Both counts must ignore fence markers and indented text that live
-        // inside a non-code container (HTML/MDX comments, raw HTML/JSX
-        // blocks, mkdocstrings, footnote definitions, blockquotes) so that
-        // the detected style stays in lockstep with `in_skipped_container`,
-        // which decides the warnings in `check`. Without this, a document that contains a single
-        // real code block plus a fake fence or indented paragraph nested in
-        // a comment is wrongly classified and the real block gets flagged.
-        let mut in_fenced = false;
+        // Fenced blocks are counted from the parser's block list, never from
+        // lines that look like fences: a `~~~` block holding a line of three
+        // backticks is one block, and the fence-looking line is its text.
+        // Indented blocks come from `indented_block_lines`, which reads the
+        // same list.
+        //
+        // Both counts must ignore blocks that live inside a non-code
+        // container (HTML/MDX comments, raw HTML/JSX blocks, mkdocstrings,
+        // footnote definitions, blockquotes) so that the detected style stays
+        // in lockstep with `in_skipped_container`, which decides the warnings
+        // in `check`. Without this, a document that contains a single real
+        // code block plus a fake fence or indented paragraph nested in a
+        // comment is wrongly classified and the real block gets flagged.
+        let mut fenced_count = 0;
+        let mut indented_count = 0;
         let mut prev_block = None;
 
-        for (i, line) in lines.iter().enumerate() {
+        let mut fence_opens = vec![false; lines.len()];
+        for detail in ctx.code_block_details.iter().filter(|detail| detail.is_fenced) {
+            if let Some(line) = Self::code_block_start_line(ctx, detail)
+                && line < fence_opens.len()
+            {
+                fence_opens[line] = true;
+            }
+        }
+
+        for (i, _) in lines.iter().enumerate() {
             let in_container = ictx.in_comment_or_html.get(i).copied().unwrap_or(false);
 
             // Lines inside Azure DevOps colon code fences are verbatim content.
@@ -1172,24 +1185,12 @@ impl MD046CodeBlockStyle {
                 continue;
             }
 
-            let baseline = ictx.list_item_baseline.get(i).copied().flatten().unwrap_or(0);
-            if self.is_fenced_code_block_start_at(line, baseline) {
-                if in_container {
-                    // Fence marker inside a container — not a real fence,
-                    // don't flip state or count it.
-                    prev_block = None;
-                    continue;
-                }
-                if !in_fenced {
-                    // Opening fence
+            if fence_opens[i] {
+                if !in_container {
                     fenced_count += 1;
-                    in_fenced = true;
-                } else {
-                    // Closing fence
-                    in_fenced = false;
                 }
                 prev_block = None;
-            } else if !in_fenced && block_lines[i].is_some() {
+            } else if block_lines[i].is_some() {
                 // Count each indented block once
                 if prev_block != block_lines[i] {
                     indented_count += 1;
@@ -4327,5 +4328,69 @@ More text
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].fix.is_some());
         assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    /// A fence line that does not match the open fence's character and length
+    /// is the fence's text; the indented blocks after the fence still count.
+    #[test]
+    fn detect_style_counts_indented_blocks_after_a_fence_holding_other_fence_lines() {
+        let head = "# T\n\nPara.\n\n    one\n\nPara.\n\n    two\n\nPara.\n\n";
+        for inner in [
+            "~~~\n```\n~~~\n",
+            "````\n```\n````\n",
+            "~~~~\n~~~\n~~~~\n",
+            "```\n~~~\n```\n",
+        ] {
+            let content = format!("{head}{inner}");
+            for flavor in crate::format_proof::ALL_FLAVORS {
+                // MDG always converges on fenced; Azure DevOps skips every line
+                // the parser marks as code (a separate, unchanged behavior).
+                if matches!(
+                    flavor,
+                    crate::config::MarkdownFlavor::MDG | crate::config::MarkdownFlavor::AzureDevOps
+                ) {
+                    continue;
+                }
+                let ctx = LintContext::new(&content, flavor, None);
+                let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+                let lines = ctx.raw_lines();
+                let owned = rule.build_indent_context(&ctx, lines);
+                assert_eq!(
+                    rule.detect_style(&ctx, lines, &owned.borrow()),
+                    Some(CodeBlockStyle::Indented),
+                    "{flavor:?}: two indented blocks outnumber one fenced block in {inner:?}"
+                );
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(
+                    warnings
+                        .iter()
+                        .map(|w| (w.line, w.message.as_str()))
+                        .collect::<Vec<_>>(),
+                    vec![(13, "Use indented code blocks")],
+                    "{flavor:?}: {inner:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn detect_style_keeps_fenced_when_fences_outnumber_indented_blocks() {
+        let content = "# T\n\nPara.\n\n    one\n\nPara.\n\n~~~\n```\n~~~\n\nPara.\n\n~~~\n```\n~~~\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let lines = ctx.raw_lines();
+        let owned = rule.build_indent_context(&ctx, lines);
+        assert_eq!(
+            rule.detect_style(&ctx, lines, &owned.borrow()),
+            Some(CodeBlockStyle::Fenced)
+        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings
+                .iter()
+                .map(|w| (w.line, w.message.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(5, "Use fenced code blocks")]
+        );
     }
 }
