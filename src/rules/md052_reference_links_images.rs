@@ -1,3 +1,4 @@
+use crate::lint_context::HeadingContainer;
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::calculate_match_range;
@@ -20,9 +21,8 @@ static REF_REGEX: LazyLock<Regex> =
 // Pattern for list items to exclude from reference checks (standard regex is fine)
 static LIST_ITEM_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[-*+]\s+(?:\[[xX\s]\]\s+)?").unwrap());
 
-// Pattern for output example sections (standard regex is fine)
-static OUTPUT_EXAMPLE_START: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^#+\s*(?:Output|Example|Output Style|Output Format)\s*$").unwrap());
+// Heading titles that open an example section
+const OUTPUT_EXAMPLE_TITLES: [&str; 4] = ["Output", "Example", "Output Style", "Output Format"];
 
 // Pattern for GitHub alerts/callouts in blockquotes (e.g., > [!NOTE], > [!TIP], etc.)
 // Extended to include additional common alert types
@@ -311,18 +311,32 @@ impl MD052ReferenceLinkImages {
         references
     }
 
+    /// Lines (1-indexed) inside an example section.
+    ///
+    /// A section starts at a top-level heading titled `Output`, `Example`,
+    /// `Output Style` or `Output Format`, and runs up to the next top-level
+    /// heading of any level. Headings come from the parser, so `#` lines in code
+    /// blocks, HTML blocks and front matter, `#hashtag` paragraphs and headings
+    /// held by a list item or blockquote neither start nor end a section; setext
+    /// headings count like ATX ones.
     fn compute_example_sections(ctx: &crate::lint_context::LintContext) -> HashSet<usize> {
         let mut sections = HashSet::new();
-        let mut in_section = false;
-        for (line_num, line) in ctx.raw_lines().iter().enumerate() {
-            if OUTPUT_EXAMPLE_START.is_match(line) {
-                in_section = true;
-            } else if line.starts_with('#') {
-                in_section = false;
+        // First line of the open section, closed by the next top-level heading.
+        let mut open_from: Option<usize> = None;
+        for parsed in ctx.headings() {
+            if ctx.heading_container(parsed.line_num) != HeadingContainer::Outside {
+                continue;
             }
-            if in_section {
-                sections.insert(line_num + 1);
+            let first_line = parsed.first_line_num();
+            if let Some(from) = open_from.take() {
+                sections.extend(from..first_line);
             }
+            if OUTPUT_EXAMPLE_TITLES.contains(&parsed.heading.text.as_str()) {
+                open_from = Some(first_line);
+            }
+        }
+        if let Some(from) = open_from {
+            sections.extend(from..=ctx.lines.len());
         }
         sections
     }
@@ -1252,6 +1266,58 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
         // Only the reference outside the Output section should be flagged
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("missing"));
+    }
+
+    fn example_section_lines(content: &str) -> Vec<usize> {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let mut lines: Vec<usize> = MD052ReferenceLinkImages::compute_example_sections(&ctx)
+            .into_iter()
+            .collect();
+        lines.sort_unstable();
+        lines
+    }
+
+    #[test]
+    fn test_example_section_spans_to_next_heading() {
+        assert_eq!(
+            example_section_lines("# T\n\n## Example\n\ntext\n\n## Next\n\nmore\n"),
+            [3, 4, 5, 6]
+        );
+        // The last section runs to the end of the document.
+        assert_eq!(example_section_lines("# T\n\n## Output\n\ntext\n"), [3, 4, 5]);
+    }
+
+    #[test]
+    fn test_example_section_ignores_hash_lines_that_are_not_headings() {
+        // A shell comment in a fence does not end the section.
+        assert_eq!(
+            example_section_lines("## Example\n\n```sh\n# a comment\n```\n\ntail\n"),
+            [1, 2, 3, 4, 5, 6, 7]
+        );
+        // A `## Output` line in a fence does not start one.
+        assert!(example_section_lines("# T\n\n```\n## Output\n```\n").is_empty());
+        // Nor does a hashtag paragraph end one.
+        assert_eq!(example_section_lines("## Example\n\n#tag\n\ntail\n"), [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_example_section_setext_and_closing_hashes() {
+        assert_eq!(example_section_lines("Example\n-------\n\ntail\n"), [1, 2, 3, 4]);
+        assert_eq!(example_section_lines("## Example ##\n\ntail\n"), [1, 2, 3]);
+        assert_eq!(
+            example_section_lines("## Example\n\ntail\n\nOther\n-----\n\nafter\n"),
+            [1, 2, 3, 4]
+        );
+    }
+
+    #[test]
+    fn test_example_section_ignores_headings_in_containers() {
+        assert!(example_section_lines("- ## Example\n\n  text\n").is_empty());
+        assert!(example_section_lines("> ## Example\n\ntext\n").is_empty());
+        assert_eq!(
+            example_section_lines("## Example\n\n- # x\n\n> # y\n\ntail\n"),
+            [1, 2, 3, 4, 5, 6, 7]
+        );
     }
 
     #[test]
