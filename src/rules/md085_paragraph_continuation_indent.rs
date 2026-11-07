@@ -109,7 +109,7 @@ impl MD085ParagraphContinuationIndent {
             || line.in_math_block
             || line.is_horizontal_rule
             || line.is_kramdown_block_ial
-            || line.is_myst_comment
+            || line.is_myst_structural_line()
     }
 
     /// Whether this line is the text of a setext heading, whose underline follows on

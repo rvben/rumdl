@@ -233,6 +233,64 @@ fn opens_item_on_marker_line(
     heading.first_line_prefix_len() > margin
 }
 
+/// Number of MyST target lines directly above a heading's first line.
+///
+/// A target (`(label)=`) labels the block below it, so a run of them is part of
+/// the heading unit: the blank line a heading needs above it goes above the run,
+/// never between a target and its heading. Only an unquoted heading that does not
+/// open a list item can be labelled this way, and only by targets written in the
+/// heading's own container: a blank line above a target that a list item holds
+/// would land inside the list instead of above the heading.
+fn attached_target_run(
+    ctx: &crate::lint_context::LintContext,
+    first_idx: usize,
+    quoted: bool,
+    heading: &crate::lint_context::HeadingInfo,
+) -> usize {
+    if quoted || opens_item_on_marker_line(ctx, first_idx, heading) {
+        return 0;
+    }
+    let container = ctx.heading_container(first_idx + 1);
+    let heading_indent = ctx.lines[first_idx].visual_indent;
+    (0..first_idx)
+        .rev()
+        .take_while(|&idx| {
+            ctx.lines[idx].is_myst_target && target_shares_container(ctx, idx, container, heading_indent)
+        })
+        .count()
+}
+
+/// Whether the target on line `idx` sits in `container`, the container of the
+/// heading below it whose first line is indented `heading_indent` columns.
+///
+/// A target is indented at most three columns, so the only list item that can
+/// hold one is a top-level item, whose content starts at column two or later.
+fn target_shares_container(
+    ctx: &crate::lint_context::LintContext,
+    idx: usize,
+    container: crate::lint_context::HeadingContainer,
+    heading_indent: usize,
+) -> bool {
+    use crate::lint_context::HeadingContainer;
+    let indent = ctx.lines[idx].visual_indent;
+    match container {
+        HeadingContainer::Outside => !list_item_reaches(ctx, idx, indent),
+        HeadingContainer::Item { content_col } => indent >= content_col,
+        HeadingContainer::Unknown => indent == heading_indent,
+    }
+}
+
+/// Whether the list block running into line `idx` has an item whose content
+/// starts at or before column `indent`, which a line indented that far continues.
+fn list_item_reaches(ctx: &crate::lint_context::LintContext, idx: usize, indent: usize) -> bool {
+    ctx.lines[..=idx]
+        .iter()
+        .rev()
+        .take_while(|line| line.in_list_block)
+        .filter_map(|line| line.list_item.as_deref())
+        .any(|item| item.content_column <= indent)
+}
+
 /// Protect headings whose structural marker belongs to template code, while
 /// retaining visible headings built from multiline template expressions.
 fn heading_is_in_template_code(
@@ -272,6 +330,7 @@ fn heading_at_start_idx(ctx: &crate::lint_context::LintContext, is_pandoc: bool)
         if is_blank_or_comment_only(trimmed)
             || line.in_kramdown_extension_block
             || line.is_kramdown_block_ial
+            || line.is_myst_target
             || (is_pandoc && (pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed)))
         {
             continue;
@@ -315,6 +374,8 @@ fn is_adjacent_nested_heading(
             || info.in_mdx_comment
             || is_block_attribute_line(trimmed, ctx.flavor)
             || (is_pandoc && (pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed)))
+            // Targets label the child heading, so they do not separate it from its parent
+            || (info.is_myst_target && !child.is_blockquote())
         {
             continue;
         }
@@ -438,6 +499,9 @@ struct Violation {
     heading_line: usize,
     /// Index of the line the heading text starts on.
     first_line: usize,
+    /// Line the added blank lines go before: the first label line of a run of
+    /// targets above the heading, else `first_line`.
+    insert_line: usize,
     /// `"above"` or `"below"`.
     position: &'static str,
     needed_blanks: usize,
@@ -588,7 +652,8 @@ impl MD022BlanksAroundHeadings {
             if required == 0 && parsed.is_setext() {
                 required = 1;
             }
-            for idx in (0..first).rev() {
+            let anchor = first - attached_target_run(ctx, first, quoted, heading);
+            for idx in (0..anchor).rev() {
                 let info = &ctx.lines[idx];
                 let line = info.content(ctx.content);
                 let trimmed = neighbour_text(ctx, idx, quoted).trim();
@@ -743,8 +808,12 @@ impl MD022BlanksAroundHeadings {
                 let heading_level = heading.level as usize;
 
                 // Count existing blank lines above in the result, skipping HTML comments, IAL, and Quarto div markers
+                // Target lines directly above are the tail of `result`; blanks are
+                // counted and added above them.
+                let attached = attached_target_run(ctx, i, quoted, heading).min(result.len());
+                let anchor_pos = result.len() - attached;
                 let mut blank_lines_above = 0;
-                let mut check_idx = result.len();
+                let mut check_idx = anchor_pos;
                 while check_idx > 0 {
                     let prev_line = &result[check_idx - 1];
                     let trimmed = if quoted {
@@ -783,11 +852,9 @@ impl MD022BlanksAroundHeadings {
 
                 // Add missing blank lines above if needed
                 if blank_lines_above < needed_blanks_above {
-                    let blank = blank_line_above(line, result.iter().rev().map(String::as_str));
-                    while blank_lines_above < needed_blanks_above {
-                        result.push(blank.clone());
-                        blank_lines_above += 1;
-                    }
+                    let blank = blank_line_above(line, result[..anchor_pos].iter().rev().map(String::as_str));
+                    let missing = needed_blanks_above - blank_lines_above;
+                    result.splice(anchor_pos..anchor_pos, std::iter::repeat_n(blank, missing));
                 }
 
                 // Add the heading's own lines, underline included, so nothing
@@ -937,10 +1004,12 @@ impl Rule for MD022BlanksAroundHeadings {
             let should_check_above = should_check_above
                 && !starts_item_under_bare_marker(ctx, first_idx)
                 && !opens_item_on_marker_line(ctx, first_idx, heading);
-            if should_check_above {
+            // Target lines directly above belong to the heading; blanks are counted above them.
+            let anchor = first_idx - attached_target_run(ctx, first_idx, quoted, heading);
+            if should_check_above && anchor > 0 {
                 let mut blank_lines_above = 0;
                 let mut hit_frontmatter_end = false;
-                for j in (0..first_idx).rev() {
+                for j in (0..anchor).rev() {
                     let line_content = ctx.lines[j].content(ctx.content);
                     let trimmed = neighbour_text(ctx, j, quoted).trim();
                     if ctx.lines[j].is_blank || is_blank_or_comment_only(line_content) {
@@ -973,16 +1042,14 @@ impl Rule for MD022BlanksAroundHeadings {
                     heading_violations.push(Violation {
                         heading_line: line_num,
                         first_line: first_idx,
+                        insert_line: anchor,
                         position: "above",
                         needed_blanks,
                         required_blanks: required,
                         is_setext: parsed.is_setext(),
                         blank_line: blank_line_above(
                             ctx.lines[first_idx].content(ctx.content),
-                            ctx.lines[..first_idx]
-                                .iter()
-                                .rev()
-                                .map(|line| line.content(ctx.content)),
+                            ctx.lines[..anchor].iter().rev().map(|line| line.content(ctx.content)),
                         ),
                     });
                 }
@@ -1053,6 +1120,7 @@ impl Rule for MD022BlanksAroundHeadings {
                         heading_violations.push(Violation {
                             heading_line: line_num,
                             first_line: first_idx,
+                            insert_line: first_idx,
                             position: "below",
                             needed_blanks,
                             required_blanks: required,
@@ -1071,6 +1139,7 @@ impl Rule for MD022BlanksAroundHeadings {
         for Violation {
             heading_line,
             first_line,
+            insert_line,
             position,
             needed_blanks,
             required_blanks,
@@ -1092,7 +1161,7 @@ impl Rule for MD022BlanksAroundHeadings {
                         required_blanks,
                         if required_blanks == 1 { "line" } else { "lines" }
                     ),
-                    first_line,
+                    insert_line, // Insert before the targets (or heading text) of the heading
                 ),
                 "below" => {
                     let insert_after = if is_setext { heading_line + 2 } else { heading_line + 1 };

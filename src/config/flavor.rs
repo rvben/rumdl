@@ -234,6 +234,11 @@ impl MarkdownFlavor {
     pub fn supports_myst_comments(self) -> bool {
         matches!(self, Self::MyST)
     }
+
+    /// True for MyST flavor - supports `(label)=` targets and `+++` block breaks
+    pub fn supports_myst_targets(self) -> bool {
+        matches!(self, Self::MyST)
+    }
 }
 
 /// Normalizes configuration keys (rule names, option names) to lowercase kebab-case.
@@ -497,6 +502,7 @@ mod tests {
         assert!(MarkdownFlavor::MyST.supports_myst_directives());
         assert!(MarkdownFlavor::MyST.supports_myst_roles());
         assert!(MarkdownFlavor::MyST.supports_myst_comments());
+        assert!(MarkdownFlavor::MyST.supports_myst_targets());
         assert!(!MarkdownFlavor::MyST.is_pandoc_compatible());
         assert!(!MarkdownFlavor::MyST.supports_colon_code_fences());
         assert!(!MarkdownFlavor::MyST.supports_jsx());

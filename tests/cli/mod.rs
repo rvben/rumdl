@@ -64,6 +64,7 @@ mod cli_md077_aligned_structure_test;
 mod cli_md077_continuation_structure_test;
 mod cli_md077_mkdocs_nesting_test;
 mod cli_md089_cjk_spacing_test;
+mod cli_myst_structural_lines_test;
 mod cli_non_commonmark_whitespace_test;
 mod cli_quoted_continuation_headings_test;
 mod cli_quoted_headings_rules_test;

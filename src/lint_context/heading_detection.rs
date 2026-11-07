@@ -472,7 +472,7 @@ fn structural_blocks(
         line.in_myst_directive,
         // myst-parser ends the quoted paragraph on a `%` comment, so
         // `> quote\n% c\nSetup\n=====` really is a heading in MyST.
-        line.is_myst_comment,
+        line.is_myst_structural_line(),
     ]
 }
 

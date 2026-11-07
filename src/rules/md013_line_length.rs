@@ -261,7 +261,17 @@ fn blockquote_content_start(prefix: &str) -> usize {
 }
 
 /// Whether a code span crosses the line break ending the 0-indexed line `idx`.
+///
+/// A MyST comment, target or block break is a block of its own that ends the
+/// paragraph on either side, so no span crosses a break next to one even where
+/// the CommonMark parse reads the lines as one paragraph.
 fn line_ends_in_code_span(ctx: &crate::lint_context::LintContext, idx: usize) -> bool {
+    let structural = |line: Option<&crate::lint_context::types::LineInfo>| {
+        line.is_some_and(crate::lint_context::types::LineInfo::is_myst_structural_line)
+    };
+    if structural(ctx.lines.get(idx)) || structural(ctx.lines.get(idx + 1)) {
+        return false;
+    }
     ctx.is_in_code_span_byte_with_or_without_math(ctx.lines[idx].byte_offset + source_line_without_cr(ctx, idx).len())
 }
 
@@ -820,8 +830,8 @@ impl Rule for MD013LineLength {
                 continue;
             }
 
-            // Skip MyST comments (% comment) — structural lines, not prose
-            if ctx.lines[line_idx].is_myst_comment {
+            // Skip MyST comments, targets and block breaks: structural lines, not prose
+            if ctx.lines[line_idx].is_myst_structural_line() {
                 continue;
             }
 
@@ -2199,6 +2209,9 @@ impl MD013LineLength {
                 || is_template_directive_only(lines[i])
                 || is_link_ref_def
                 || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
+                || ctx
+                    .line_info(line_num)
+                    .is_some_and(crate::lint_context::types::LineInfo::is_myst_structural_line)
                 || is_html_only_line(lines[i])
                 || standalone_link_ends_paragraph(ctx, line_num, config)
             {
@@ -4553,6 +4566,9 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_front_matter)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_html_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_html_comment)
+                    || ctx
+                        .line_info(next_line_num)
+                        .is_some_and(crate::lint_context::types::LineInfo::is_myst_structural_line)
                     || ctx.line_holds_html_block(i)
                     // Retain source boundaries before fence-like lines, even
                     // when a backtick in the info string makes the fence invalid.

@@ -533,7 +533,7 @@ impl MD034NoBareUrls {
         // HTML block contents and MyST comments are not visible Markdown prose.
         if ctx
             .line_info(line_number)
-            .is_some_and(|info| info.in_html_block || info.is_myst_comment)
+            .is_some_and(|info| info.in_html_block || info.is_myst_structural_line())
         {
             return warnings;
         }

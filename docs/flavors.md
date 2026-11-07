@@ -80,7 +80,7 @@ The `standard` flavor includes CommonMark plus widely-adopted GFM extensions (ta
 - **[Quarto](flavors/quarto.md)** - Citations, shortcodes, div blocks, math blocks, executable code
 - **[Kramdown](flavors/kramdown.md)** - IALs, ALDs, extension blocks, kramdown anchor generation
 - **[Azure DevOps](flavors/azure_devops.md)** - Colon code fences (`:::mermaid … :::`) treated as opaque code blocks
-- **[MyST](flavors/myst.md)** - Directives (`:::{name}`, `` ```{name} ``), roles (`{role}`content``), `%` comments
+- **[MyST](flavors/myst.md)** - Directives (`:::{name}`, `` ```{name} ``), roles (`{role}`content``), `%` comments, `(label)=` targets
 - **[Hugo](flavors/hugo.md)** - Goldmark Markdown attributes (`{class="a" id="b"}`) attached to tables, headings, and code blocks
 - **[Markdown with Gherkin](flavors/mdg.md)** - Structure headings, tag lines, Doc String fences, and indented Gherkin tables kept in the form Gherkin accepts
 - **[GitHub Agentic Workflows](flavors/gh-aw.md)** - Frontmatter templates, runtime imports, and conditional control lines preserved safely (preview)

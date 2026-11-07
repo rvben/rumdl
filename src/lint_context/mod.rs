@@ -1336,6 +1336,14 @@ impl<'a> LintContext<'a> {
         heading_detection::mark_parser_html_blocks(content, &mut lines, &html_blocks, flavor);
         let (html_block_ranges, html_block_lines) = heading_detection::parser_html_blocks(&lines, &html_blocks, flavor);
 
+        // MyST targets and block breaks. The HTML blocks are known only now, and a
+        // line in one is raw HTML, whatever it looks like.
+        profile_section!(
+            "MyST targets",
+            profile,
+            flavor_detection::detect_myst_targets(content, &mut lines, flavor, &html_block_lines)
+        );
+
         // Now detect headings and blockquotes
         let mdx_flow_lines = mdx_context.as_ref().map(|mdx| mdx.flow_lines(&lines));
         let heading_detection::HeadingAnalysis {

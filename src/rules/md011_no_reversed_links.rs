@@ -266,7 +266,7 @@ impl Rule for MD011NoReversedLinks {
             .skip_esm_blocks()
             .skip_obsidian_comments()
         {
-            if filtered_line.line_info.is_myst_comment {
+            if filtered_line.line_info.is_myst_structural_line() {
                 continue;
             }
             // Raw HTML block contents are literal. MDX JSX children and

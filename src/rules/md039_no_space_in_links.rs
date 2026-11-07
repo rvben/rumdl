@@ -116,6 +116,9 @@ impl Rule for MD039NoSpaceInLinks {
             if ctx.is_in_jsx_expression(link.byte_offset)
                 || ctx.is_in_mdx_comment(link.byte_offset)
                 || ctx.is_in_myst_comment(link.byte_offset)
+                || ctx
+                    .line_info(link.line)
+                    .is_some_and(crate::lint_context::types::LineInfo::is_myst_structural_line)
             {
                 continue;
             }
@@ -160,6 +163,9 @@ impl Rule for MD039NoSpaceInLinks {
             if ctx.is_in_jsx_expression(image.byte_offset)
                 || ctx.is_in_mdx_comment(image.byte_offset)
                 || ctx.is_in_myst_comment(image.byte_offset)
+                || ctx
+                    .line_info(image.line)
+                    .is_some_and(crate::lint_context::types::LineInfo::is_myst_structural_line)
             {
                 continue;
             }

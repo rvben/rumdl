@@ -70,7 +70,7 @@ Most tools treat Markdown as a single dialect and rely on configuration or plugi
 | quarto       | Quarto / RMarkdown                 | Citations, shortcodes, executable blocks                                     |
 | kramdown     | Jekyll / kramdown                  | Attribute lists, TOC markers                                                 |
 | azure_devops | Azure DevOps wikis                 | Colon code fences (`:::mermaid … :::`) treated as opaque code blocks         |
-| myst         | MyST / Jupyter Book                | Directives (`:::{name}`), roles (`` {role}`text` ``), `%` comments           |
+| myst         | MyST / Jupyter Book                | Directives (`:::{name}`), roles (`` {role}`text` ``), `%` comments, targets  |
 | hugo         | Hugo / Goldmark                    | Block attribute lists                                                        |
 | mdg          | Markdown with Gherkin              | Gherkin-safe headings, tag lines, Doc String fences, indented tables         |
 | gh-aw        | GitHub Agentic Workflows (preview) | Runtime imports, conditionals, frontmatter message templates                 |

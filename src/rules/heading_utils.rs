@@ -417,7 +417,7 @@ pub(crate) fn atx_to_setext_is_safe(
             || l.in_obsidian_comment
             || l.in_footnote_definition
             || l.in_myst_directive
-            || l.is_myst_comment
+            || l.is_myst_structural_line()
             || l.in_definition_list
             || l.in_list_block
             || l.in_table_block

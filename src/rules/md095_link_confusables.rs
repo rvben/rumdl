@@ -610,7 +610,7 @@ fn html_source_tags<'a>(
                         || info.in_front_matter
                         || info.in_obsidian_comment
                         || info.in_mdx_comment
-                        || info.is_myst_comment
+                        || info.is_myst_structural_line()
                 })
             {
                 continue;
@@ -738,7 +738,7 @@ impl Rule for MD095LinkConfusables {
                         || info.in_front_matter
                         || info.in_obsidian_comment
                         || info.in_mdx_comment
-                        || info.is_myst_comment
+                        || info.is_myst_structural_line()
                 })
             {
                 return;

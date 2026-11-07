@@ -206,7 +206,11 @@ impl MD041FirstLineHeading {
             let idx = filtered_line.line_num - 1;
             let line_info = &ctx.lines[idx];
 
-            if line_info.is_blank || line_info.is_kramdown_block_ial || Self::is_mdx_comment_only_line(ctx, idx) {
+            if line_info.is_blank
+                || line_info.is_kramdown_block_ial
+                || line_info.is_myst_structural_line()
+                || Self::is_mdx_comment_only_line(ctx, idx)
+            {
                 continue;
             }
 
@@ -649,7 +653,8 @@ impl MD041FirstLineHeading {
                 || Self::is_non_content_line(line_content)
                 || (is_mkdocs && is_mkdocs_anchor_line(line_content))
                 || line_info.in_kramdown_extension_block
-                || line_info.is_kramdown_block_ial;
+                || line_info.is_kramdown_block_ial
+                || line_info.is_myst_structural_line();
 
             if is_preamble {
                 continue;

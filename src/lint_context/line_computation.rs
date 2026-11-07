@@ -204,6 +204,8 @@ pub(super) fn compute_basic_line_info(
             in_footnote_definition: false,
             in_myst_directive: false,
             is_myst_comment: false,
+            is_myst_target: false,
+            is_myst_block_break: false,
         });
     }
 

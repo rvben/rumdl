@@ -6,7 +6,7 @@ description: "Lint MyST Markdown for Jupyter Book and Sphinx while preserving di
 
 Use rumdl's `myst` flavor for MyST Markdown in Jupyter Book, Sphinx with
 MyST-Parser, and the MyST document engine. It distinguishes content directives
-from code directives and recognizes roles, directive options, and MyST comments
+from code directives and recognizes roles, directive options, MyST comments, targets, and block breaks
 without turning off normal Markdown checks.
 
 ```bash
@@ -103,13 +103,48 @@ MyST uses `%` for single-line comments:
 Regular paragraph text.
 ```
 
-Comment lines are excluded from line-length checks.
+Comment lines are excluded from line-length checks, from text rules such as
+MD044, and from paragraph reflow: a comment never joins the paragraph around it.
+
+### Targets
+
+A line of the form `(label)=` defines a cross-reference target for the block
+below it, and `{ref}` roles point at the label:
+
+```markdown
+(sphinx)=
+
+# Sphinx
+
+See {ref}`sphinx`.
+```
+
+A target line is a label, not prose. rumdl does not check the label as text
+(MD044 would otherwise rewrite it and break the links that use it), and a file
+that starts with a target satisfies MD041 when a heading follows. A target
+directly above a heading needs no blank line between them, and MD022 asks for
+the blank line above the target instead. A line that only contains `(label)=`
+inside a paragraph interrupts it, as in MyST. `Text (label)= text` is ordinary
+text and is still checked. Targets are recognized only in the `myst` flavor.
+
+### Block breaks
+
+A line starting with `+++` is a block break, optionally followed by JSON
+metadata (`+++ {"tags": ["x"]}`). The line is excluded from text checks, and the
+paragraphs around it are never reflowed together. Only the contiguous `+++`
+form is recognized.
+
+Targets, block breaks and comments inside directive bodies, indented four or
+more columns, or inside blockquotes are not recognized.
 
 ## Rule Behavior Changes
 
 | Rule  | Standard Behavior                   | MyST Behavior                                                  |
 | ----- | ----------------------------------- | -------------------------------------------------------------- |
-| MD013 | Check line length everywhere        | Skip `%` comment lines                                         |
+| MD013 | Check line length everywhere        | Skip `%` comment, `(label)=` target and `+++` break lines      |
+| MD022 | Blank lines around headings         | Blank line goes above `(label)=` targets directly above a heading |
+| MD041 | First line should be a heading      | Skip leading comments, targets and `+++` breaks                |
+| MD044 | Check proper names everywhere       | Skip comment, target and block break lines                     |
 | MD031 | Blanks around backtick/tilde fences | Also enforce blanks around colon directives (`:::{name}`)      |
 | MD038 | Flag spaces in inline code          | Skip role syntax (`{role}`content``)                           |
 | MD040 | Require language on code fences     | Accept `{name}` as valid directive info string                 |

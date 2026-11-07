@@ -372,7 +372,7 @@ fn finalize_plan(pending: Vec<(SpanEdit, Option<RefDefInsert>)>) -> FixPlan {
 /// Share source exclusions without changing framework diagnostic filtering.
 pub(super) fn skip_non_prose(ctx: &LintContext, line: usize, start: usize, end: usize) -> bool {
     ctx.line_info(line)
-        .is_some_and(|info| info.in_front_matter || info.in_code_block || info.is_myst_comment)
+        .is_some_and(|info| info.in_front_matter || info.in_code_block || info.is_myst_structural_line())
         || ctx.overlaps_template_code(start, end)
 }
 

@@ -995,7 +995,7 @@ flavor = "mkdocs"  # Use MkDocs flavor
 - `"obsidian"`: Obsidian notes with callouts, wikilinks, and Dataview syntax
 - `"kramdown"`: Jekyll/kramdown attribute lists and extension blocks
 - `"azure_devops"`: Azure DevOps wikis — treats `:::mermaid` blocks as opaque code fences
-- `"myst"`: MyST/Jupyter Book directives, roles, math, and comments
+- `"myst"`: MyST/Jupyter Book directives, roles, math, comments, targets, and block breaks
 - `"hugo"`: Hugo/Goldmark block attribute lists
 - `"mdg"`: Markdown with Gherkin — steers headings, Doc String fences, and Gherkin tables toward the one spelling Gherkin accepts, and withholds corrections that are not safe
 - `"gh-aw"`: GitHub Agentic Workflows — preserves runtime imports, conditionals, and Markdown-looking message templates (preview)

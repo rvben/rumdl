@@ -1544,6 +1544,67 @@ pub(super) fn detect_myst_comments(
     ranges
 }
 
+/// Detect MyST targets (`(label)=`) and block breaks (`+++`) and mark their lines.
+///
+/// Both are block-level syntax of myst-parser's block rules, which interrupt a
+/// paragraph, a quote and a list, and which an indented code block (4 or more
+/// columns) shields. A target is a line that starts with `(`, ends with `)=` and
+/// has a label between; the label is otherwise unrestricted. A block break is
+/// three or more `+`, and whatever follows them is its JSON metadata.
+///
+/// Lines in code, front matter, comments, HTML, math and directives are
+/// skipped, and `html_block_lines` covers HTML blocks opened inside a container.
+pub(super) fn detect_myst_targets(
+    content: &str,
+    lines: &mut [LineInfo],
+    flavor: MarkdownFlavor,
+    html_block_lines: &[std::ops::Range<usize>],
+) {
+    if !flavor.supports_myst_targets() {
+        return;
+    }
+
+    let in_html_run = |idx: usize| html_block_lines.iter().any(|run| run.contains(&idx));
+
+    for (idx, line) in lines.iter_mut().enumerate() {
+        if line.in_code_block
+            || line.in_front_matter
+            || line.in_html_comment
+            || line.in_html_block
+            || line.in_math_block
+            || line.in_myst_directive
+            || line.is_myst_comment
+            || in_html_run(idx)
+        {
+            continue;
+        }
+
+        let line_content = line.content(content);
+        let spaces = count_leading_spaces(line_content);
+        if spaces > 3 {
+            continue;
+        }
+        let rest = &line_content[spaces..];
+        if rest.starts_with('\t') {
+            continue;
+        }
+
+        if is_myst_target_text(rest) {
+            line.is_myst_target = true;
+        } else if rest.starts_with("+++") {
+            line.is_myst_block_break = true;
+        }
+    }
+}
+
+/// Whether `text`, a line without its indentation, is a MyST target: it starts
+/// with `(`, ends with `)=` once trailing whitespace is dropped, and holds a
+/// label between them.
+pub(crate) fn is_myst_target_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.len() > "()=".len() && trimmed.starts_with('(') && trimmed.ends_with(")=")
+}
+
 /// Known MyST content-bearing directives whose body should be linted as markdown.
 const MYST_CONTENT_DIRECTIVES: &[&str] = &[
     "note",
@@ -1845,6 +1906,104 @@ mod myst_tests {
         let content = "% This is a comment\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         assert!(!ctx.lines[0].is_myst_comment);
+    }
+
+    fn target_flags(content: &str) -> Vec<bool> {
+        myst_ctx(content).lines.iter().map(|line| line.is_myst_target).collect()
+    }
+
+    fn break_flags(content: &str) -> Vec<bool> {
+        myst_ctx(content)
+            .lines
+            .iter()
+            .map(|line| line.is_myst_block_break)
+            .collect()
+    }
+
+    #[test]
+    fn test_myst_target_line() {
+        assert_eq!(target_flags("(sphinx)=\n\n# Intro\n"), [true, false, false]);
+        assert_eq!(target_flags("   (sphinx)=  \n"), [true]);
+        assert_eq!(target_flags("(my label: 1)=\n"), [true], "labels are unrestricted");
+        assert_eq!(target_flags("(a)=\n(b)=\n# H\n"), [true, true, false]);
+    }
+
+    #[test]
+    fn test_myst_target_interrupts_a_paragraph() {
+        let ctx = myst_ctx("Para\n(x)=\nmore\n");
+        assert!(!ctx.lines[0].is_myst_target);
+        assert!(ctx.lines[1].is_myst_target);
+        assert!(!ctx.lines[2].is_myst_target);
+    }
+
+    #[test]
+    fn test_myst_target_rejects_non_targets() {
+        for text in [
+            "Text (sphinx)= inline.",
+            "(sphinx)= tail",
+            "(sphinx)",
+            "()=",
+            "    (sphinx)=",
+            "\t(sphinx)=",
+            "> (sphinx)=",
+            "- (sphinx)=",
+        ] {
+            assert_eq!(target_flags(&format!("{text}\n")), [false], "{text:?}");
+        }
+    }
+
+    #[test]
+    fn test_myst_target_not_flagged_in_opaque_blocks() {
+        for content in [
+            "```\n(x)=\n```\n",
+            "---\ntitle: a\n(x)=\n---\n",
+            "<!--\n(x)=\n-->\n",
+            "<div>\n(x)=\n</div>\n",
+            "- item\n\n  <div>\n  (x)=\n  </div>\n",
+            "$$\n(x)=\n$$\n",
+        ] {
+            assert!(
+                target_flags(content).iter().all(|&flag| !flag),
+                "target flagged inside an opaque block: {content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_myst_target_not_in_standard_flavor() {
+        let ctx = LintContext::new("(sphinx)=\n+++\n", MarkdownFlavor::Standard, None);
+        assert!(!ctx.lines[0].is_myst_target);
+        assert!(!ctx.lines[1].is_myst_block_break);
+    }
+
+    #[test]
+    fn test_myst_block_break_line() {
+        assert_eq!(break_flags("+++\n"), [true]);
+        assert_eq!(break_flags("+++ {\"tags\": [\"a\"]}\n"), [true]);
+        assert_eq!(break_flags("++++\n"), [true]);
+        assert_eq!(break_flags("  +++\n"), [true]);
+        for text in ["++", "    +++", "+ item", "text +++", "> +++"] {
+            assert_eq!(break_flags(&format!("{text}\n")), [false], "{text:?}");
+        }
+    }
+
+    #[test]
+    fn test_myst_structural_line_covers_comment_target_and_break() {
+        let ctx = myst_ctx("% c\n(x)=\n+++\ntext\n");
+        let flags: Vec<bool> = ctx
+            .lines
+            .iter()
+            .map(crate::lint_context::types::LineInfo::is_myst_structural_line)
+            .collect();
+        assert_eq!(flags, [true, true, true, false]);
+    }
+
+    #[test]
+    fn test_myst_target_ends_setext_paragraph() {
+        let ctx = myst_ctx("Para\n(x)=\n===\n");
+        assert!(ctx.lines.iter().all(|line| line.heading.is_none()));
+        let standard = LintContext::new("Para\n(x)=\n===\n", MarkdownFlavor::Standard, None);
+        assert!(standard.lines.iter().any(|line| line.heading.is_some()));
     }
 
     #[test]

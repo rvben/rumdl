@@ -271,7 +271,7 @@ the [flavors guide](flavors.md).
 | `pandoc`   | Pandoc Markdown              | Fenced divs, attributes, citations       |
 | `kramdown` | Jekyll / kramdown            | IALs, ALDs, extension blocks             |
 | `azure_devops` | Azure DevOps wikis        | Colon code fences                        |
-| `myst`     | MyST / Jupyter Book / Sphinx | Directives, roles, `%` comments          |
+| `myst`     | MyST / Jupyter Book / Sphinx | Directives, roles, comments, targets    |
 | `hugo`     | Hugo / Goldmark              | Block attribute lists                    |
 | `mdg`      | Markdown with Gherkin        | Gherkin-safe headings, tags, and tables  |
 | `gh-aw`    | GitHub Agentic Workflows (preview) | Runtime imports and conditional controls |

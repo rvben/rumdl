@@ -85,7 +85,7 @@ pub(super) fn collect(ctx: &LintContext<'_>) -> LexicalEmphasis {
         .skip_obsidian_comments()
         .skip_mkdocstrings()
         .candidates(super::LineCandidateKind::Emphasis)
-        .filter(|line| !line.line_info.is_myst_comment)
+        .filter(|line| !line.line_info.is_myst_structural_line())
     {
         let info = line.line_info;
         let source_range = info.byte_offset..info.byte_offset + info.byte_len;

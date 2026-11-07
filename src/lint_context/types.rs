@@ -116,9 +116,21 @@ pub struct LineInfo {
     pub in_myst_directive: bool,
     /// Whether this line is a MyST comment (`% comment`)
     pub is_myst_comment: bool,
+    /// Whether this line is a MyST target (`(label)=`), the anchor of the block below it
+    pub is_myst_target: bool,
+    /// Whether this line is a MyST block break (`+++`, optionally followed by JSON metadata)
+    pub is_myst_block_break: bool,
 }
 
 impl LineInfo {
+    /// Whether this line is MyST block-level syntax that holds no prose: a `%`
+    /// comment, a `(label)=` target or a `+++` block break. Each ends the
+    /// paragraph above it, and what it holds is a label, metadata or a note
+    /// rather than text for a proofreading or reflow rule to read.
+    pub fn is_myst_structural_line(&self) -> bool {
+        self.is_myst_comment || self.is_myst_target || self.is_myst_block_break
+    }
+
     /// Get the line content as a string slice from the source document
     pub fn content<'a>(&self, source: &'a str) -> &'a str {
         &source[self.byte_offset..self.byte_offset + self.byte_len]
@@ -154,7 +166,7 @@ impl LineInfo {
             && !self.in_pymdown_block
             && !self.in_kramdown_extension_block
             && !self.is_kramdown_block_ial
-            && !self.is_myst_comment
+            && !self.is_myst_structural_line()
             && self.heading.is_none()
     }
 
