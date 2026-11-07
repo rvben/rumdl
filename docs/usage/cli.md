@@ -161,11 +161,22 @@ rumdl check-assets --root docs --source docs --assets docs/images
 rumdl check-assets --root docs --source docs --assets docs/images --output-format json
 ```
 
+`--root` is the URL root (leading-slash links resolve from it and reported paths
+are relative to it), `--source` is a directory of Markdown files to read, and
+`--assets` is a directory of files to report on. When assets are stored next to
+the Markdown that uses them, give one directory to all three:
+
+```bash
+rumdl check-assets --root docs --source docs --assets docs
+```
+
 Repeat `--source` and `--assets` for additional directories. Use `--include` to
 select root-relative asset globs and `--keep` for files used by CSS, templates,
 or other sources outside Markdown. All directories must be inside `--root`.
-The scan includes hidden and ignored Markdown files and does not load lint
-configuration.
+The scan includes hidden and ignored Markdown files. Sources are read in the
+flavor `rumdl check` would use: `--flavor`, then the configuration's `flavor`
+and `per-file-flavor`, then the file extension. Only the flavor is taken from
+configuration; `--config`, `--no-config`, and `--isolated` work as for `check`.
 
 Reports go to stdout; errors go to stderr. Exit codes are 0 for no unreferenced
 assets, 1 for findings, and 2 for an incomplete or invalid scan. An incomplete
