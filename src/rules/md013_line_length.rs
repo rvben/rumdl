@@ -2226,8 +2226,8 @@ impl MD013LineLength {
                 // --- Line classification for footnote content ---
                 #[derive(Debug, Clone)]
                 enum FnLineType {
-                    Content(String, usize),  // text, 0-based line index
-                    Verbatim(String, usize), // preserved text, original indent
+                    Content(String, usize), // text, 0-based line index
+                    Verbatim(String, bool), // preserved text, and whether it is the whole source line
                     Empty,
                 }
 
@@ -2237,14 +2237,6 @@ impl MD013LineLength {
                         .take_while(|c| c.is_whitespace())
                         .map(|c| if c == '\t' { 4 } else { 1 })
                         .sum::<usize>()
-                };
-
-                // Helper: check if a trimmed line is a fence marker (homogeneous chars)
-                let is_fence = |s: &str| -> bool {
-                    let t = s.trim();
-                    let fence_char = t.chars().next();
-                    matches!(fence_char, Some('`') | Some('~'))
-                        && t.chars().take_while(|&c| c == fence_char.unwrap()).count() >= 3
                 };
 
                 // Helper: check if a trimmed line is a setext underline
@@ -2282,8 +2274,17 @@ impl MD013LineLength {
                     chars.as_str().to_string()
                 };
 
-                let mut in_fenced_code = false;
                 let mut consecutive_blanks = 0u32;
+
+                // A line the parser puts in a fenced code block or a raw HTML block is
+                // verbatim (an indented code block inside a footnote loses the flag and
+                // is handled by its indent below). The closing rules - fence character,
+                // length, info string - and where an unclosed block ends are the
+                // parser's, so the collector never matches fences itself.
+                let in_verbatim_block = |idx: usize| -> bool {
+                    ctx.lines.get(idx).is_some_and(|l| l.in_code_block || l.in_html_block)
+                        || ctx.line_holds_html_block(idx)
+                };
 
                 while i < lines.len() {
                     let next = lines[i];
@@ -2297,10 +2298,10 @@ impl MD013LineLength {
                             break;
                         }
 
-                        // Inside a fenced code block, blank lines are part of the code
-                        if in_fenced_code {
+                        // Inside a verbatim block, blank lines are part of it
+                        if in_verbatim_block(i) {
                             consecutive_blanks = 0; // Don't count blanks inside code blocks
-                            fn_lines.push(FnLineType::Verbatim(String::new(), 0));
+                            fn_lines.push(FnLineType::Verbatim(next.to_string(), true));
                             last_consumed = i;
                             i += 1;
                             continue;
@@ -2333,12 +2334,9 @@ impl MD013LineLength {
                         break;
                     }
 
-                    // Inside a fenced code block: everything is verbatim until closing fence
-                    if in_fenced_code {
-                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
-                        if is_fence(next_trimmed) {
-                            in_fenced_code = false;
-                        }
+                    // Inside a fenced code block or raw HTML block: verbatim
+                    if in_verbatim_block(i) {
+                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), false));
                         last_consumed = i;
                         i += 1;
                         continue;
@@ -2349,19 +2347,10 @@ impl MD013LineLength {
                     // the parser read on into this one, so it is prose however it
                     // is spelled.
                     if !continues_code_span {
-                        // Fence opener — start verbatim code block
-                        if is_fence(next_trimmed) {
-                            in_fenced_code = true;
-                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
-                            last_consumed = i;
-                            i += 1;
-                            continue;
-                        }
-
                         // A multi-line display-math block is verbatim: its line breaks
                         // carry meaning (see `line_in_multiline_math_block`).
                         if self.line_in_multiline_math_block(i + 1, ctx, config) {
-                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), false));
                             last_consumed = i;
                             i += 1;
                             continue;
@@ -2369,7 +2358,7 @@ impl MD013LineLength {
 
                         // Indented code block: indent >= FN_INDENT + 4 (= 8 spaces)
                         if indent >= FN_INDENT + 4 {
-                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), false));
                             last_consumed = i;
                             i += 1;
                             continue;
@@ -2392,7 +2381,7 @@ impl MD013LineLength {
                                 || is_setext_underline(next_trimmed)
                                 || is_horizontal_rule(next_trimmed)
                             {
-                                fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                                fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), false));
                                 last_consumed = i;
                                 i += 1;
                                 continue;
@@ -2407,7 +2396,7 @@ impl MD013LineLength {
                             && next_trimmed.contains("]:")
                             && LINK_REF_PATTERN.is_match(next_trimmed)
                         {
-                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), false));
                             last_consumed = i;
                             i += 1;
                             continue;
@@ -2415,7 +2404,7 @@ impl MD013LineLength {
 
                         // HTML-only lines inside footnotes are not reflowable
                         if is_html_only_line(next_trimmed) {
-                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), false));
                             last_consumed = i;
                             i += 1;
                             continue;
@@ -2462,7 +2451,7 @@ impl MD013LineLength {
                 #[derive(Debug)]
                 enum FnBlock {
                     Paragraph(Vec<(String, usize)>), // (text, 1-based line number)
-                    Verbatim(Vec<(String, usize)>),  // (content, indent) preserved as-is
+                    Verbatim(Vec<(String, bool)>),   // (content, whole source line) preserved as-is
                 }
 
                 // Each block carries whether a blank line comes before it in the
@@ -2471,7 +2460,7 @@ impl MD013LineLength {
                 // is text of that paragraph, which a blank line would cut off.
                 let mut blocks: Vec<(bool, FnBlock)> = Vec::new();
                 let mut current_para: Vec<(String, usize)> = Vec::new();
-                let mut current_verbatim: Vec<(String, usize)> = Vec::new();
+                let mut current_verbatim: Vec<(String, bool)> = Vec::new();
                 let mut blank_before = false;
 
                 for fl in &fn_lines {
@@ -2483,12 +2472,12 @@ impl MD013LineLength {
                             }
                             current_para.push((s.clone(), idx + 1));
                         }
-                        FnLineType::Verbatim(s, indent) => {
+                        FnLineType::Verbatim(s, whole_line) => {
                             if !current_para.is_empty() {
                                 let para = std::mem::take(&mut current_para);
                                 blocks.push((std::mem::take(&mut blank_before), FnBlock::Paragraph(para)));
                             }
-                            current_verbatim.push((s.clone(), *indent));
+                            current_verbatim.push((s.clone(), *whole_line));
                         }
                         FnLineType::Empty => {
                             if !current_para.is_empty() {
@@ -2634,8 +2623,14 @@ impl MD013LineLength {
                                 }
                                 is_first_block = false;
                             }
-                            for (content, _orig_indent) in verb_lines {
-                                result_lines.push(format!("{indent_str}{content}"));
+                            for (content, whole_line) in verb_lines {
+                                // A blank line inside code is code text: it keeps the
+                                // whitespace it had, without the footnote indent added.
+                                if *whole_line {
+                                    result_lines.push(content.clone());
+                                } else {
+                                    result_lines.push(format!("{indent_str}{content}"));
+                                }
                             }
                         }
                     }

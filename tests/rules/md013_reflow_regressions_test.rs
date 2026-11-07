@@ -2771,3 +2771,118 @@ fn code_span_after_empty_list_keeps_closing_line_space() {
         }
     }
 }
+
+const FN_PROSE: &str = "[^1]: Search the tree with grep to list the files that use it.\n\n";
+const FN_PROSE_REFLOWED: &str = "[^1]: Search the tree with\n    grep to list the files\n    that use it.\n\n";
+const FN_TAIL: &str = "\n    Then edit the files that use it and more.\n";
+const FN_TAIL_REFLOWED: &str = "\n    Then edit the files that\n    use it and more.\n";
+
+/// A fenced block inside a footnote ends where the parser ends it: same fence
+/// character, at least as long as the opener, no info string. A line that only
+/// looks like a fence inside it is code, so the block stays as written and the
+/// paragraph after it is still reflowed.
+#[test]
+fn a_footnote_code_block_ends_at_its_own_closing_fence() {
+    let long = "keep   these   spaces   exactly and this line is long enough to wrap if treated as prose";
+    for (open, inner, close) in [
+        ("~~~text", "```", "~~~"),
+        ("~~~text", "```text", "~~~"),
+        ("~~~~", "~~~", "~~~~"),
+        ("````", "```", "````"),
+        ("```", "~~~", "```"),
+        ("```", "```text", "```"),
+        ("~~~", "~~~ x", "~~~"),
+    ] {
+        let block = format!("    {open}\n    {inner}\n    {long}\n    {close}\n");
+        let input = format!("{FN_PROSE}{block}{FN_TAIL}");
+        let expected = format!("{FN_PROSE_REFLOWED}{block}{FN_TAIL_REFLOWED}");
+        assert_reflows_to(&input, 30, &[Mode::Normalize], &expected);
+        assert_reflows_to(&expected, 30, &[Mode::Normalize], &expected);
+    }
+}
+
+/// A fence the footnote never closes runs to the end of the footnote: its
+/// lines are code, however fence-like one of them is.
+#[test]
+fn an_unclosed_footnote_code_block_is_left_as_written() {
+    let long = "keep   these   spaces   exactly and this line is long enough to wrap if treated as prose";
+    for input in [
+        format!("{FN_PROSE}    ~~~text\n    ```\n    {long}\n"),
+        format!("{FN_PROSE}    ```text\n    ~~~\n    {long}\n    ~~~\n"),
+        format!("{FN_PROSE}    ````\n    ```\n    {long}\n    ```\n"),
+    ] {
+        let expected = input.replacen(FN_PROSE, FN_PROSE_REFLOWED, 1);
+        assert_reflows_to(&input, 30, &[Mode::Normalize], &expected);
+    }
+}
+
+/// Control: with no fence-like line inside, the block is untouched too.
+#[test]
+fn a_footnote_code_block_with_plain_lines_is_left_as_written() {
+    let block =
+        "    ~~~text\n    plain\n    keep   these   spaces   exactly and this line is long enough to wrap\n    ~~~\n";
+    let input = format!("{FN_PROSE}{block}{FN_TAIL}");
+    let expected = format!("{FN_PROSE_REFLOWED}{block}{FN_TAIL_REFLOWED}");
+    assert_reflows_to(&input, 30, &[Mode::Normalize], &expected);
+}
+
+/// A whitespace-only line inside the code is code text: it keeps the
+/// whitespace it had, and the footnote's indent is not added to it.
+#[test]
+fn whitespace_only_lines_in_a_footnote_code_block_keep_their_whitespace() {
+    for blank in ["", "    ", "        ", "\t", "      \t"] {
+        let block = format!("    ```\n    one\n{blank}\n    two\n    ```\n");
+        let input = format!("{FN_PROSE}{block}{FN_TAIL}");
+        let expected = format!("{FN_PROSE_REFLOWED}{block}{FN_TAIL_REFLOWED}");
+        assert_reflows_to(&input, 30, &[Mode::Normalize], &expected);
+    }
+    // A line shorter than the footnote's indent is not checked by the render
+    // oracle: comrak ends the footnote there, pulldown-cmark (the parser rumdl
+    // reads) keeps the fence open. The text is what the parser's reading asks.
+    for blank in [" ", "  ", "   "] {
+        let block = format!("    ```\n    one\n{blank}\n    two\n    ```\n");
+        let input = format!("{FN_PROSE}{block}{FN_TAIL}");
+        let expected = format!("{FN_PROSE_REFLOWED}{block}{FN_TAIL_REFLOWED}");
+        let settings = ReflowSettings::with_mode(Mode::Normalize, 30);
+        assert_eq!(reflow(&input, &settings).expect("reflow runs"), expected, "{blank:?}");
+    }
+}
+
+/// A raw HTML block inside a footnote is not prose, whatever its lines look
+/// like, so its spaces and line breaks stay. That holds for every kind of block
+/// the parser reads: a tag, a comment, a processing instruction, a declaration
+/// and CDATA.
+#[test]
+fn a_footnote_html_block_is_left_as_written() {
+    let long = "keep   these   spaces   exactly and this line is long enough to wrap";
+    for (open, close) in [
+        ("<pre>", "</pre>"),
+        ("<!--", "-->"),
+        ("<?php", "?>"),
+        ("<!DOCTYPE x", ">"),
+        ("<![CDATA[", "]]>"),
+    ] {
+        for body in [
+            format!("    {long}\n"),
+            format!("    ~~~\n    {long}\n    ~~~\n"),
+            format!("\n    {long}\n\n"),
+        ] {
+            let block = format!("    {open}\n{body}    {close}\n");
+            let input = format!("{FN_PROSE}{block}{FN_TAIL}");
+            let expected = format!("{FN_PROSE_REFLOWED}{block}{FN_TAIL_REFLOWED}");
+            assert_reflows_to(&input, 30, &[Mode::Normalize], &expected);
+        }
+    }
+}
+
+/// Two footnotes in a row: the block in the first leaves no state behind for
+/// the second.
+#[test]
+fn a_footnote_code_block_leaves_no_state_for_the_next_footnote() {
+    let block = "    ~~~text\n    ```\n    keep   these   spaces\n    ~~~\n";
+    let input = format!("{FN_PROSE}{block}\n[^2]: Search the tree with grep to list the files that use it.\n");
+    let expected = format!(
+        "{FN_PROSE_REFLOWED}{block}\n[^2]: Search the tree with\n    grep to list the files\n    that use it.\n"
+    );
+    assert_reflows_to(&input, 30, &[Mode::Normalize], &expected);
+}
