@@ -347,10 +347,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             exit::tool_error();
         }
     }
-    if matches!(cli.command, Commands::CheckAssets(_)) && (!cli.config.is_empty() || cli.no_config || cli.isolated) {
-        eprintln!("error: check-assets uses explicit scan arguments and does not accept configuration flags");
-        exit::tool_error();
-    }
     #[cfg(any(feature = "native", feature = "wasi"))]
     if matches!(cli.command, Commands::Experimental { .. }) && (!cli.config.is_empty() || cli.no_config || cli.isolated)
     {
@@ -381,7 +377,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             #[cfg(any(feature = "native", feature = "wasi"))]
             Commands::Experimental { action } => commands::experimental::handle(action),
-            Commands::CheckAssets(args) => commands::check_assets::handle(args),
+            Commands::CheckAssets(args) => {
+                let config_path = if cli.no_config || cli.isolated {
+                    None
+                } else {
+                    config_path.as_deref()
+                };
+                commands::check_assets::handle(args, config_path, cli.no_config || cli.isolated, &inline_overrides);
+            }
             Commands::Check(mut args) => {
                 args.fix_mode = if args.fix { FixMode::CheckFix } else { FixMode::Check };
                 args.fail_on_mode = args.fail_on;

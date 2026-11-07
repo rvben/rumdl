@@ -203,12 +203,6 @@ fn incomplete_or_empty_scans_are_tool_errors_and_emit_no_findings() {
         (vec!["--source", "docs/page.md"], "must be directories within"),
         (vec!["--source", "missing"], "Cannot scan"),
         (vec!["--include", "["], "Invalid asset glob"),
-        (
-            vec!["--config", "MD013.line-length=80"],
-            "does not accept configuration flags",
-        ),
-        (vec!["--no-config"], "does not accept configuration flags"),
-        (vec!["--isolated"], "does not accept configuration flags"),
     ] {
         let output = run(dir.path(), &args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
@@ -316,9 +310,10 @@ fn explicit_site_root_and_ignores_do_not_reduce_source_coverage() {
     put(dir.path(), "docs/page.md", "[x](/assets/a.png)\n");
     put(dir.path(), ".rumdl.toml", "this is invalid TOML");
     put(dir.path(), "docs/.gitignore", "page.md\n");
-    let value = report(&run(dir.path(), &["--root", "docs"]), 0);
+    // Configuration is read for the Markdown flavor only; --isolated skips the unparsable file.
+    let value = report(&run(dir.path(), &["--root", "docs", "--isolated"]), 0);
     assert_eq!(value["mentioned_but_unresolved"], serde_json::json!([]));
-    let output = run(dir.path(), &["--root", "docs/assets"]);
+    let output = run(dir.path(), &["--root", "docs/assets", "--isolated"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("within"));
 }

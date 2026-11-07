@@ -401,6 +401,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let crate::resolution::ResolvedGroups {
         groups: mut config_groups,
         config_warning: resolution_config_warning,
+        failed_configs: _,
     } = resolved;
 
     // Configuration and CLI2 ignore globs refer to the supplied pathname,

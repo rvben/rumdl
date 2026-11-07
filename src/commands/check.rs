@@ -212,10 +212,7 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // so a grouping root above home never promotes `~/.rumdl.toml`. Isolated and
     // explicit-config runs are unaffected: `resolve_config_groups` fast-paths on
     // those regardless of the grouping root.
-    let grouping_root = project_root
-        .clone()
-        .or_else(|| multi_path_root.clone())
-        .or_else(|| crate::resolution::enclosing_repository_root(discovery_dir));
+    let grouping_root = grouping_root(project_root.clone(), multi_path_root.clone(), discovery_dir);
 
     // 5. Convert to Config for the rest of the linter
     // Validation warnings are already printed above, so we use into_validated_unchecked
@@ -309,6 +306,19 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     }
 }
 
+/// The upper bound for per-directory config grouping: the discovered project
+/// root, else the multi-path anchor, else the repository enclosing the
+/// discovery start.
+pub(crate) fn grouping_root(
+    project_root: Option<std::path::PathBuf>,
+    multi_path_root: Option<std::path::PathBuf>,
+    discovery_dir: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    project_root
+        .or(multi_path_root)
+        .or_else(|| crate::resolution::enclosing_repository_root(discovery_dir))
+}
+
 /// The nearest common-ancestor directory of every target path, resolved against
 /// the current working directory.
 ///
@@ -320,7 +330,7 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
 /// paths share no common ancestor (e.g. different Windows drives) or the working
 /// directory cannot be resolved for a relative path, in which case the caller
 /// falls back to cwd-based discovery.
-fn common_ancestor_dir(paths: &[String]) -> Option<std::path::PathBuf> {
+pub(crate) fn common_ancestor_dir(paths: &[String]) -> Option<std::path::PathBuf> {
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
 

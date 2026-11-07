@@ -380,6 +380,7 @@ pub fn resolve_config_groups(
                         // governs are linted under settings their author did not write.
                         // Suppressed by --silent like every other config warning.
                         grouping.config_warning |= reports_problems;
+                        grouping.failed_configs.push((path.clone(), e.to_string()));
                         if !args.silent && reports_problems {
                             eprintln!(
                                 "{} Failed to load config {}: {}. Using root config for affected files.",
@@ -407,6 +408,10 @@ pub struct ResolvedGroups {
     /// property was read but could not be applied. Reported like rumdl's own
     /// config warnings, and counted the same way by `--deny-config-warnings`.
     pub config_warning: bool,
+    /// Subdirectory configs that could not be loaded, with the reason. `check`
+    /// falls back to the root config for their files and warns; a caller that
+    /// cannot tolerate a silently different config reads this instead.
+    pub failed_configs: Vec<(PathBuf, String)>,
 }
 
 /// The groups being built, plus the state that spans them.
@@ -419,6 +424,7 @@ struct Grouping {
     /// Whether resolving the groups turned up a configuration problem, which
     /// `--deny-config-warnings` fails the run on.
     config_warning: bool,
+    failed_configs: Vec<(PathBuf, String)>,
 }
 
 impl Grouping {
@@ -426,6 +432,7 @@ impl Grouping {
         ResolvedGroups {
             groups: self.groups,
             config_warning: self.config_warning,
+            failed_configs: self.failed_configs,
         }
     }
 

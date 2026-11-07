@@ -10,13 +10,18 @@ use crate::utils::html_elements;
 use crate::workspace_index::link_path_part;
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use pulldown_cmark::{Event, Parser, Tag};
+use regex::Regex;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-#[derive(Debug)]
-pub struct AssetScanOptions {
+/// Resolves the Markdown flavor of each scanned source, given the sorted list of
+/// source files. Returns one flavor per file, in the same order.
+pub type FlavorResolver<'a> = &'a dyn Fn(&[PathBuf]) -> io::Result<Vec<MarkdownFlavor>>;
+
+pub struct AssetScanOptions<'a> {
     /// Site root for leading-slash URLs. All scanned directories must be within it.
     pub root: PathBuf,
     pub sources: Vec<PathBuf>,
@@ -25,6 +30,10 @@ pub struct AssetScanOptions {
     pub include: Vec<String>,
     /// Assets used outside Markdown (themes, CSS, templates, generated pages).
     pub keep: Vec<String>,
+    /// Decides how each source is parsed, so constructs that only exist in some
+    /// flavors (MkDocs admonitions and tabs, MDX components, MyST directives)
+    /// are read the way `rumdl check` reads them.
+    pub flavors: FlavorResolver<'a>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,6 +56,75 @@ const MENTION_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
     .add(b'"')
     .add(b'<')
     .add(b'>');
+
+/// Characters that continue a file name. Anything else (quotes, brackets,
+/// slashes, whitespace, punctuation, CJK brackets) delimits it.
+fn is_name_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '-' | '~' | '+' | '@')
+}
+
+/// Percent-encoded spellings of characters that delimit a name inside a URL or
+/// attribute (`a%2Flogo.png`, `logo.png%3Fv=1`). Other escapes, such as `%20`,
+/// are part of a longer name.
+fn is_encoded_delimiter(hex: &[u8]) -> bool {
+    matches!(
+        hex.to_ascii_uppercase().as_slice(),
+        b"2F"
+            | b"5C"
+            | b"22"
+            | b"27"
+            | b"28"
+            | b"29"
+            | b"3C"
+            | b"3D"
+            | b"3E"
+            | b"2C"
+            | b"5B"
+            | b"5D"
+            | b"60"
+            | b"3F"
+            | b"23"
+    )
+}
+
+/// Whether a substring hit at `start..end` is a complete file name rather than
+/// part of a longer one (`readme_logo.png`, `logo.png.bak`, `my-logo.png`).
+fn is_whole_name(content: &str, start: usize, end: usize) -> bool {
+    let bytes = content.as_bytes();
+    let left_ok = match content[..start].chars().next_back() {
+        None => true,
+        Some('.') => false,
+        // Emphasis such as `_logo.png_`: an underscore run that starts a word.
+        Some('_') => !content[..start]
+            .trim_end_matches('_')
+            .chars()
+            .next_back()
+            .is_some_and(is_name_char),
+        Some(c) if is_name_char(c) => {
+            // `F` of `%2F` is alphanumeric but the escape as a whole is a delimiter.
+            start >= 3 && bytes[start - 3] == b'%' && is_encoded_delimiter(&bytes[start - 2..start])
+        }
+        Some(_) => true,
+    };
+    if !left_ok {
+        return false;
+    }
+    let rest = &content[end..];
+    let mut chars = rest.chars();
+    match chars.next() {
+        None => true,
+        // A dot continues the name only when more name follows (`.bak`); a
+        // sentence-ending dot does not.
+        Some('.') => !chars.next().is_some_and(is_name_char),
+        // Closing emphasis such as `_logo.png_`: an underscore run that ends a word.
+        Some('_') => !rest.trim_start_matches('_').chars().next().is_some_and(is_name_char),
+        Some('%') => match rest.as_bytes().get(1..3) {
+            Some(hex) if hex.iter().all(u8::is_ascii_hexdigit) => is_encoded_delimiter(hex),
+            _ => true,
+        },
+        Some(c) => !is_name_char(c),
+    }
+}
 
 fn error(message: impl Into<String>) -> io::Error {
     io::Error::other(message.into())
@@ -119,7 +197,7 @@ fn files(directories: &[PathBuf], root: &Path) -> io::Result<BTreeSet<PathBuf>> 
 
 /// Scan complete directory trees. No lint caches, rule enablement, file ignores
 /// or prior invocations influence the answer. A scan error returns no findings.
-pub fn scan(options: &AssetScanOptions) -> io::Result<AssetScan> {
+pub fn scan(options: &AssetScanOptions<'_>) -> io::Result<AssetScan> {
     if options.sources.is_empty() || options.assets.is_empty() {
         return Err(error(
             "At least one source directory and one asset directory are required",
@@ -142,6 +220,10 @@ pub fn scan(options: &AssetScanOptions) -> io::Result<AssetScan> {
         return Err(error(
             "No Markdown sources found; refusing to classify assets without a source scan",
         ));
+    }
+    let flavors = (options.flavors)(&sources)?;
+    if flavors.len() != sources.len() {
+        return Err(error("Flavor resolution did not cover every Markdown source"));
     }
     let asset_files = files(&options.assets, &root)?;
     // Markdown in an asset tree can itself reference assets. Silently excluding
@@ -188,13 +270,16 @@ pub fn scan(options: &AssetScanOptions) -> io::Result<AssetScan> {
         .map_err(|e| error(format!("Cannot build asset mention index: {e}")))?;
     let mut mentioned_patterns = HashSet::new();
     let mut referenced = HashSet::new();
-    for source in &sources {
+    for (source, flavor) in sources.iter().zip(flavors) {
         let content = std::fs::read_to_string(source)
             .map_err(|e| error(format!("Cannot read source {}: {e}", source.display())))?;
         for found in mentions.find_overlapping_iter(&content) {
-            mentioned_patterns.insert(found.pattern().as_usize());
+            // Each hit is judged on its own: a rejected hit never hides a later valid one.
+            if is_whole_name(&content, found.start(), found.end()) {
+                mentioned_patterns.insert(found.pattern().as_usize());
+            }
         }
-        for destination in destinations(&content) {
+        for destination in destinations(&content, flavor) {
             if let Some(path) = resolve(&destination, source, &root) {
                 referenced.insert(file_identity(&path)?);
             }
@@ -286,8 +371,18 @@ fn file_identity(path: &Path) -> io::Result<FileIdentity> {
     path.canonicalize().map_err(|e| path_error(path, &e))
 }
 
-fn destinations(content: &str) -> Vec<String> {
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+/// Every destination a source can reference, as the union of three views of it.
+/// Destinations that come from the Markdown parser are final; only values read
+/// from HTML attributes are entity-decoded, once.
+///
+/// 1. The document body parsed as CommonMark (the flavor-independent baseline).
+/// 2. The bodies of MkDocs admonitions and content tabs, dedented. To CommonMark
+///    their 4-space indentation is a code block, so the body view never sees
+///    them; they are parsed again without that indentation.
+/// 3. The flavor-aware link, image and definition scan, which covers constructs
+///    such as MDX components whose children a plain CommonMark parse hides.
+fn destinations(content: &str, flavor: MarkdownFlavor) -> Vec<String> {
+    let ctx = LintContext::new(content, flavor, None);
     let body_start = ctx
         .lines
         .get(ctx.front_matter_end_line())
@@ -297,18 +392,102 @@ fn destinations(content: &str) -> Vec<String> {
     } else {
         &content[body_start..]
     };
-    let parser = Parser::new_ext(body, crate::utils::rumdl_parser_options_for(body));
-    // Definitions are conservatively counted even when currently unused.
-    let mut result: Vec<_> = parser
-        .reference_definitions()
-        .iter()
-        .map(|(_, def)| def.dest.to_string())
-        .collect();
+    let mut result = Vec::new();
+    markdown_destinations(body, &mut result);
+    container_destinations(content, &ctx, &mut result);
+    context_destinations(content, &ctx, &mut result);
+    html_destinations(content, &ctx, &mut result);
+    result
+}
+
+/// Link, image and reference-definition destinations of `text` as parsed by
+/// CommonMark. Definitions are conservatively counted even when unused.
+fn markdown_destinations(text: &str, result: &mut Vec<String>) {
+    let parser = Parser::new_ext(text, crate::utils::rumdl_parser_options_for(text));
+    result.extend(
+        parser
+            .reference_definitions()
+            .iter()
+            .map(|(_, def)| def.dest.to_string()),
+    );
     for event in parser {
         if let Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) = event {
             result.push(dest_url.to_string());
         }
     }
+}
+
+static ONE_LINE_DEFINITION: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\[[^\]]+\]:\s*\S").expect("valid definition pattern"));
+static SOLE_HTML_TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^</?[A-Za-z][A-Za-z0-9-]*(\s[^<>]*)?/?>$").expect("valid tag pattern"));
+
+fn is_container_opener(line: &str) -> bool {
+    ["!!!", "???", "???+", "==="].iter().any(|marker| {
+        line.strip_prefix(marker)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+    })
+}
+
+/// Destinations inside MkDocs containers, parsed from the dedented body text.
+fn container_destinations(content: &str, ctx: &LintContext<'_>, result: &mut Vec<String>) {
+    let mut text = String::new();
+    let mut previous = None;
+    for (index, line) in ctx.lines.iter().enumerate() {
+        if !line.in_mkdocs_container() || line.in_code_block || line.in_front_matter || line.in_html_comment {
+            continue;
+        }
+        let trimmed = content[line.byte_offset..line.byte_offset + line.byte_len].trim();
+        // A gap keeps unrelated container lines from merging into one paragraph.
+        if previous.is_some_and(|p| p + 1 != index) {
+            text.push('\n');
+        }
+        previous = Some(index);
+        // Openers carry no destinations and a wrapper tag such as
+        // `<div markdown="1">` would turn the lines after it into an HTML block.
+        if is_container_opener(trimmed) || SOLE_HTML_TAG.is_match(trimmed) {
+            text.push('\n');
+            continue;
+        }
+        // A one-line definition is parsed alone, so the line above it (for
+        // example an admonition title) cannot absorb it.
+        if ONE_LINE_DEFINITION.is_match(trimmed) {
+            markdown_destinations(trimmed, result);
+        }
+        text.push_str(trimmed);
+        text.push('\n');
+    }
+    markdown_destinations(&text, result);
+}
+
+/// Destinations the flavor-aware context finds outside MkDocs containers.
+fn context_destinations(content: &str, ctx: &LintContext<'_>, result: &mut Vec<String>) {
+    let skipped = |line: usize| {
+        ctx.line_info(line)
+            .is_none_or(|info| info.in_mkdocs_container() || info.in_front_matter || info.in_html_comment)
+    };
+    result.extend(
+        ctx.links()
+            .iter()
+            .filter(|link| !link.is_reference && !skipped(link.line))
+            .map(|link| link.url.to_string()),
+    );
+    result.extend(
+        ctx.images()
+            .iter()
+            .filter(|image| !image.is_reference && !skipped(image.line))
+            .map(|image| image.url.to_string()),
+    );
+    for definition in ctx.reference_definitions().iter().filter(|d| !skipped(d.line)) {
+        // Parsed alone: the span's own indentation (an MDX child) is not code.
+        if let Some(span) = content.get(definition.byte_offset..definition.byte_end) {
+            markdown_destinations(span.trim_start(), result);
+        }
+    }
+}
+
+/// `href`, `src` and similar attributes of HTML elements outside code.
+fn html_destinations(content: &str, ctx: &LintContext<'_>, result: &mut Vec<String>) {
     for tag in ctx.html_tags().iter().filter(|tag| {
         !tag.is_closing
             && !ctx.is_in_code_span_byte(tag.byte_offset)
@@ -341,7 +520,6 @@ fn destinations(content: &str) -> Vec<String> {
             }
         }
     }
-    result
 }
 
 fn decode_entities(value: &str) -> String {
