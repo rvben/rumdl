@@ -7,11 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- MD022 adds `nested-heading-lines-above` to configure spacing before a deeper heading
-  directly following its parent, with matching diagnostics and fixes (#980).
-
 ## [0.3.2](https://github.com/rvben/rumdl/compare/v0.3.1...v0.3.2) - 2026-10-28
 
 ### Fixed

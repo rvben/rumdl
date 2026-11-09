@@ -187,6 +187,10 @@ pub struct MD022Config {
     #[serde(default, alias = "lines_above_mode")]
     pub lines_above_mode: HeadingBlankMode,
 
+    /// Blank lines between a heading and a deeper heading that directly follows it
+    /// with no body in between (default: unset, which uses `lines_above` and
+    /// `lines_below`). Replaces both for that gap. A single integer or an array of 6
+    /// integers indexed by the deeper heading's level.
     #[serde(
         default,
         alias = "nested_heading_lines_above",
