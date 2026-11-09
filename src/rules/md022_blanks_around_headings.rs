@@ -1289,6 +1289,96 @@ mod tests {
         assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
     }
 
+    /// Checks `content` with exact nested spacing, asserts the fix produces
+    /// `expected`, and that the fixed document is clean and fixes to itself.
+    fn assert_exact_nested_fix(rule: &MD022BlanksAroundHeadings, content: &str, expected: &str) {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.check(&ctx).unwrap().is_empty(),
+            content == expected,
+            "warnings for {content:?}"
+        );
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected);
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty(), "{fixed:?}");
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
+    }
+
+    #[test]
+    fn nested_heading_spacing_applies_to_setext_headings() {
+        let rule = nested_rule(1, HeadingBlankMode::Exact);
+        assert_exact_nested_fix(
+            &rule,
+            "Parent\n======\n\n\nChild\n-----\n",
+            "Parent\n======\n\nChild\n-----\n",
+        );
+        assert_exact_nested_fix(
+            &rule,
+            "Parent\n======\n\nBody\n\nChild\n-----\n",
+            "Parent\n======\n\nBody\n\n\nChild\n-----\n",
+        );
+    }
+
+    #[test]
+    fn nested_heading_spacing_applies_inside_blockquotes() {
+        let rule = nested_rule(1, HeadingBlankMode::Exact);
+        assert_exact_nested_fix(&rule, "> # Parent\n>\n>\n> ## Child\n", "> # Parent\n>\n> ## Child\n");
+        assert_exact_nested_fix(
+            &rule,
+            "> # Parent\n>\n> Body\n>\n> ## Child\n",
+            "> # Parent\n>\n> Body\n>\n>\n> ## Child\n",
+        );
+    }
+
+    #[test]
+    fn nested_heading_spacing_looks_through_comments() {
+        let rule = nested_rule(1, HeadingBlankMode::Exact);
+        assert_exact_nested_fix(
+            &rule,
+            "# Parent\n\n<!-- note -->\n\n\n## Child\n",
+            "# Parent\n\n<!-- note -->\n\n## Child\n",
+        );
+    }
+
+    #[test]
+    fn reference_definitions_and_thematic_breaks_count_as_parent_body() {
+        let rule = nested_rule(1, HeadingBlankMode::Exact);
+        for body in ["[ref]: https://example.com", "***"] {
+            assert_exact_nested_fix(
+                &rule,
+                &format!("# Parent\n\n{body}\n\n## Child\n"),
+                &format!("# Parent\n\n{body}\n\n\n## Child\n"),
+            );
+        }
+    }
+
+    #[test]
+    fn nested_heading_spacing_is_indexed_by_the_child_level() {
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: md022_config::HeadingLevelConfig::scalar(2),
+            lines_above_mode: HeadingBlankMode::Exact,
+            nested_heading_lines_above: Some(md022_config::HeadingLevelConfig::per_level([0, 0, 3, 1, 1, 1])),
+            lines_below: md022_config::HeadingLevelConfig::scalar(1),
+            allowed_at_start: true,
+        });
+        assert_exact_nested_fix(
+            &rule,
+            "# Parent\n\n## Child\n\n### Grandchild\n",
+            "# Parent\n## Child\n\n\n\n### Grandchild\n",
+        );
+    }
+
+    #[test]
+    fn nested_heading_spacing_applies_after_front_matter() {
+        let rule = nested_rule(1, HeadingBlankMode::Exact);
+        assert_exact_nested_fix(
+            &rule,
+            "---\ntitle: Doc\n---\n\n\n## Parent\n\n\n### Child\n",
+            "---\ntitle: Doc\n---\n\n\n## Parent\n\n### Child\n",
+        );
+    }
+
     #[test]
     fn test_valid_headings() {
         let rule = MD022BlanksAroundHeadings::default();

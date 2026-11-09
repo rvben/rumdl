@@ -165,6 +165,15 @@ fn minimum_remains_the_default_and_exact_adds_missing_blanks() {
 }
 
 #[test]
+fn exact_spacing_uses_nested_value_only_when_child_directly_follows_parent() {
+    assert_spacing(
+        "# Parent\n\n\n## Child\n\nBody\n# Next\n\nText\n## Other\n",
+        "# Parent\n\n## Child\n\nBody\n\n\n# Next\n\nText\n\n\n## Other\n",
+        "lines-above = 2\nlines-below = 1\nlines-above-mode = \"exact\"\nnested-heading-lines-above = 1",
+    );
+}
+
+#[test]
 fn exact_spacing_uses_per_level_zero_and_unlimited_requirements() {
     assert_spacing(
         "# Title\n\n\n\n## Section\n\n\n\n### Subsection\n",
