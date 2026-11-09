@@ -162,3 +162,26 @@ fn test_sentence_pack_separates_packed_sentences_with_two_spaces() {
     let settings = [ON, &["MD013.reflow-mode=\"sentence-pack\""]].concat();
     assert_eq!(fmt(dir.path(), input, &settings), expected);
 }
+
+#[test]
+fn test_normalize_mode_joins_sentences_with_two_spaces() {
+    let dir = TempDir::new().unwrap();
+    // Normalize joins short paragraphs and list items even when they fit, so
+    // every sentence break is joined: kept two-space gaps stay two, broken
+    // sentence ends become two, and a gap that ends no sentence stays one
+    let input = indoc! {"
+        Short one.  Short two.
+        Short three, with e.g.
+        an abbreviation.
+
+        - First item sentence.
+          Second item sentence.
+    "};
+    let expected = indoc! {"
+        Short one.  Short two.  Short three, with e.g. an abbreviation.
+
+        - First item sentence.  Second item sentence.
+    "};
+    let settings = [ON, &["MD013.reflow-mode=\"normalize\""]].concat();
+    assert_eq!(fmt(dir.path(), input, &settings), expected);
+}
