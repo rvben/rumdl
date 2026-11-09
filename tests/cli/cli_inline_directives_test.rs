@@ -114,6 +114,101 @@ fn control_a_disabled_first_line_still_drops_the_warning() {
     assert!(findings(MD013_NORMALIZE, "MD013", &doc).is_empty());
 }
 
+// ── default-mode reflow: one over-long line, one paragraph-wide fix ──────────
+//
+// Default mode reports each over-long line on its own, and every such warning
+// carries the fix for the whole paragraph. The fix is withheld when it would
+// rewrite a disabled line, whichever line the warning is reported on.
+
+const MD013_REFLOW: &str = "[global]\nenable = [\"MD013\"]\n[MD013]\nline-length = 30\nreflow = true\n";
+
+const LONG_A: &str = "aaaa bbbb cccc dddd eeee ffff gggg hhhh";
+const LONG_B: &str = "iiii jjjj kkkk llll mmmm nnnn oooo pppp";
+
+/// Paragraphs holding a disabled line beside an enabled over-long one, with the
+/// 1-indexed line the enabled one is on.
+fn paragraphs_with_a_disabled_line() -> Vec<(String, usize)> {
+    vec![
+        (
+            format!("<!-- rumdl-disable-next-line MD013 -->\n{LONG_A}\n{LONG_B}\n"),
+            3,
+        ),
+        (
+            format!("{LONG_A}\niiii jjjj kkkk <!-- rumdl-disable-line MD013 -->\n"),
+            1,
+        ),
+        (
+            format!("{LONG_A} <!-- markdownlint-disable-line MD013 -->\n{LONG_B}\n"),
+            2,
+        ),
+        (
+            format!("> {LONG_A}\n> iiii jjjj kkkk <!-- rumdl-disable-line MD013 -->\n"),
+            1,
+        ),
+        (format!("> {LONG_A} <!-- rumdl-disable-line MD013 -->\n> {LONG_B}\n"), 2),
+    ]
+}
+
+#[test]
+fn default_reflow_reports_the_enabled_line_of_a_paragraph_with_a_disabled_line_without_a_fix() {
+    for (doc, enabled_line) in paragraphs_with_a_disabled_line() {
+        assert_eq!(
+            findings(MD013_REFLOW, "MD013", &doc),
+            [(enabled_line, false)],
+            "the fix would rewrite a disabled line, so none is offered: {doc:?}"
+        );
+    }
+}
+
+#[test]
+fn default_reflow_leaves_a_paragraph_with_a_disabled_line_as_written() {
+    for (doc, _) in paragraphs_with_a_disabled_line() {
+        assert_eq!(fmt(MD013_REFLOW, &doc), doc, "{doc:?}");
+    }
+}
+
+#[test]
+fn default_reflow_still_rewraps_the_paragraph_after_one_with_a_disabled_line() {
+    let kept = format!("<!-- rumdl-disable-next-line MD013 -->\n{LONG_A}\n{LONG_B}\n");
+    let after = fmt(MD013_REFLOW, &format!("{kept}\n{LONG_A}\n"));
+    assert_eq!(after, format!("{kept}\naaaa bbbb cccc dddd eeee ffff\ngggg hhhh\n"));
+    assert_eq!(fmt(MD013_REFLOW, &after), after, "second pass changes nothing");
+}
+
+/// The fix covers whole lines up to, not including, the line after the
+/// paragraph: a disabled line on either side of it is no reason to withhold it.
+#[test]
+fn default_reflow_fixes_a_paragraph_beside_a_disabled_line_it_does_not_hold() {
+    let wrapped = "aaaa bbbb cccc dddd eeee ffff\ngggg hhhh";
+    let heading = "# iiii jjjj kkkk llll <!-- rumdl-disable-line MD013 -->";
+    for (doc, expected, paragraph_line) in [
+        // The disabled line starts where the fix ends.
+        (format!("{LONG_A}\n{heading}\n"), format!("{wrapped}\n{heading}\n"), 1),
+        (format!("{LONG_A}\n{heading}"), format!("{wrapped}\n{heading}"), 1),
+        // The disabled line ends where the fix starts.
+        (format!("{heading}\n{LONG_A}\n"), format!("{heading}\n{wrapped}\n"), 2),
+        (format!("{heading}\n{LONG_A}"), format!("{heading}\n{wrapped}"), 2),
+    ] {
+        assert_eq!(
+            findings(MD013_REFLOW, "MD013", &doc),
+            [(paragraph_line, true)],
+            "{doc:?}"
+        );
+        let after = fmt(MD013_REFLOW, &doc);
+        assert_eq!(after, expected, "{doc:?}");
+        assert_eq!(fmt(MD013_REFLOW, &after), after, "second pass: {doc:?}");
+    }
+}
+
+#[test]
+fn control_default_reflow_without_a_directive_offers_the_fix_and_rewraps() {
+    for doc in [format!("{LONG_A}\n{LONG_B}\n"), format!("> {LONG_A}\n> {LONG_B}\n")] {
+        let found = findings(MD013_REFLOW, "MD013", &doc);
+        assert!(found.iter().any(|&(_, fixable)| fixable), "{doc:?}: {found:?}");
+        assert_ne!(fmt(MD013_REFLOW, &doc), doc, "{doc:?}");
+    }
+}
+
 // ── 20, 21: MD044 and tool comments ─────────────────────────────────────────
 
 fn md044_lines(doc: &str) -> Vec<usize> {

@@ -1037,11 +1037,27 @@ impl Rule for MD013LineLength {
                     // for any table.
                     continue;
                 }
-                // A paragraph warning that touches a disabled line is dropped by the
-                // inline-config filter, since its fix would rewrite that line. It is
-                // still emitted so the filter credits the disable comment, and the
-                // per-line warnings stay: those on disabled lines are filtered as
-                // usual and an over-long enabled line is still reported.
+                // The inline-config filter judges a warning by the lines it is
+                // reported on, and default mode reports one over-long line while
+                // its fix replaces the whole paragraph. So the fix is judged here,
+                // by the lines its byte range covers: when one of them is disabled
+                // the fix is withheld and the warning stays, which keeps an
+                // over-long enabled line reported. The range is end-exclusive, so
+                // the line starting where it ends is not one of them.
+                let fix_rewrites_disabled_line = pw.fix.as_ref().is_some_and(|fix| {
+                    let first_line = ctx.line_number_at_offset(fix.range.start);
+                    let last_byte = fix.range.end.saturating_sub(1).max(fix.range.start);
+                    let last_line = ctx.line_number_at_offset(last_byte);
+                    (first_line..=last_line)
+                        .any(|line_number| ctx.inline_config().is_rule_disabled(self.name(), line_number))
+                });
+                if fix_rewrites_disabled_line {
+                    pw.fix = None;
+                }
+                // Span-reported paragraph warnings touching a disabled line still
+                // reach inline-config filtering for disable-comment accounting.
+                // Keep the original per-line warnings in that case so enabled
+                // over-long lines remain visible after the span warning is filtered.
                 let touches_disabled_line = (pw.line..=pw.end_line)
                     .any(|line_number| ctx.inline_config().is_rule_disabled(self.name(), line_number));
                 if !touches_disabled_line {
