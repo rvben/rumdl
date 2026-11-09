@@ -65,20 +65,20 @@ aho-corasick = "1.1"
 clap = { version = "4.6", features = ["derive"] }
 colored = { version = "3.1.1", optional = true }
 fancy-regex = "0.17.0"
-ignore = "0.4.33"
+ignore = "0.4.34"
 rayon = { version = "1.12.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 toml = "1.1"
 thiserror = "2.0.21"
-globset = "0.4.20"
+globset = "0.4.21"
 indexmap = { version = "2", features = ["serde"] }
-log = "0.4.34"
+log = "0.4.35"
 memchr = "2.8"
 # `default-features` would add `getopts` for pulldown-cmark's own CLI binary,
 # which rumdl never builds. `html` is the renderer MD085 uses.
-pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
 unicase = "2.10"
 # Identifier classification for the bundled markdown-rs parser.
 unicode-id = { version = "0.3", features = ["no_std"] }
@@ -101,7 +101,7 @@ tower-lsp = { version = "0.20", optional = true }
 # LSP needs async file/stdio/TCP I/O, tasks, synchronization, timers and macros.
 # Keep the existing parking_lot runtime locks; process and signal support are
 # unused. Avoid `full` so unrelated Tokio features do not enter native builds.
-tokio = { version = "1.53.3", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "rt-multi-thread", "sync", "time"], optional = true }
+tokio = { version = "1.54.1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "rt-multi-thread", "sync", "time"], optional = true }
 # The default `humantime` feature pulls in jiff purely to render log timestamps,
 # which `main.rs` turns off with `.format_timestamp(None)`.
 env_logger = { version = "0.11", default-features = false, features = [
@@ -128,7 +128,7 @@ ec4rs = { version = "1.2.0", features = ["track-source"], optional = true }
 
 # Unified diffs for `--diff` and `fmt --check`. Only the CLI prints them, so the
 # browser wasm build leaves this out.
-similar = "3.2.0"
+similar = "3.2.1"
 
 [features]
 default = ["parallel", "native"]
@@ -171,7 +171,7 @@ quick-xml = "0.41"
 unicode-segmentation = "1.13"
 serial_test = "3.2"
 jsonschema = "0.46"
-ureq = "3.4"
+ureq = "3.5"
 url = "2"
 # The reflow semantics oracle's third renderer, a port of cmark-gfm, which
 # GitHub renders with. `default-features` would add its CLI and syntect.
