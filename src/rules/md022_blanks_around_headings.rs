@@ -323,30 +323,37 @@ fn is_adjacent_nested_heading(
     true
 }
 
-fn preceding_nested_heading<'a>(
-    ctx: &'a crate::lint_context::LintContext<'a>,
-    child: crate::lint_context::ParsedHeading<'a>,
-    is_pandoc: bool,
-) -> Option<crate::lint_context::ParsedHeading<'a>> {
-    let child_first = child.first_line_num() - 1;
-    let parent = ctx
-        .headings()
-        .filter(|candidate| heading_end_idx(*candidate) < child_first)
-        .max_by_key(|candidate| heading_end_idx(*candidate))?;
-    is_adjacent_nested_heading(ctx, parent, child, is_pandoc).then_some(parent)
+/// The gaps where a deeper heading directly follows its parent heading.
+///
+/// Both maps are keyed by the 0-indexed line a heading's text starts on and
+/// hold the child's level, which indexes `nested-heading-lines-above`.
+#[derive(Default)]
+struct NestedGaps {
+    /// Children that directly follow their parent.
+    by_child: std::collections::HashMap<usize, usize>,
+    /// Parents directly followed by a child.
+    by_parent: std::collections::HashMap<usize, usize>,
 }
 
-fn following_nested_heading<'a>(
-    ctx: &'a crate::lint_context::LintContext<'a>,
-    parent: crate::lint_context::ParsedHeading<'a>,
-    is_pandoc: bool,
-) -> Option<crate::lint_context::ParsedHeading<'a>> {
-    let parent_end = heading_end_idx(parent);
-    let child = ctx
-        .headings()
-        .filter(|candidate| candidate.first_line_num() - 1 > parent_end)
-        .min_by_key(crate::lint_context::ParsedHeading::first_line_num)?;
-    is_adjacent_nested_heading(ctx, parent, child, is_pandoc).then_some(child)
+impl NestedGaps {
+    /// Pairs each heading with the one before it in a single pass. Headings
+    /// come in document order, so the previous heading is the nearest one
+    /// above and is the only candidate parent.
+    fn new(ctx: &crate::lint_context::LintContext, is_pandoc: bool) -> Self {
+        let mut gaps = Self::default();
+        let mut previous: Option<crate::lint_context::ParsedHeading<'_>> = None;
+        for heading in ctx.headings() {
+            if let Some(parent) = previous
+                && is_adjacent_nested_heading(ctx, parent, heading, is_pandoc)
+            {
+                let level = heading.heading.level as usize;
+                gaps.by_child.insert(heading.first_line_num() - 1, level);
+                gaps.by_parent.insert(parent.first_line_num() - 1, level);
+            }
+            previous = Some(heading);
+        }
+        gaps
+    }
 }
 
 ///
@@ -475,32 +482,46 @@ impl MD022BlanksAroundHeadings {
         Self { config }
     }
 
-    fn above_requirement<'s>(
-        &'s self,
-        ctx: &crate::lint_context::LintContext,
-        heading: crate::lint_context::ParsedHeading<'_>,
-        is_pandoc: bool,
-    ) -> &'s md022_config::HeadingBlankRequirement {
-        if preceding_nested_heading(ctx, heading, is_pandoc).is_some()
-            && let Some(nested) = &self.config.nested_heading_lines_above
-        {
-            return nested.get_for_level(heading.heading.level as usize);
+    /// The nested gaps in the document, or none when
+    /// `nested-heading-lines-above` is unset and they would go unused.
+    fn nested_gaps(&self, ctx: &crate::lint_context::LintContext, is_pandoc: bool) -> NestedGaps {
+        if self.config.nested_heading_lines_above.is_some() {
+            NestedGaps::new(ctx, is_pandoc)
+        } else {
+            NestedGaps::default()
         }
-        self.config.lines_above.get_for_level(heading.heading.level as usize)
     }
 
-    fn below_requirement<'s>(
-        &'s self,
-        ctx: &crate::lint_context::LintContext,
-        heading: crate::lint_context::ParsedHeading<'_>,
-        is_pandoc: bool,
-    ) -> &'s md022_config::HeadingBlankRequirement {
-        if let Some(child) = following_nested_heading(ctx, heading, is_pandoc)
-            && let Some(nested) = &self.config.nested_heading_lines_above
+    /// The blank lines required above the heading whose text starts on
+    /// `first_line` (0-indexed).
+    fn above_requirement(
+        &self,
+        gaps: &NestedGaps,
+        first_line: usize,
+        level: usize,
+    ) -> &md022_config::HeadingBlankRequirement {
+        if let Some(nested) = &self.config.nested_heading_lines_above
+            && let Some(&child_level) = gaps.by_child.get(&first_line)
         {
-            return nested.get_for_level(child.heading.level as usize);
+            return nested.get_for_level(child_level);
         }
-        self.config.lines_below.get_for_level(heading.heading.level as usize)
+        self.config.lines_above.get_for_level(level)
+    }
+
+    /// The blank lines required below the heading whose text starts on
+    /// `first_line` (0-indexed).
+    fn below_requirement(
+        &self,
+        gaps: &NestedGaps,
+        first_line: usize,
+        level: usize,
+    ) -> &md022_config::HeadingBlankRequirement {
+        if let Some(nested) = &self.config.nested_heading_lines_above
+            && let Some(&child_level) = gaps.by_parent.get(&first_line)
+        {
+            return nested.get_for_level(child_level);
+        }
+        self.config.lines_below.get_for_level(level)
     }
 
     /// Exact mode caps actual blank lines. Comment-only lines still satisfy the
@@ -511,6 +532,7 @@ impl MD022BlanksAroundHeadings {
         }
         let is_pandoc = ctx.flavor.is_pandoc_compatible();
         let at_start = heading_at_start_idx(ctx, is_pandoc);
+        let gaps = self.nested_gaps(ctx, is_pandoc);
         // A gap shared by two headings must also satisfy the earlier heading's
         // minimum below it, including any attached attribute lines.
         let mut below_requirements = std::collections::HashMap::new();
@@ -523,7 +545,10 @@ impl MD022BlanksAroundHeadings {
             {
                 continue;
             }
-            let Some(required) = self.below_requirement(ctx, parsed, is_pandoc).required_count() else {
+            let Some(required) = self
+                .below_requirement(&gaps, parsed.first_line_num() - 1, parsed.heading.level as usize)
+                .required_count()
+            else {
                 continue;
             };
             let mut end = last;
@@ -539,7 +564,10 @@ impl MD022BlanksAroundHeadings {
             let first = parsed.first_line_num() - 1;
             let heading_line = parsed.line_num - 1;
             let heading = parsed.heading;
-            let Some(mut required) = self.above_requirement(ctx, parsed, is_pandoc).required_count() else {
+            let Some(mut required) = self
+                .above_requirement(&gaps, first, heading.level as usize)
+                .required_count()
+            else {
                 continue;
             };
             let last = heading_line + usize::from(parsed.is_setext());
@@ -636,6 +664,7 @@ impl MD022BlanksAroundHeadings {
         let mut skip_count: usize = 0;
 
         let heading_at_start_idx = heading_at_start_idx(ctx, is_pandoc);
+        let gaps = self.nested_gaps(ctx, is_pandoc);
 
         // Headings inside a blockquote by the line their text starts on; the
         // per-line `heading` field holds none of them.
@@ -739,17 +768,7 @@ impl MD022BlanksAroundHeadings {
                 }
 
                 // Determine how many blank lines we need above
-                let parsed_heading = quoted_heading.copied().or_else(|| {
-                    ctx.headings().find(|parsed| {
-                        parsed.first_line_num() - 1 == i
-                            && parsed.heading.level == heading.level
-                            && parsed.heading.text == heading.text
-                    })
-                });
-                let requirement_above = parsed_heading.map_or_else(
-                    || self.config.lines_above.get_for_level(heading_level),
-                    |parsed| self.above_requirement(ctx, parsed, is_pandoc),
-                );
+                let requirement_above = self.above_requirement(&gaps, i, heading_level);
                 let follows_mdg_tags = is_mdg && follows_mdg_tag_line(ctx, i, heading);
                 let needed_blanks_above = if follows_mdg_tags
                     || (is_first_heading && self.config.allowed_at_start)
@@ -814,10 +833,7 @@ impl MD022BlanksAroundHeadings {
                 }
 
                 // Add missing blank lines below if needed
-                let requirement_below = parsed_heading.map_or_else(
-                    || self.config.lines_below.get_for_level(heading_level),
-                    |parsed| self.below_requirement(ctx, parsed, is_pandoc),
-                );
+                let requirement_below = self.below_requirement(&gaps, i, heading_level);
                 // A heading that ends the document has nothing to separate
                 // from, and `check` asks for no blank line below it.
                 let needed_blanks_below = if next_content_line_idx.is_none() {
@@ -879,6 +895,7 @@ impl Rule for MD022BlanksAroundHeadings {
         let is_mdg = ctx.flavor == crate::config::MarkdownFlavor::MDG;
 
         let heading_at_start_idx = heading_at_start_idx(ctx, is_pandoc);
+        let gaps = self.nested_gaps(ctx, is_pandoc);
 
         // Collect all headings first to batch process
         let mut heading_violations = Vec::new();
@@ -907,7 +924,8 @@ impl Rule for MD022BlanksAroundHeadings {
             // Check if this heading is at document start
             let is_first_heading = Some(first_idx) == heading_at_start_idx;
 
-            let required_above_count = self.above_requirement(ctx, parsed, is_pandoc).required_count();
+            let heading_level = heading.level as usize;
+            let required_above_count = self.above_requirement(&gaps, first_idx, heading_level).required_count();
 
             // Count blank lines above if needed
             let should_check_above = required_above_count.is_some()
@@ -1020,7 +1038,7 @@ impl Rule for MD022BlanksAroundHeadings {
                     continue;
                 }
 
-                if let Some(required) = self.below_requirement(ctx, parsed, is_pandoc).required_count() {
+                if let Some(required) = self.below_requirement(&gaps, first_idx, heading_level).required_count() {
                     // Count blank lines below (counting only blank lines, not skipped transparent lines)
                     let mut blank_lines_below = 0;
                     for k in (effective_last_line + 1)..next_non_blank_idx {

@@ -2360,6 +2360,46 @@ fn test_md022_linear_complexity() {
     assert_linear_complexity("MD022", &durations, 6.0);
 }
 
+/// Finding the heading directly before or after each heading must not search
+/// the whole heading list, whether or not `nested-heading-lines-above` is set.
+#[test]
+fn test_md022_nested_heading_lines_above_linear_complexity() {
+    // A parent directly followed by its child, then a parent with a body.
+    let unit = "# Parent\n\n## Child\n\nBody\n\n\n# Section\n\nBody\n\n\n";
+    for nested in [None, Some(1)] {
+        let mut config = rumdl_lib::config::Config::default();
+        let md022 = config.rules.entry("MD022".to_string()).or_default();
+        md022.values.insert("lines-above".to_string(), 2.into());
+        if let Some(nested) = nested {
+            md022
+                .values
+                .insert("nested-heading-lines-above".to_string(), nested.into());
+        }
+        let rule = MD022BlanksAroundHeadings::from_config(&config);
+        let mut check_times = Vec::new();
+        let mut fix_times = Vec::new();
+        for count in [1024, 2048, 4096] {
+            let content = unit.repeat(count);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            // Without the option every child lacks a second blank line above it.
+            let expected = if nested.is_some() { 0 } else { count };
+            assert_eq!(rule.check(&ctx).unwrap().len(), expected);
+            check_times.push(measure_rule_time_with_context(rule.as_ref(), &ctx, 5));
+            let mut samples: Vec<_> = (0..5)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    std::hint::black_box(rule.fix(std::hint::black_box(&ctx)).unwrap());
+                    start.elapsed()
+                })
+                .collect();
+            samples.sort();
+            fix_times.push(samples[2]);
+        }
+        assert_linear_complexity(&format!("MD022 check nested={nested:?}"), &check_times, 3.0);
+        assert_linear_complexity(&format!("MD022 fix nested={nested:?}"), &fix_times, 3.0);
+    }
+}
+
 #[test]
 fn test_md025_linear_complexity() {
     let sizes = [500, 1000, 2000];
