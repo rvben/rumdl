@@ -716,6 +716,84 @@ fn test_fix_md013_reflow_keeps_a_disabled_line_inside_a_paragraph() {
     assert_ne!(fix_with_rule(&rule, &content), content);
 }
 
+/// MD048 reports the two fences of a block on their own lines, each with a fix
+/// for that line alone. Only the opener can carry a directive, since nothing
+/// between the fences is one, so it must exempt the block: a closing fence
+/// converted on its own no longer closes its opener.
+#[test]
+fn test_fix_md048_keeps_the_closing_fence_of_a_block_disabled_at_its_opener() {
+    use rumdl_lib::MD048CodeFenceStyle;
+    use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
+
+    let backtick = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+    let tilde = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+
+    // Each document with the rule that wants its block converted and the
+    // 1-indexed line of the block's opening fence.
+    let documents: [(&MD048CodeFenceStyle, &str, usize); 6] = [
+        (
+            &backtick,
+            "<!-- rumdl-disable-next-line MD048 -->\n~~~text\ncode\n~~~\n\nAfter.\n",
+            2,
+        ),
+        (
+            &backtick,
+            "<!-- markdownlint-disable-next-line MD048 -->\n~~~text\ncode\n~~~\n\nAfter.\n",
+            2,
+        ),
+        (
+            &backtick,
+            "<!-- rumdl-disable-next-line -->\n~~~text\ncode\n~~~\n\nAfter.\n",
+            2,
+        ),
+        // The converted closing fence would also be lengthened past the inner one.
+        (
+            &backtick,
+            "<!-- rumdl-disable-next-line MD048 -->\n~~~markdown\n```rust\ncode\n```\n~~~\n\nAfter.\n",
+            2,
+        ),
+        (
+            &backtick,
+            "- item\n\n  <!-- rumdl-disable-next-line MD048 -->\n  ~~~text\n  code\n  ~~~\n\n  After.\n",
+            4,
+        ),
+        (
+            &tilde,
+            "<!-- rumdl-disable-next-line MD048 -->\n```text\ncode\n```\n\nAfter.\n",
+            2,
+        ),
+    ];
+    for (rule, document, opener) in documents {
+        for content in [
+            document.to_string(),
+            document.replace('\n', "\r\n"),
+            document.trim_end().to_string(),
+        ] {
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert!(ctx.inline_config().is_rule_disabled("MD048", opener), "{content:?}");
+            // The opener is still reported, for the inline-config filter to drop
+            // and credit to the directive. The closing fence is not reported.
+            let reported: Vec<usize> = rule.check(&ctx).unwrap().iter().map(|w| w.line).collect();
+            assert_eq!(reported, [opener], "{content:?}");
+            assert_eq!(fix_with_rule(rule, &content), content);
+        }
+    }
+
+    // Control: without the directive both fences are reported and converted.
+    let content = "~~~text\ncode\n~~~\n\nAfter.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let reported: Vec<usize> = backtick.check(&ctx).unwrap().iter().map(|w| w.line).collect();
+    assert_eq!(reported, [1, 3]);
+    assert_eq!(fix_with_rule(&backtick, content), "```text\ncode\n```\n\nAfter.\n");
+
+    // Control: the block after a disabled one is converted, both fences.
+    let content = "<!-- rumdl-disable-next-line MD048 -->\n~~~text\ncode\n~~~\n\n~~~text\nmore\n~~~\n";
+    assert_eq!(
+        fix_with_rule(&backtick, content),
+        "<!-- rumdl-disable-next-line MD048 -->\n~~~text\ncode\n~~~\n\n```text\nmore\n```\n"
+    );
+}
+
 /// A fix replaces whole lines and ends where the next line starts. A disabled
 /// line that only borders the paragraph, on either side, withholds nothing.
 #[test]

@@ -340,6 +340,13 @@ impl Rule for MD048CodeFenceStyle {
         let mut needs_lengthening = false;
         // A backtick fence cannot contain any backtick in its info string.
         let mut can_convert_block = true;
+        // A block's two fences are rewritten together or not at all: a closing
+        // fence converted on its own no longer closes its opener, and the block
+        // then runs to the end of the document. Each fence is reported on its
+        // own line, though, so a directive naming only the opener filters out
+        // half of the pair. Nothing between the fences can be a directive, so
+        // the opener's line speaks for the whole block, as it does for MD046.
+        let mut opening_fence_disabled = false;
         let mut list_fence_end = None;
 
         for filtered_line in ctx.filtered_lines().skip_front_matter() {
@@ -391,6 +398,7 @@ impl Rule for MD048CodeFenceStyle {
                 in_code_block = true;
                 code_block_fence_char = fence_char;
                 code_block_fence_len = fence_len;
+                opening_fence_disabled = ctx.inline_config().is_rule_disabled(self.name(), line_num + 1);
                 list_fence_end = native_list_fence_end(ctx, line_num, marker.fence_start);
                 can_convert_block =
                     !(fence_char == '~' && target_style == CodeFenceStyle::Backtick && marker.rest.contains('`'));
@@ -507,7 +515,7 @@ impl Rule for MD048CodeFenceStyle {
                 if is_closing {
                     let needs_conversion = needs_fence_conversion(fence_char, target_style);
 
-                    if needs_conversion || needs_lengthening {
+                    if (needs_conversion || needs_lengthening) && !opening_fence_disabled {
                         let target_char = if needs_conversion {
                             if target_style == CodeFenceStyle::Backtick {
                                 '`'

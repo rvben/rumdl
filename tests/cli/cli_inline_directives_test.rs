@@ -6,6 +6,8 @@
 //!   syntax, whatever whitespace follows `<!--`, and never rewrites one.
 //! - One whitespace class serves every comment helper.
 //! - A directive comment may span lines.
+//! - MD048 exempts a block whose opening fence is disabled: its closing fence
+//!   is neither reported nor rewritten.
 //!
 //! Each case has a control that must behave the other way: the same document
 //! without the directive, or a near-miss comment that is not one.
@@ -453,4 +455,63 @@ fn prose_before_a_comment_in_a_blockquote_does_not_hide_the_quote_markers() {
 fn an_unclosed_configure_file_example_in_code_does_not_hide_the_directive_after_it() {
     let doc = format!("```\n<!-- rumdl-configure-file\n```\n\n<!--\nrumdl-disable MD013\n-->\n\n{LONG}\n");
     assert!(md013_lines(&doc).is_empty());
+}
+
+// ── MD048: a directive on the opening fence exempts the whole block ─────────
+//
+// MD048 reports the two fences of a block on their own lines, each with a fix
+// for that line alone. Only the opener can carry a directive, because nothing
+// between the fences is one, and a closing fence converted on its own no longer
+// closes its opener: the block then swallows the rest of the document.
+
+const MD048_BACKTICK: &str = "[global]\nenable = [\"MD048\"]\n[MD048]\nstyle = \"backtick\"\n";
+const TILDE_BLOCK: &str = "~~~markdown\n```rust\nfn main() {}\n```\n~~~\n\nAfter the block.\n";
+
+/// The tilde block with MD048 disabled on its opening fence, in each spelling.
+fn tilde_blocks_disabled_at_the_opening_fence() -> Vec<String> {
+    vec![
+        format!("<!-- rumdl-disable-next-line MD048 -->\n{TILDE_BLOCK}"),
+        format!("<!-- markdownlint-disable-next-line MD048 -->\n{TILDE_BLOCK}"),
+        format!("<!-- rumdl-disable-next-line -->\n{TILDE_BLOCK}"),
+        format!("<!-- rumdl-disable-next-line MD048 -->\n{TILDE_BLOCK}").replace('\n', "\r\n"),
+    ]
+}
+
+#[test]
+fn a_block_disabled_at_its_opening_fence_is_not_reported_at_its_closing_fence() {
+    for doc in tilde_blocks_disabled_at_the_opening_fence() {
+        assert!(findings(MD048_BACKTICK, "MD048", &doc).is_empty(), "{doc:?}");
+    }
+}
+
+#[test]
+fn a_block_disabled_at_its_opening_fence_keeps_its_closing_fence() {
+    for doc in tilde_blocks_disabled_at_the_opening_fence() {
+        assert_eq!(fmt(MD048_BACKTICK, &doc), doc);
+    }
+}
+
+#[test]
+fn the_default_rule_set_keeps_a_block_disabled_at_its_opening_fence_closed() {
+    let doc = format!("# Title\n\n```text\nfirst\n```\n\n<!-- rumdl-disable-next-line MD048 -->\n{TILDE_BLOCK}");
+    assert_eq!(fmt("", &doc), doc);
+}
+
+#[test]
+fn a_block_after_one_disabled_at_its_opening_fence_is_still_converted() {
+    let doc = format!("<!-- rumdl-disable-next-line MD048 -->\n{TILDE_BLOCK}\n~~~\nplain\n~~~\n");
+    assert_eq!(findings(MD048_BACKTICK, "MD048", &doc), [(10, true), (12, true)]);
+    assert_eq!(
+        fmt(MD048_BACKTICK, &doc),
+        format!("<!-- rumdl-disable-next-line MD048 -->\n{TILDE_BLOCK}\n```\nplain\n```\n")
+    );
+}
+
+#[test]
+fn control_without_the_directive_both_fences_are_reported_and_converted() {
+    assert_eq!(findings(MD048_BACKTICK, "MD048", TILDE_BLOCK), [(1, true), (5, true)]);
+    assert_eq!(
+        fmt(MD048_BACKTICK, TILDE_BLOCK),
+        "````markdown\n```rust\nfn main() {}\n```\n````\n\nAfter the block.\n"
+    );
 }
