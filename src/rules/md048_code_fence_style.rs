@@ -338,8 +338,6 @@ impl Rule for MD048CodeFenceStyle {
         // True when the opening fence was already the correct style but its length is
         // ambiguous (interior has same-style fences of equal or greater length).
         let mut needs_lengthening = false;
-        // A backtick fence cannot contain any backtick in its info string.
-        let mut can_convert_block = true;
         // A block's two fences are rewritten together or not at all: a closing
         // fence converted on its own no longer closes its opener, and the block
         // then runs to the end of the document. Each fence is reported on its
@@ -347,6 +345,11 @@ impl Rule for MD048CodeFenceStyle {
         // half of the pair. Nothing between the fences can be a directive, so
         // the opener's line speaks for the whole block, as it does for MD046.
         let mut opening_fence_disabled = false;
+        // Where the open block's opening fence was reported, if it was. The
+        // fences are still reported one by one, and a consumer may apply the
+        // fix of either warning alone, as an editor quick fix does. Each fix
+        // therefore also carries the edit of the other fence.
+        let mut opening_warning = None;
         let mut list_fence_end = None;
 
         for filtered_line in ctx.filtered_lines().skip_front_matter() {
@@ -400,8 +403,10 @@ impl Rule for MD048CodeFenceStyle {
                 code_block_fence_len = fence_len;
                 opening_fence_disabled = ctx.inline_config().is_rule_disabled(self.name(), line_num + 1);
                 list_fence_end = native_list_fence_end(ctx, line_num, marker.fence_start);
-                can_convert_block =
+                // A backtick fence cannot contain any backtick in its info string.
+                let can_convert_block =
                     !(fence_char == '~' && target_style == CodeFenceStyle::Backtick && marker.rest.contains('`'));
+                let reported_before = warnings.len();
 
                 let needs_conversion = needs_fence_conversion(fence_char, target_style);
 
@@ -508,6 +513,7 @@ impl Rule for MD048CodeFenceStyle {
                         needs_lengthening = false;
                     }
                 }
+                opening_warning = (warnings.len() > reported_before).then_some(reported_before);
             } else {
                 // Inside a code block — check if this is the closing fence.
                 let is_closing = is_closing_fence(marker, code_block_fence_char, code_block_fence_len);
@@ -556,6 +562,19 @@ impl Rule for MD048CodeFenceStyle {
                             )
                         };
 
+                        // An opening fence that cannot be converted has no fix,
+                        // and then neither has its closing fence.
+                        let closing_range = ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len());
+                        let fix = opening_warning
+                            .and_then(|index| warnings[index].fix.as_mut())
+                            .map(|opening| {
+                                let opening_edit = Fix::new(opening.range.clone(), opening.replacement.clone());
+                                opening
+                                    .additional_edits
+                                    .push(Fix::new(closing_range.clone(), replacement.clone()));
+                                Fix::with_additional_edits(closing_range, replacement, vec![opening_edit])
+                            });
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             message,
@@ -564,12 +583,7 @@ impl Rule for MD048CodeFenceStyle {
                             end_line,
                             end_column: end_col,
                             severity: Severity::Warning,
-                            fix: can_convert_block.then(|| {
-                                Fix::new(
-                                    ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len()),
-                                    replacement,
-                                )
-                            }),
+                            fix,
                         });
                     }
 
@@ -1540,5 +1554,127 @@ mod list_fence_content_tests {
             "cached: {:?}",
             ctx.code_block_details
         );
+    }
+}
+
+#[cfg(test)]
+mod paired_fix_tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+    use crate::utils::fix_utils::apply_warning_fixes;
+
+    /// The two fences of a block are reported separately, and a consumer may
+    /// apply either fix alone. Each must therefore rewrite both fences.
+    #[test]
+    fn md048_each_fence_fix_rewrites_both_fences_of_its_block() {
+        for (style, document, converted) in [
+            (
+                CodeFenceStyle::Backtick,
+                "~~~text\ncode\n~~~\n\nAfter.\n",
+                "```text\ncode\n```\n\nAfter.\n",
+            ),
+            (
+                CodeFenceStyle::Tilde,
+                "```text\ncode\n```\n\nAfter.\n",
+                "~~~text\ncode\n~~~\n\nAfter.\n",
+            ),
+            (
+                CodeFenceStyle::Backtick,
+                "~~~markdown\n```rust\ncode\n```\n~~~\n\nAfter.\n",
+                "````markdown\n```rust\ncode\n```\n````\n\nAfter.\n",
+            ),
+            (
+                CodeFenceStyle::Backtick,
+                "- item\n\n  ~~~text\n  code\n   ~~~\n\n  After.\n",
+                "- item\n\n  ```text\n  code\n   ```\n\n  After.\n",
+            ),
+            (
+                CodeFenceStyle::Backtick,
+                "~~~内容 🎉\ncode\n~~~",
+                "```内容 🎉\ncode\n```",
+            ),
+        ] {
+            let rule = MD048CodeFenceStyle::new(style);
+            for (source, expected) in [
+                (document.to_string(), converted.to_string()),
+                (document.replace('\n', "\r\n"), converted.replace('\n', "\r\n")),
+            ] {
+                let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 2, "{source:?}");
+                for warning in &warnings {
+                    assert_eq!(
+                        apply_warning_fixes(&source, std::slice::from_ref(warning)).unwrap(),
+                        expected,
+                        "the fix on line {} of {source:?}",
+                        warning.line
+                    );
+                }
+                // Each fix leads with its own fence, then names the other one.
+                let [opening, closing] = [&warnings[0], &warnings[1]].map(|warning| warning.fix.as_ref().unwrap());
+                for (own, other) in [(opening, closing), (closing, opening)] {
+                    assert_eq!(own.additional_edits.len(), 1, "{source:?}");
+                    assert_eq!(own.additional_edits[0].range, other.range);
+                    assert_eq!(own.additional_edits[0].replacement, other.replacement);
+                    assert!(own.additional_edits[0].additional_edits.is_empty());
+                }
+                // Applied together, the repeated edits collapse.
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    /// Each block pairs its own fences, and a fence with no partner to rewrite
+    /// keeps a fix for its line alone.
+    #[test]
+    fn md048_fix_pairs_only_the_fences_of_one_block() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+
+        let source = "~~~text\none\n~~~\n\n~~~text\ntwo\n~~~\n";
+        let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.iter().map(|w| (w.line, w.column)).collect::<Vec<_>>(),
+            [(1, 1), (3, 1), (5, 1), (7, 1)]
+        );
+        for (index, expected) in [
+            "```text\none\n```\n\n~~~text\ntwo\n~~~\n",
+            "```text\none\n```\n\n~~~text\ntwo\n~~~\n",
+            "~~~text\none\n~~~\n\n```text\ntwo\n```\n",
+            "~~~text\none\n~~~\n\n```text\ntwo\n```\n",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                apply_warning_fixes(source, &warnings[index..=index]).unwrap(),
+                expected,
+                "warning {index}"
+            );
+        }
+
+        // Unclosed: the opening fence is the only one there is.
+        let source = "~~~text\n```\ncode\n";
+        let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.as_ref().unwrap().additional_edits.is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), "````text\n```\ncode\n");
+
+        // An unclosed block before a closed one does not lend it an opener.
+        let source = "- item\n\n  ~~~text\n  code\n\n~~~text\ntwo\n~~~\n";
+        let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.iter().map(|w| w.line).collect::<Vec<_>>(), [3, 6, 8]);
+        assert_eq!(
+            apply_warning_fixes(source, &warnings[..1]).unwrap(),
+            "- item\n\n  ```text\n  code\n\n~~~text\ntwo\n~~~\n"
+        );
+        for warning in &warnings[1..] {
+            assert_eq!(
+                apply_warning_fixes(source, std::slice::from_ref(warning)).unwrap(),
+                "- item\n\n  ~~~text\n  code\n\n```text\ntwo\n```\n"
+            );
+        }
     }
 }

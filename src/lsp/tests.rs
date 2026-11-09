@@ -14210,3 +14210,265 @@ fn test_lsp_config_walk_stops_at_the_profile_boundary() {
         "A workspace opened at the profile keeps its own config"
     );
 }
+
+/// A server that runs MD048 alone, enforcing `style`.
+async fn md048_server(style: &str) -> RumdlLanguageServer {
+    let server = create_test_server();
+    let mut config = crate::config::Config::default();
+    config.global.enable = vec!["MD048".into()];
+    config
+        .rules
+        .entry("MD048".into())
+        .or_default()
+        .values
+        .insert("style".into(), toml::Value::String(style.into()));
+    *server.rumdl_config.write().await = config;
+    server
+}
+
+/// The MD048 fix actions a client is offered with the cursor on `line`.
+async fn md048_quick_fixes(server: &RumdlLanguageServer, uri: &Url, text: &str, line: u32) -> Vec<CodeAction> {
+    let cursor = Position::new(line, 0);
+    server
+        .get_code_actions(uri, text, Range::new(cursor, cursor))
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|action| {
+            action.kind == Some(CodeActionKind::QUICKFIX)
+                && action.title.starts_with("Fix: ")
+                && action
+                    .diagnostics
+                    .iter()
+                    .flatten()
+                    .any(|diagnostic| diagnostic.code == Some(NumberOrString::String("MD048".into())))
+        })
+        .collect()
+}
+
+/// Apply one code action the way a client does: every edit addresses the
+/// document the action was computed for, and no two of them may overlap.
+fn apply_code_action(action: &CodeAction, uri: &Url, text: &str) -> String {
+    let mut edits: Vec<_> = action.edit.as_ref().unwrap().changes.as_ref().unwrap()[uri]
+        .iter()
+        .map(|edit| {
+            let start = crate::lsp::position::lsp_position_to_byte_offset(text, edit.range.start);
+            let end = crate::lsp::position::lsp_position_to_byte_offset(text, edit.range.end);
+            (start, end, edit.new_text.as_str())
+        })
+        .collect();
+    edits.sort_by_key(|&(start, end, _)| (start, end));
+    let mut result = String::new();
+    let mut copied = 0;
+    for (start, end, new_text) in edits {
+        assert!(copied <= start && start <= end, "overlapping edits in {action:?}");
+        result.push_str(&text[copied..start]);
+        result.push_str(new_text);
+        copied = end;
+    }
+    result.push_str(&text[copied..]);
+    result
+}
+
+/// MD048 reports the two fences of a block as separate diagnostics. The quick
+/// fix of either one must rewrite both fences: a fence converted on its own no
+/// longer pairs with the other, and the block runs on over the prose after it.
+#[tokio::test]
+async fn md048_quick_fix_on_either_fence_converts_both_fences_of_the_block() {
+    let uri = Url::parse("untitled:fences.md").unwrap();
+    // Style, document, the document with the first block converted, and the
+    // 0-indexed lines of that block's opening and closing fence.
+    let cases: [(&str, &str, &str, u32, u32); 8] = [
+        (
+            "backtick",
+            "Before.\n\n~~~text\ncode\n~~~\n\nAfter.\n",
+            "Before.\n\n```text\ncode\n```\n\nAfter.\n",
+            2,
+            4,
+        ),
+        (
+            "tilde",
+            "Before.\n\n```text\ncode\n```\n\nAfter.\n",
+            "Before.\n\n~~~text\ncode\n~~~\n\nAfter.\n",
+            2,
+            4,
+        ),
+        // The converted fences are lengthened past the inner ones.
+        (
+            "backtick",
+            "~~~markdown\n```rust\ncode\n```\n~~~\n\nAfter.\n",
+            "````markdown\n```rust\ncode\n```\n````\n\nAfter.\n",
+            0,
+            4,
+        ),
+        (
+            "tilde",
+            "```markdown\n~~~~\ncode\n~~~~\n```\n\nAfter.\n",
+            "~~~~~markdown\n~~~~\ncode\n~~~~\n~~~~~\n\nAfter.\n",
+            0,
+            4,
+        ),
+        // A block in a list item, its closing fence indented differently.
+        (
+            "backtick",
+            "- item\n\n  ~~~text\n  code\n   ~~~\n\n  After.\n",
+            "- item\n\n  ```text\n  code\n   ```\n\n  After.\n",
+            2,
+            4,
+        ),
+        // Only the block under the cursor is converted.
+        (
+            "backtick",
+            "~~~text\none\n~~~\n\n~~~text\ntwo\n~~~\n",
+            "```text\none\n```\n\n~~~text\ntwo\n~~~\n",
+            0,
+            2,
+        ),
+        // Characters wider than one byte or one UTF-16 unit, before and on the fence line.
+        (
+            "backtick",
+            "Ünï 🎉 cödé.\n\n~~~~内容 🎉\ncode 🎉\n~~~~~ \n\nAfter 🎉.\n",
+            "Ünï 🎉 cödé.\n\n````内容 🎉\ncode 🎉\n```` \n\nAfter 🎉.\n",
+            2,
+            4,
+        ),
+        // The closing fence ends the document.
+        ("backtick", "~~~text\ncode\n~~~", "```text\ncode\n```", 0, 2),
+    ];
+
+    for (style, document, converted, opener, closer) in cases {
+        let server = md048_server(style).await;
+        for (text, expected) in [
+            (document.to_string(), converted.to_string()),
+            (document.replace('\n', "\r\n"), converted.replace('\n', "\r\n")),
+        ] {
+            for line in [opener, closer] {
+                let actions = md048_quick_fixes(&server, &uri, &text, line).await;
+                assert_eq!(
+                    actions.len(),
+                    1,
+                    "one MD048 fix on line {line} of {text:?}: {actions:?}"
+                );
+                // Each diagnostic stays on its own fence.
+                let diagnostics = actions[0].diagnostics.as_ref().unwrap();
+                assert_eq!(diagnostics.len(), 1);
+                assert_eq!(diagnostics[0].range.start.line, line);
+                assert_eq!(diagnostics[0].range.end.line, line);
+
+                let fixed = apply_code_action(&actions[0], &uri, &text);
+                assert_eq!(
+                    fixed, expected,
+                    "the quick fix on line {line} of {text:?} must convert both fences"
+                );
+            }
+        }
+    }
+}
+
+/// The edits of a paired MD048 quick fix address whole fence lines in UTF-16
+/// units, whichever fence the action was requested on.
+#[tokio::test]
+async fn md048_quick_fix_edits_address_both_fence_lines_in_utf16_units() {
+    let server = md048_server("backtick").await;
+    let uri = Url::parse("untitled:fences.md").unwrap();
+    for ending in ["\n", "\r\n"] {
+        let text = "Ünï 🎉 cödé.\n\n~~~内容 🎉\ncode 🎉\n~~~\n\nAfter 🎉.\n".replace('\n', ending);
+        for line in [2, 4] {
+            let actions = md048_quick_fixes(&server, &uri, &text, line).await;
+            assert_eq!(actions.len(), 1, "{actions:?}");
+            let mut edits = actions[0].edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri].clone();
+            edits.sort_by_key(|edit| edit.range.start.line);
+            assert_eq!(
+                edits,
+                [
+                    TextEdit {
+                        // `~~~内容 🎉`: three tildes, two ideographs, a space, a surrogate pair.
+                        range: Range::new(Position::new(2, 0), Position::new(2, 8)),
+                        new_text: "```内容 🎉".into(),
+                    },
+                    TextEdit {
+                        range: Range::new(Position::new(4, 0), Position::new(4, 3)),
+                        new_text: "```".into(),
+                    },
+                ],
+                "line {line} of {text:?}"
+            );
+        }
+    }
+}
+
+/// Fix-all and formatting collect the fixes of both diagnostics of a block.
+/// Each fence is still rewritten exactly once.
+#[tokio::test]
+async fn md048_fix_all_rewrites_each_fence_of_a_block_once() {
+    let uri = Url::parse("untitled:fences.md").unwrap();
+    for (style, document, converted) in [
+        (
+            "backtick",
+            "~~~text\none\n~~~\n\n~~~markdown\n```rust\ntwo\n```\n~~~\n\n- item\n\n  ~~~text\n  three\n   ~~~\n\nAfter 🎉.\n",
+            "```text\none\n```\n\n````markdown\n```rust\ntwo\n```\n````\n\n- item\n\n  ```text\n  three\n   ```\n\nAfter 🎉.\n",
+        ),
+        (
+            "tilde",
+            "```text\none\n```\n\n```markdown\n~~~~\ntwo\n~~~~\n```\n\nAfter 🎉.\n",
+            "~~~text\none\n~~~\n\n~~~~~markdown\n~~~~\ntwo\n~~~~\n~~~~~\n\nAfter 🎉.\n",
+        ),
+    ] {
+        let server = md048_server(style).await;
+        for (text, expected) in [
+            (document.to_string(), converted.to_string()),
+            (document.replace('\n', "\r\n"), converted.replace('\n', "\r\n")),
+        ] {
+            assert_eq!(fix_all_text(&server, &uri, &text).await.as_ref(), Some(&expected));
+            assert_eq!(
+                server.apply_all_fixes(&uri, &text).await.unwrap().as_ref(),
+                Some(&expected)
+            );
+            assert_eq!(fix_all_text(&server, &uri, &expected).await, None);
+        }
+    }
+}
+
+/// Blocks MD048 offers no paired conversion for keep the actions they had.
+#[tokio::test]
+async fn md048_quick_fix_leaves_unpaired_and_exempt_fences_as_they_were() {
+    let server = md048_server("backtick").await;
+    let uri = Url::parse("untitled:fences.md").unwrap();
+
+    // A directive on the opening fence exempts the block: no fix on either fence.
+    for text in [
+        "<!-- rumdl-disable-next-line MD048 -->\n~~~text\ncode\n~~~\n\nAfter.\n",
+        "<!-- rumdl-disable MD048 -->\n~~~text\ncode\n~~~\n<!-- rumdl-enable MD048 -->\n\nAfter.\n",
+    ] {
+        for line in [1, 3] {
+            let actions = md048_quick_fixes(&server, &uri, text, line).await;
+            assert!(actions.is_empty(), "line {line} of {text:?}: {actions:?}");
+        }
+        assert_eq!(fix_all_text(&server, &uri, text).await, None);
+    }
+
+    // The block after an exempt one is still converted as a pair.
+    let text = "<!-- rumdl-disable-next-line MD048 -->\n~~~text\none\n~~~\n\n~~~text\ntwo\n~~~\n";
+    let expected = "<!-- rumdl-disable-next-line MD048 -->\n~~~text\none\n~~~\n\n```text\ntwo\n```\n";
+    assert_eq!(fix_all_text(&server, &uri, text).await.as_deref(), Some(expected));
+
+    // An info string a backtick fence cannot carry: reported, never converted.
+    let text = "~~~foo `bar`\ncode\n~~~\n\nAfter.\n";
+    for line in [0, 2] {
+        let actions = md048_quick_fixes(&server, &uri, text, line).await;
+        assert!(actions.is_empty(), "line {line} of {text:?}: {actions:?}");
+    }
+
+    // An unclosed block has one fence to convert, lengthened past its content.
+    let text = "Before.\n\n~~~text\n```\ncode\n";
+    let actions = md048_quick_fixes(&server, &uri, text, 2).await;
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    assert_eq!(
+        actions[0].edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri].len(),
+        1
+    );
+    assert_eq!(
+        apply_code_action(&actions[0], &uri, text),
+        "Before.\n\n````text\n```\ncode\n"
+    );
+}
