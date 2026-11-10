@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3](https://github.com/rvben/rumdl/compare/v0.3.2...v0.3.3) - 2026-11-10
+
+### Added
+
+- **MD088**: add normalize-spaces option for non-ASCII spaces ([f80566c](https://github.com/rvben/rumdl/commit/f80566c7d5c92b8a77a26348dc1d3961f46e81f6))
+- **MD013**: keep two spaces after sentences when reflowing (#979) ([c89b5e6](https://github.com/rvben/rumdl/commit/c89b5e657fbda9c3bd16998111a38511f2820c20))
+- **MD022**: add configurable nested heading spacing (#980) ([6387c03](https://github.com/rvben/rumdl/commit/6387c03f5e86366d48795c3f639f7a68b7218612))
+- **MD012**: report one warning per blank-line run with its exact range ([20c5727](https://github.com/rvben/rumdl/commit/20c57276426e576c58ef80b3461c88c151d0c3bc))
+- **MD051**: name the closest existing anchor when a link fragment is missing ([ef3a0eb](https://github.com/rvben/rumdl/commit/ef3a0eb60375c5b844514780207770da80ad0c95))
+
+### Fixed
+
+- **deps**: update pulldown-cmark to 0.13.6 ([72dea1a](https://github.com/rvben/rumdl/commit/72dea1a31abab9e66ef834adaade73cd1eb36d41))
+- **fmt**: keep full analysis when a comment opener is left as text ([f1028e7](https://github.com/rvben/rumdl/commit/f1028e75cd70db1db4ff6045fab87ee3a003246f))
+- **MD057**: check the definitions links resolve to, as the parser reads them ([b2bc481](https://github.com/rvben/rumdl/commit/b2bc481a7b75c23427c7b8856effd79be897f3e7))
+- **lsp**: rename only the link fragments that name a changed anchor ([2ef8fbd](https://github.com/rvben/rumdl/commit/2ef8fbdecfef4fb29e121e1c52c7b5e76ac4030f))
+- **MD051**: check fragments in reference definitions ([b87ee91](https://github.com/rvben/rumdl/commit/b87ee910f1a7565ec0dcdef463c4c22e3b96a69a))
+- **workspace**: build the cross-file link index from parsed links ([7918bc4](https://github.com/rvben/rumdl/commit/7918bc428055d00f2d94be594d15343a2f2bf879))
+- **parser**: recognize reference definitions only where the Markdown parser does ([fdb95f7](https://github.com/rvben/rumdl/commit/fdb95f715792012747eb754655170706fe473efc))
+- **myst**: treat targets, block breaks and comments as structural lines ([1db8e75](https://github.com/rvben/rumdl/commit/1db8e75968aa68d3a656c525d671bb06e2c64090))
+- **parser**: lint a tab-indented list in a definition after non-ASCII text ([2c0ac8f](https://github.com/rvben/rumdl/commit/2c0ac8f55f16d9b0ee83fec9b13cb60464be8201))
+- **MD048**: pair code fence edits in editor quick fixes ([8e9e300](https://github.com/rvben/rumdl/commit/8e9e300cf6bd392e17904b622ff98041f535222f))
+- **MD048**: keep disabled code fences paired ([fb4450e](https://github.com/rvben/rumdl/commit/fb4450e284e77b685a04746e1e390dddfc8c1ef7))
+- **MD013**: preserve disabled lines during paragraph reflow ([e647d7e](https://github.com/rvben/rumdl/commit/e647d7e07cf0a9e95751cac9e17a525d1a091679))
+- **MD046**: count code blocks from the parser when detecting the consistent style ([2bd9549](https://github.com/rvben/rumdl/commit/2bd95498a6e28976da419a6458d47a20ecb26585))
+- **MD052**: bound example sections by parsed headings ([ff8df5f](https://github.com/rvben/rumdl/commit/ff8df5ff0b584e82942c21bd074bb89217247c42))
+- **MD013**: keep footnote code blocks verbatim during reflow ([7ca1c09](https://github.com/rvben/rumdl/commit/7ca1c09edd28eae4b72911ed3040510b720b5182))
+- **check-assets**: match filenames at boundaries and read sources in their configured flavor ([f94260f](https://github.com/rvben/rumdl/commit/f94260f0fff8a392a901ea130467db4cac2e474e))
+- **MD067**: end the out-of-order range at the last definition line ([7b0a6a7](https://github.com/rvben/rumdl/commit/7b0a6a768a3bedd5b30804c78bcb1a0774330344))
+- **cli**: skip mimalloc's process-exit cleanup on Windows ([7d09be6](https://github.com/rvben/rumdl/commit/7d09be6a2edf94bd2da24ca5939b966b8297c66e))
+- **cli**: join the workspace index drop thread before the check run returns ([dd074bd](https://github.com/rvben/rumdl/commit/dd074bd398b36b8033fd936beb7720345918cf66))
+- **lsp**: stop publishing empty diagnostics to pull-diagnostics clients ([82bc966](https://github.com/rvben/rumdl/commit/82bc9661bc11537916e5ff410ffc5c68a73ab431))
+- **parser**: treat bracket text without a reference definition as literal text ([56e6610](https://github.com/rvben/rumdl/commit/56e66106394996647dbc769803ca5444188b9325))
+
+### Performance
+
+- **discovery**: probe each parent directory for a repository once per walk ([4c14771](https://github.com/rvben/rumdl/commit/4c14771024531643e809bd96b592f4d1ffcb4a80))
+- **output**: serialize JSON warnings without building intermediate values ([a9a5f07](https://github.com/rvben/rumdl/commit/a9a5f079d3db17bb665e6b95831bfbe35a604e51))
+- **discovery**: derive walked directory identities from their parents ([4a850d9](https://github.com/rvben/rumdl/commit/4a850d915e759494cd7ef169396faba36c23d82a))
+- **workspace**: reuse the cached workspace index without copying or rewriting it ([b8f2e1c](https://github.com/rvben/rumdl/commit/b8f2e1c2183c43d90ee863832f5b878d69741714))
+- **discovery**: resolve each walked file once ([3618cd4](https://github.com/rvben/rumdl/commit/3618cd45a1454235927db184db81a0230d960fc0))
+- **cache**: build the code-block processor only for hits with tool verdicts ([0f05859](https://github.com/rvben/rumdl/commit/0f05859269e20bc70092cc73c0442c6fe672ca27))
+- **discovery**: walk directories in parallel during file discovery ([ba13203](https://github.com/rvben/rumdl/commit/ba13203ad1aac0c6b73cc9b664739ffefd8234f6))
+
 ## [0.3.2](https://github.com/rvben/rumdl/compare/v0.3.1...v0.3.2) - 2026-10-28
 
 ### Fixed
