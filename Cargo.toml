@@ -78,7 +78,7 @@ log = "0.4.34"
 memchr = "2.8"
 # `default-features` would add `getopts` for pulldown-cmark's own CLI binary,
 # which rumdl never builds. `html` is the renderer MD085 uses.
-pulldown-cmark = { version = "0.13.5", default-features = false, features = ["html"] }
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
 unicase = "2.10"
 # Identifier classification for the bundled markdown-rs parser.
 unicode-id = { version = "0.3", features = ["no_std"] }
