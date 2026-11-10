@@ -615,11 +615,8 @@ impl MD057ExistingRelativeLinks {
             });
         }
 
-        for reference in ctx.reference_definitions() {
-            if ctx.line_info(reference.line).is_some_and(|info| info.in_front_matter) {
-                continue;
-            }
-            let url = reference.url.as_str();
+        for reference in ctx.body_reference_definitions() {
+            let url = reference.url;
             if url.is_empty() || self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
                 continue;
             }
@@ -1743,11 +1740,11 @@ impl Rule for MD057ExistingRelativeLinks {
         }
 
         // Also process reference definitions: [ref]: ./path.md
-        for ref_def in ctx.reference_definitions() {
-            if ctx.line_info(ref_def.line).is_some_and(|info| info.in_front_matter) {
-                continue;
-            }
-            let url = &ref_def.url;
+        // Only the definitions the parser reads, with their destinations as it
+        // decodes them: text after a paragraph line, indented as code, or under
+        // a label defined earlier defines nothing.
+        for definition in ctx.body_reference_definitions() {
+            let url = definition.url;
 
             // Skip empty URLs
             if url.is_empty() {
@@ -1761,11 +1758,16 @@ impl Rule for MD057ExistingRelativeLinks {
 
             // Where this definition's destination sits, shared by every report
             // on it. Without a located destination a warning falls back to the
-            // start of the definition's line and offers no fix.
-            let url_range = ref_def.destination_range(ctx.content);
-            let (line, col) = url_range
-                .as_ref()
-                .map_or((ref_def.line, 1), |range| position(range.start));
+            // definition's label. Only a destination written verbatim is
+            // rewritten: a fix derived from the decoded value would change
+            // what an escape or a character reference spells.
+            let url_range = definition.verbatim_range();
+            let (line, col) = position(
+                definition
+                    .destination
+                    .as_ref()
+                    .map_or(definition.start, |range| range.start),
+            );
             let end_col = col + url.chars().count();
 
             // Handle absolute paths based on config
@@ -3717,6 +3719,30 @@ Use [ref] here.
             result.iter().any(|w| w.message.contains("ref-missing.md")),
             "Should warn about ref-missing.md"
         );
+    }
+
+    #[test]
+    fn test_only_parsed_reference_definitions_are_checked() {
+        let temp_dir = tempdir().unwrap();
+        let rule = MD057ExistingRelativeLinks::new().with_path(temp_dir.path());
+        // (text, line of the definition the parser reads, if any)
+        let cases: &[(&str, Option<usize>)] = &[
+            ("[r]: missing.md\n", Some(1)),
+            ("- [r]: missing.md\n", Some(1)),
+            ("> [r]:\n> missing.md\n", Some(2)),
+            // A definition cannot interrupt a paragraph.
+            ("para\n[r]: missing.md\n", None),
+            ("- item\n  [r]: missing.md\n", None),
+            // Indented four columns, it is code.
+            ("    [r]: missing.md\n", None),
+            // Trailing text that is not a title makes it a paragraph.
+            ("[r]: missing.md junk\n", None),
+        ];
+        for &(content, line) in cases {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let lines: Vec<_> = rule.check(&ctx).unwrap().iter().map(|w| w.line).collect();
+            assert_eq!(lines, line.into_iter().collect::<Vec<_>>(), "{content:?}");
+        }
     }
 
     #[test]
@@ -6195,8 +6221,8 @@ mod cached_position_tests {
                         );
                     }
                 }
-                let definition = &ctx.reference_definitions()[0];
-                let range = definition.destination_range(&content).unwrap();
+                let definition = ctx.body_reference_definitions().next().unwrap();
+                let range = definition.destination.clone().unwrap();
                 let (line, column) = ctx.offset_to_line_col(range.start);
                 let warning = warnings.last().unwrap();
                 assert_eq!(

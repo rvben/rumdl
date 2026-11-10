@@ -7095,7 +7095,7 @@ mod reference_definitions {
                 .unwrap()
                 .iter()
                 .any(|w| w.message.contains("[b]"));
-            // MD057 checks every definition.
+            // MD057 checks the definition references resolve to.
             let checked = crate::rules::MD057ExistingRelativeLinks::default()
                 .with_path(dir.path())
                 .check(&ctx)
@@ -7105,7 +7105,7 @@ mod reference_definitions {
             if listed != *defined
                 || resolved != defined.first().copied()
                 || unused == defined.is_empty()
-                || checked != defined.contains(&"missing-b.md")
+                || checked != (defined.first() == Some(&"missing-b.md"))
             {
                 wrong.push(format!(
                     "{content:?}: listed {listed:?}, resolved {resolved:?}, MD053 {unused}, MD057 {checked}"

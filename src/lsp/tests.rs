@@ -5720,7 +5720,7 @@ fn definitions_outside_the_body_never_shadow_a_body_definition() {
             .into_iter()
             .map(|warning| warning.message)
             .collect();
-        let md057_real = checked.iter().any(|message| message.contains("'real.md#g'"));
+        let md057_real = checked.len() == 1 && checked[0].contains("'real.md#g'");
         if indexed != ["real.md"] || resolved != Some("real.md#g") || !md057_real {
             wrong.push(format!(
                 "{flavor:?} {content:?}: indexed {indexed:?}, resolved {resolved:?}, MD057 {checked:?}"
