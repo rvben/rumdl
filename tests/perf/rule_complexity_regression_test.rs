@@ -1468,6 +1468,77 @@ fn test_md095_source_positions_linear_complexity() {
     }
 }
 
+#[test]
+fn test_md088_space_fix_guard_linear_complexity() {
+    let mut config = rumdl_lib::config::Config::default();
+    config
+        .rules
+        .entry("MD088".to_string())
+        .or_default()
+        .values
+        .insert("normalize-spaces".to_string(), true.into());
+    let rule = MD088QuotesDashes::from_config(&config);
+    // Every space is one an ASCII space would change the parse around: each in its
+    // own block, in its own item of one list, or inside a single block quote that
+    // cannot be split.
+    for (name, unit) in [
+        ("separate blocks", "# title\u{a0}###\n\n"),
+        ("one list block", "- [x]\u{a0}done\n"),
+        ("one block quote", "> - [x]\u{a0}done\n"),
+    ] {
+        let durations: Vec<_> = [250, 500, 1000]
+            .into_iter()
+            .map(|count| {
+                let content = unit.repeat(count);
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), count, "{name}");
+                assert!(
+                    warnings.iter().all(|w| w.fix.is_none()),
+                    "{name}: an unsafe space was offered a fix"
+                );
+                measure_rule_time_with_context(&*rule, &ctx, 3)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD088 space guard {name}"), &durations, 3.0);
+    }
+}
+
+/// A single line holding many spaces is read once, whether the spaces form one long
+/// run or sit between tokens that are all block markers.
+#[test]
+fn test_md088_spaces_on_one_line_linear_complexity() {
+    let mut config = rumdl_lib::config::Config::default();
+    config
+        .rules
+        .entry("MD088".to_string())
+        .or_default()
+        .values
+        .insert("normalize-spaces".to_string(), true.into());
+    let rule = MD088QuotesDashes::from_config(&config);
+    // (name, text before the spaces, repeated unit, text after them, fix offered)
+    for (name, head, unit, tail, fixable) in [
+        ("one long run", "a", "\u{a0}", "b\n", true),
+        ("marker tokens", "", "-\u{a0}", "x\n", false),
+    ] {
+        let durations: Vec<_> = [4000, 8000, 16000]
+            .into_iter()
+            .map(|count| {
+                let content = format!("{head}{}{tail}", unit.repeat(count));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), count, "{name}");
+                assert!(
+                    warnings.iter().all(|w| w.fix.is_some() == fixable),
+                    "{name}: expected every space to be fixable = {fixable}"
+                );
+                measure_rule_time_with_context(&*rule, &ctx, 3)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD088 spaces on one line, {name}"), &durations, 3.0);
+    }
+}
+
 /// Assert linear complexity by checking growth ratios
 fn assert_linear_complexity(name: &str, durations: &[Duration], threshold: f64) {
     assert!(durations.len() >= 3, "Need at least 3 measurements for ratio check");

@@ -15,6 +15,11 @@ pub(super) struct MD088Config {
     #[serde(default = "default_normalize_dashes")]
     pub(super) normalize_dashes: bool,
 
+    /// Enables linting and autofix for non-ASCII space characters
+    /// (no-break space, narrow no-break space, en/em spaces, ideographic space, ...).
+    #[serde(default = "default_normalize_spaces")]
+    pub(super) normalize_spaces: bool,
+
     /// Unicode characters to allow as-is.
     ///
     /// Any look-alike character with a codepoint present in this list
@@ -29,12 +34,16 @@ fn default_normalize_quotes() -> bool {
 fn default_normalize_dashes() -> bool {
     false
 }
+fn default_normalize_spaces() -> bool {
+    false
+}
 
 impl Default for MD088Config {
     fn default() -> Self {
         Self {
             normalize_quotes: default_normalize_quotes(),
             normalize_dashes: default_normalize_dashes(),
+            normalize_spaces: default_normalize_spaces(),
             allow: HashSet::new(),
         }
     }
@@ -75,6 +84,7 @@ mod tests {
         let config = MD088Config::default();
         assert!(config.normalize_quotes);
         assert!(!config.normalize_dashes);
+        assert!(!config.normalize_spaces);
         assert!(config.allow.is_empty());
     }
 
@@ -88,6 +98,20 @@ mod tests {
         .unwrap();
 
         assert!(config.normalize_dashes);
+    }
+
+    #[test]
+    fn test_enable_spaces_deserializes() {
+        let config: MD088Config = toml::from_str(
+            r#"
+            normalize-spaces = true
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.normalize_spaces);
+        assert!(config.normalize_quotes);
+        assert!(!config.normalize_dashes);
     }
 
     #[test]

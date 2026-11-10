@@ -63,6 +63,7 @@ mod cli_md070_container_fences_test;
 mod cli_md077_aligned_structure_test;
 mod cli_md077_continuation_structure_test;
 mod cli_md077_mkdocs_nesting_test;
+mod cli_md088_spaces_regions_test;
 mod cli_md089_cjk_spacing_test;
 mod cli_myst_structural_lines_test;
 mod cli_non_commonmark_whitespace_test;
