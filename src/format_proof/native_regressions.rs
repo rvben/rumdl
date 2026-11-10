@@ -90,4 +90,5 @@ pub(crate) const SOURCES: &[&str] = &[
     "text `\n<video markdown=\"1\">\n` more\n\nafter\n",
     "text `code\nmore` <video markdown=\"span\">\n\nafter\n",
     "text `code\nmore` <video markdown=\"span\">\n\n|a|b|\n|-|-|\n|1|\n",
+    "3. third\ntext <!-- comment\n\n3. third\nwww.a*a*~~~\n-->\n</span>## H\n3. third\n`inline\n",
 ];

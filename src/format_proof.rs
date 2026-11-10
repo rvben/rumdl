@@ -766,6 +766,16 @@ impl<'a> FormatProof<'a> {
             let end = ranges.partition_point(|range| range.start <= pos);
             end > 0 && pos < ranges[end - 1].end
         };
+        // Native rules read a comment from its opener to the next `-->`, even
+        // across the blank line where the parser ends the paragraph holding
+        // the opener. An opener the parser left as text can therefore hide
+        // parsed blocks from the native view; no policy is certified then.
+        if memchr::memmem::find_iter(source.as_bytes(), b"<!--")
+            .any(|opener| !contains(&literals, opener) && !contains(&inline_code, opener))
+        {
+            facts.bits = 0;
+            return facts;
+        }
         if has_config_candidates
             && (unknown_html
                 || crate::inline_config::inline_rule_option_candidate_offsets(source)
