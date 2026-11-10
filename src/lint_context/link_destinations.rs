@@ -35,6 +35,15 @@ impl SourceDestination {
         Some(Self { range, verbatim })
     }
 
+    /// The written fragment, after its `#`, when the destination is verbatim.
+    fn fragment(&self, content: &str) -> Option<Range<usize>> {
+        if !self.verbatim {
+            return None;
+        }
+        let hash = content[self.range.clone()].find('#')?;
+        Some(self.range.start + hash + 1..self.range.end)
+    }
+
     fn body<'s>(&self, link: &'s ParsedLink<'_>) -> BodyLinkDestination<'s> {
         let (url, fragment) = split_fragment(&link.url);
         BodyLinkDestination {
@@ -234,6 +243,26 @@ impl<'a> LintContext<'a> {
             })
     }
 
+    /// The fragments written in the destinations of body inline links,
+    /// fragment-only destinations included, located in the source.
+    ///
+    /// A link whose source spells the destination differently from the URL the
+    /// parser read, as a backslash escape or an entity does, is left out: no
+    /// byte range of the source holds the fragment the parser resolved.
+    pub(crate) fn body_link_fragments(&self) -> impl Iterator<Item = BodyLinkFragment<'a>> + '_ {
+        let content = self.content;
+        let facts = self.link_destinations();
+        facts.body_link_indices(self).iter().filter_map(move |&i| {
+            let destination = facts.destinations[i].as_ref()?;
+            let fragment = destination.fragment(content)?;
+            Some(BodyLinkFragment {
+                path: &content[destination.range.start..fragment.start - 1],
+                fragment: &content[fragment.clone()],
+                range: fragment,
+            })
+        })
+    }
+
     /// The link reference definitions of the document body: those the
     /// parser read, which excludes text that only resembles one (after a
     /// paragraph line, indented as code), and those the flavor reads, outside
@@ -261,10 +290,15 @@ impl<'a> LintContext<'a> {
         indices.iter().map(move |&index| {
             let definition = &self.definition_candidates[index].definition;
             let start = definition.span.start;
+            let destination = definition_destination_range(content, &definition.span, &definition.dest);
+            let verbatim = destination
+                .as_ref()
+                .is_some_and(|range| content[range.clone()] == *definition.dest);
             BodyDefinition {
                 start,
                 url: &definition.dest,
-                destination: definition_destination_range(content, &definition.span, &definition.dest),
+                destination,
+                verbatim,
             }
         })
     }
@@ -280,6 +314,33 @@ pub(crate) struct BodyDefinition<'a> {
     /// Byte range of the written destination, without angle brackets. `None`
     /// when no place in the definition is written so that it reads as `url`.
     pub destination: Option<Range<usize>>,
+    verbatim: bool,
+}
+
+impl BodyDefinition<'_> {
+    /// The written destination, when it is `url` byte for byte and so may be
+    /// rewritten.
+    pub(crate) fn verbatim_range(&self) -> Option<Range<usize>> {
+        self.destination.clone().filter(|_| self.verbatim)
+    }
+
+    /// Byte range of the written fragment, after its `#`, when the
+    /// destination is written verbatim and has one.
+    pub(crate) fn fragment_range(&self) -> Option<Range<usize>> {
+        let range = self.verbatim_range()?;
+        let hash = self.url.find('#')?;
+        Some(range.start + hash + 1..range.end)
+    }
+}
+
+/// The fragment of one body inline link's destination, located in the source.
+pub(crate) struct BodyLinkFragment<'a> {
+    /// The destination's path part as written; empty for a fragment-only link.
+    pub path: &'a str,
+    /// The fragment as written, without its `#`.
+    pub fragment: &'a str,
+    /// Byte range of `fragment` in the document.
+    pub range: Range<usize>,
 }
 
 /// Byte range of an inline link's destination, without angle brackets, or
@@ -594,7 +655,7 @@ mod tests {
         let mut checked = 0;
         for (first, continuation) in CONTAINERS {
             for form in DEFINITION_FORMS {
-                for &(written, _) in SPELLINGS {
+                for &(written, is_verbatim) in SPELLINGS {
                     if written.starts_with('>') && form.contains("\nCD") {
                         continue;
                     }
@@ -625,6 +686,14 @@ mod tests {
                             definition.url,
                             "{content:?}"
                         );
+                        assert_eq!(
+                            definition.verbatim_range().is_some(),
+                            &content[range] == definition.url,
+                            "{content:?}"
+                        );
+                        if is_verbatim {
+                            assert!(definition.verbatim_range().is_some(), "{content:?}");
+                        }
                         checked += 1;
                     }
                 }
@@ -669,5 +738,24 @@ mod tests {
             let (_, definition) = parsed.reference_definitions().iter().next().expect(written);
             assert_eq!(decode_destination(written), definition.dest.as_ref(), "{written:?}");
         }
+    }
+
+    #[test]
+    fn body_link_fragments_cover_exactly_the_written_fragment() {
+        let content = "[a](#one) [b](<x y.md#two> \"t#no\") [c](f(1).md#three)\n\
+            [d](e.md#four 'x') [esc](e.md#fi\\_ve) `[code](#six)` [ref][r] [none](g.md)\n\n[r]: #seven\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let found: Vec<_> = ctx
+            .body_link_fragments()
+            .map(|link| {
+                assert_eq!(&content[link.range.clone()], link.fragment);
+                (link.path, link.fragment)
+            })
+            .collect();
+        // The escaped fragment reads `fi_ve`, which no byte range spells.
+        assert_eq!(
+            found,
+            [("", "one"), ("x y.md", "two"), ("f(1).md", "three"), ("e.md", "four")]
+        );
     }
 }

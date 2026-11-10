@@ -109,6 +109,23 @@ and code actions are unaffected. The related navigation features (hover,
 go-to-definition, references, rename) are controlled separately by
 `enableLinkNavigation`.
 
+### Heading references and rename
+
+Find-references on a heading lists the links to it from inline links and
+reference definitions (`[label]: guide.md#setup`) across the workspace. Text
+that only looks like a link, in a code span, a code block or an HTML comment,
+is not a reference.
+
+Renaming a heading rewrites its text and the fragment of every link to it. A
+link counts when it leads to the heading's file and its fragment names the
+heading's anchor, ignoring ASCII case and percent-encoding, the way
+[MD051](md051.md) resolves it. Only the fragment is edited, so link text and
+titles stay as written, and a link to `#setup-guide` or to another file's
+`#setup` is left alone when `Setup` is renamed. When several headings share the renamed text, the numbered
+anchors of the later ones (`#setup-1`, `#setup-2`) can move, and links to them
+are updated too. A rename is refused when the new name gives the heading the
+anchor of another heading.
+
 ## Editor configuration
 
 ### Neovim (nvim-lspconfig)
