@@ -111,13 +111,17 @@ fn warnings(content: &str) -> Vec<(usize, String)> {
     fs::write(&path, content).unwrap();
     rumdl(&["check", "--no-cache", "--isolated", "--enable", "MD046"], &path)
         .lines()
-        .filter(|line| line.contains("[MD046]"))
         .filter_map(|line| {
-            let mut parts = line.splitn(4, ':');
-            parts.next()?;
-            let row = parts.next()?.parse().ok()?;
-            let message = parts.nth(1)?.trim().trim_start_matches("[MD046]").trim().to_string();
-            Some((row, message.trim_end_matches(" [*]").to_string()))
+            // The path can itself contain colons (a Windows drive letter), so
+            // the row and column are read from the end of the location.
+            let (location, message) = line.split_once(": [MD046] ")?;
+            let mut fields = location.rsplitn(3, ':');
+            fields.next()?;
+            let row = fields
+                .next()
+                .and_then(|row| row.parse().ok())
+                .unwrap_or_else(|| panic!("no row in {line:?}"));
+            Some((row, message.trim().trim_end_matches(" [*]").to_string()))
         })
         .collect()
 }
