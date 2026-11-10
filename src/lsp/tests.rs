@@ -5581,6 +5581,256 @@ fn link_index_holds_parsed_links_and_definitions_only() {
     );
 }
 
+/// Regions of a document, with `@@` where a link goes, and whether the renderer
+/// reads that place as Markdown of the document body.
+const LINK_REGIONS: &[(crate::config::MarkdownFlavor, &str, bool)] = {
+    use crate::config::MarkdownFlavor::*;
+    &[
+        (Standard, "@@", true),
+        (Standard, "> @@", true),
+        (Standard, "```\n@@\n```", false),
+        (Standard, "~~~\n@@\n~~~", false),
+        (Standard, "    @@", false),
+        (Standard, "---\nk: v\n@@\n---", false),
+        (Standard, "<!--\n@@\n-->", false),
+        (Standard, "<div>\n@@\n</div>", false),
+        (Standard, "$$\n@@\n$$", false),
+        (Standard, "{%\n@@\n%}", false),
+        (MkDocs, "$$\n@@\n$$", false),
+        (MkDocs, "/// note\n@@\n///", false),
+        (Kramdown, "{::comment}\n@@\n{:/comment}", false),
+        (Kramdown, "{::nomarkdown}\n@@\n{:/nomarkdown}", false),
+        (Obsidian, "%%\n@@\n%%", false),
+        (MDX, "{/*\n@@\n*/}", false),
+        (MDX, "{\n@@\n}", false),
+        (Hugo, "{{< note\n@@\n>}}", false),
+        (MyST, "```{code-block}\n@@\n```", false),
+        (Quarto, "::: {.note}\n@@\n:::", true),
+        (Quarto, "::: {.note}\n\n@@\n\n:::", true),
+    ]
+};
+
+/// Where a flavor's own block fence ends the block before it, a definition
+/// written directly after or before the fence line is one: the index holds
+/// it, MD051 checks its fragment and references resolve to it. Where the
+/// fence line is plain text, a line directly after it continues that
+/// paragraph and is text, while one after a blank line is a definition.
+#[test]
+fn definitions_beside_flavor_fences() {
+    use crate::config::MarkdownFlavor::{Quarto, Standard};
+    use crate::rule::Rule;
+    let rules = crate::lsp::index_worker::cross_file_rules(&Config::default());
+    let cases = [
+        (Quarto, "::: {.note}\n@@\n:::", true),
+        (Quarto, "::: {.note}\nText.\n\n@@\n:::", true),
+        (Quarto, ":::: {.outer}\n::: {.inner}\n@@\n:::\n::::", true),
+        (Quarto, ":::: {.outer}\n::: {.inner}\nText.\n:::\n@@\n::::", true),
+        (Standard, "::: {.note}\n@@\n:::", false),
+        (Standard, "::: {.note}\nText.\n\n@@\n:::", true),
+    ];
+    let mut wrong = Vec::new();
+    for (flavor, region, is_definition) in cases {
+        let place = |definition: &str| format!("{}\n\nSee [text][d].\n\n# Real\n", region.replace("@@", definition));
+
+        let content = place("[d]: t.md#gone");
+        let index = crate::build_file_index_only(&content, &rules, flavor, Some(std::path::PathBuf::from("s.md")));
+        let indexed = index
+            .cross_file_links
+            .iter()
+            .any(|link| link.origin == crate::workspace_index::LinkOrigin::Body && link.fragment == "gone");
+        let ctx = crate::lint_context::LintContext::new(&content, flavor, None);
+        let resolved = ctx.get_reference_url("d") == Some("t.md#gone");
+        if indexed != is_definition || resolved != is_definition {
+            wrong.push(format!(
+                "{flavor:?} {content:?}: indexed {indexed}, resolved {resolved}"
+            ));
+        }
+
+        let content = place("[d]: #gone");
+        let ctx = crate::lint_context::LintContext::new(&content, flavor, None);
+        let warnings = crate::rules::MD051LinkFragments::default().check(&ctx).unwrap();
+        if warnings.iter().any(|warning| warning.message.contains("'#gone'")) != is_definition {
+            wrong.push(format!("MD051 {flavor:?} {content:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Text shaped like a definition outside the document body never shadows the
+/// body definition of the same label: the index holds the body definition,
+/// MD057 and MD051 check it, and references resolve to it.
+#[test]
+fn definitions_outside_the_body_never_shadow_a_body_definition() {
+    use crate::config::MarkdownFlavor::*;
+    use crate::rule::Rule;
+    let rules = crate::lsp::index_worker::cross_file_rules(&Config::default());
+    let cases = [
+        (Standard, "---\n@@\n---", "@@"),
+        (Standard, "---\n@@\nk: v\n---", "@@"),
+        (Standard, "---\nk: v\n@@\n---", "@@"),
+        (Standard, "+++\n@@\n+++", "@@"),
+        (Standard, "{\n\"k\": 1,\n@@\n}", "@@"),
+        (MkDocs, "---\n@@\n---", "@@"),
+        (Pandoc, "---\n@@\n---", "@@"),
+        (Quarto, "---\n@@\n---", "@@"),
+        (Quarto, "---\n@@\n---", "::: {.n}\n@@\n:::"),
+        (MDX, "---\n@@\n---", "@@"),
+        (Standard, "<!--\n@@\n-->", "@@"),
+        (Standard, "<div>\n@@\n</div>", "@@"),
+        (Standard, "```\n@@\n```", "@@"),
+        (Standard, "~~~\n@@\n~~~", "@@"),
+        (Standard, "Text.\n\n    @@", "@@"),
+        (Standard, "$$\n@@\n$$", "@@"),
+        (Standard, "{%\n@@\n%}", "@@"),
+        (MkDocs, "/// note\n@@\n///", "@@"),
+        (MkDocs, "::: my.module\n    @@", "@@"),
+        (MyST, "```{code-block}\n@@\n```", "@@"),
+        (MDX, "{/*\n@@\n*/}", "@@"),
+        (MDX, "{\n@@\n}", "@@"),
+        (Kramdown, "{::comment}\n@@\n{:/comment}", "@@"),
+        (Kramdown, "{::nomarkdown}\n@@\n{:/nomarkdown}", "@@"),
+        (Obsidian, "%%\n@@\n%%", "@@"),
+        (Hugo, "{{< note\n@@\n>}}", "@@"),
+    ];
+    let dir = tempfile::tempdir().unwrap();
+    let mut wrong = Vec::new();
+    for (flavor, region, body) in cases {
+        let document = |shadow: &str, real: &str| {
+            format!(
+                "{}\n\n{}\n\nSee [x][r].\n\n# Real\n",
+                region.replace("@@", &format!("[r]: {shadow}")),
+                body.replace("@@", &format!("[r]: {real}"))
+            )
+        };
+
+        let content = document("shadow.md#s", "real.md#g");
+        let index = crate::build_file_index_only(&content, &rules, flavor, Some(std::path::PathBuf::from("s.md")));
+        let indexed: Vec<_> = index
+            .cross_file_links
+            .iter()
+            .filter(|link| link.origin == crate::workspace_index::LinkOrigin::Body)
+            .map(|link| link.target_path.as_str())
+            .collect();
+        let ctx = crate::lint_context::LintContext::new(&content, flavor, None);
+        let resolved = ctx.get_reference_url("r");
+        let checked: Vec<_> = crate::rules::MD057ExistingRelativeLinks::default()
+            .with_path(dir.path())
+            .check(&ctx)
+            .unwrap()
+            .into_iter()
+            .map(|warning| warning.message)
+            .collect();
+        let md057_real = checked.iter().any(|message| message.contains("'real.md#g'"));
+        if indexed != ["real.md"] || resolved != Some("real.md#g") || !md057_real {
+            wrong.push(format!(
+                "{flavor:?} {content:?}: indexed {indexed:?}, resolved {resolved:?}, MD057 {checked:?}"
+            ));
+        }
+
+        let content = document("#shadow", "#gone");
+        let ctx = crate::lint_context::LintContext::new(&content, flavor, None);
+        let anchors: Vec<_> = crate::rules::MD051LinkFragments::default()
+            .check(&ctx)
+            .unwrap()
+            .into_iter()
+            .map(|warning| warning.message)
+            .collect();
+        if anchors.len() != 1 || !anchors[0].contains("'#gone'") {
+            wrong.push(format!("MD051 {flavor:?} {content:?}: {anchors:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A line shaped like a definition inside the title of another definition is
+/// title text: the index holds no link for it and MD051 does not check it,
+/// while the same line after a closed title is a definition both see.
+#[test]
+fn a_definition_shaped_line_inside_a_title_is_neither_indexed_nor_checked() {
+    use crate::rule::Rule;
+    let rules = crate::lsp::index_worker::cross_file_rules(&Config::default());
+    let flavor = crate::config::MarkdownFlavor::Standard;
+    let cases = [
+        ("[a]: #real \"t\n@@\n\"", false),
+        ("[a]: #real 't\n@@\n'", false),
+        ("[a]: #real (t\n@@\n)", false),
+        ("[a]: #real \"t\nmore\n@@\nmore\n\"", false),
+        ("> [a]: #real \"t\n> @@\n> \"", false),
+        ("- [a]: #real \"t\n  @@\n  \"", false),
+        ("[a]: #real \"t\"\n@@", true),
+        ("[a]: #real \"t\nx\"\n@@", true),
+    ];
+    let mut wrong = Vec::new();
+    for (case, is_definition) in cases {
+        let content = format!(
+            "# Real\n\n{}\n\nSee [x][a] and [y][b].\n",
+            case.replace("@@", "[b]: t.md#gone")
+        );
+        let index = crate::build_file_index_only(&content, &rules, flavor, Some(std::path::PathBuf::from("s.md")));
+        let indexed = index
+            .cross_file_links
+            .iter()
+            .any(|link| link.origin == crate::workspace_index::LinkOrigin::Body && link.target_path == "t.md");
+        if indexed != is_definition {
+            wrong.push(format!("index {content:?}: {indexed}"));
+        }
+
+        let content = format!(
+            "# Real\n\n{}\n\nSee [x][a] and [y][b].\n",
+            case.replace("@@", "[b]: #gone")
+        );
+        let ctx = crate::lint_context::LintContext::new(&content, flavor, None);
+        let checked = crate::rules::MD051LinkFragments::default()
+            .check(&ctx)
+            .unwrap()
+            .iter()
+            .any(|warning| warning.message.contains("'#gone'"));
+        if checked != is_definition {
+            wrong.push(format!("MD051 {content:?}: {checked}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// An inline link and a reference definition written in the same place are
+/// both read as links, or both as text: the index holds both or neither, and
+/// MD051 checks both or neither.
+#[test]
+fn inline_links_and_definitions_share_one_notion_of_body() {
+    use crate::rule::Rule;
+    let rules = crate::lsp::index_worker::cross_file_rules(&Config::default());
+    let mut wrong = Vec::new();
+    for &(flavor, region, is_body) in LINK_REGIONS {
+        for (cross_file, same_file) in [("[i](t.md#gone)", "[i](#gone)"), ("[d]: t.md#gone", "[d]: #gone")] {
+            let place = |link: &str| format!("{}\n\n# Real\n", region.replace("@@", link));
+
+            let content = place(cross_file);
+            let index = crate::build_file_index_only(&content, &rules, flavor, Some(std::path::PathBuf::from("s.md")));
+            // Frontmatter values that read as paths are indexed under their
+            // own origin; only Markdown links are in question here.
+            let indexed = index
+                .cross_file_links
+                .iter()
+                .any(|link| link.origin == crate::workspace_index::LinkOrigin::Body && link.fragment == "gone");
+            if indexed != is_body {
+                wrong.push(format!("index {flavor:?} {content:?}"));
+            }
+
+            let content = place(same_file);
+            let ctx = crate::lint_context::LintContext::new(&content, flavor, None);
+            let warnings = crate::rules::MD051LinkFragments::default().check(&ctx).unwrap();
+            if warnings.iter().any(|warning| warning.message.contains("'#gone'")) != is_body {
+                wrong.push(format!("MD051 {flavor:?} {content:?}"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "read against the region's body status:\n{}",
+        wrong.join("\n")
+    );
+}
+
 #[tokio::test]
 async fn references_skip_lookalikes_and_include_definitions() {
     let target = "# Doc\n\n## A\n\n## B\n\n## C\n";

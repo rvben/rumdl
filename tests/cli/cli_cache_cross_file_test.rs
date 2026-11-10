@@ -412,6 +412,62 @@ fn cache_hit_respects_inline_disable_for_cross_file_rule() {
     );
 }
 
+/// The fragment of a reference definition, used or not, is checked against the
+/// file it names, and the warning sits on the definition's destination.
+#[test]
+fn md051_checks_reference_definition_fragments_without_cache() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    write_target(dir);
+    fs::write(
+        dir.join("a.md"),
+        "# Source\n\n## Local\n\nSee [the target][t].\n\n\
+         [t]: b.md#nonexistent\n[unused]: #locl\n[fine]: b.md#real-heading\n[here]: #local\n",
+    )
+    .unwrap();
+
+    let (success, out) = run_with_status(dir, &["check", ".", "--no-cache", "--isolated"]);
+    assert!(!success, "broken definition fragments must fail:\n{out}");
+    let mut md051: Vec<&str> = out.lines().filter(|line| line.contains("[MD051]")).collect();
+    md051.sort_unstable();
+    assert_eq!(
+        md051,
+        [
+            "a.md:7:6: [MD051] Link fragment 'nonexistent' not found in 'b.md'",
+            "a.md:8:11: [MD051] Link anchor '#locl' does not exist in document headings (did you mean '#local'?)",
+        ],
+        "{out}"
+    );
+}
+
+/// A reference definition's fragment is cached in the index like an inline
+/// link's: the rebuilt index after a lint-cache hit still reports it, and a
+/// target gaining the heading clears it.
+#[test]
+fn md051_reference_definition_fragment_survives_the_cache() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    fs::write(dir.join(".rumdl.toml"), "").unwrap();
+    write_target(dir);
+    fs::write(dir.join("a.md"), "# Source\n\nSee [later][t].\n\n[t]: b.md#later\n").unwrap();
+
+    let first = run(dir, &["check", "."]);
+    assert!(first.contains("Link fragment 'later' not found in 'b.md'"), "{first}");
+
+    delete_workspace_index(dir);
+    let second = run(dir, &["check", "."]);
+    assert!(
+        second.contains("Link fragment 'later' not found in 'b.md'"),
+        "a lint-cache hit must rebuild the definition's index entry:\n{second}"
+    );
+
+    fs::write(dir.join("b.md"), "# Target\n\n## Later\n").unwrap();
+    let (third_success, third) = run_with_status(dir, &["check", "."]);
+    assert!(third_success, "the new heading must clear the warning:\n{third}");
+}
+
 #[test]
 fn per_file_ignores_suppresses_cross_file_rule_without_cache() {
     let temp = tempfile::tempdir().unwrap();

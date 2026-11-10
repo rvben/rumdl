@@ -4006,3 +4006,297 @@ mod anchor_hint {
         );
     }
 }
+
+mod reference_definition_fragments {
+    use rumdl_lib::config::{Config, MarkdownFlavor};
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::{LintWarning, Rule};
+    use rumdl_lib::rules::MD051LinkFragments;
+    use rumdl_lib::workspace_index::WorkspaceIndex;
+
+    fn check(rule: &MD051LinkFragments, flavor: MarkdownFlavor, content: &str) -> Vec<LintWarning> {
+        rule.check(&LintContext::new(content, flavor, None)).unwrap()
+    }
+
+    fn rule(config: &str) -> MD051LinkFragments {
+        MD051LinkFragments::from_config_struct(serde_json::from_str(config).expect("config"))
+    }
+
+    /// A definition's fragment is held to exactly the rules an inline link's
+    /// is: the same fragments resolve, the same are exempt, and the same
+    /// messages report the rest.
+    #[test]
+    fn a_definition_fragment_is_checked_like_an_inline_one() {
+        let fragments = [
+            "setup",
+            "SETUP",
+            "Setup",
+            "setpu",
+            "set%75p",
+            "skip-me",
+            "fn:note",
+            "+toc.slugify",
+            "",
+        ];
+        let configs = [
+            r#"{}"#,
+            r#"{"ignore-case": true}"#,
+            r#"{"ignore-case": false}"#,
+            r#"{"ignored-pattern": "^skip-"}"#,
+        ];
+        for config in configs {
+            let rule = rule(config);
+            for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs] {
+                for fragment in fragments {
+                    let messages = |link: String| -> Vec<String> {
+                        check(&rule, flavor, &format!("# Doc\n\n## Setup\n\n{link}\n"))
+                            .into_iter()
+                            .map(|w| w.message)
+                            .collect()
+                    };
+                    let inline = messages(format!("[x](#{fragment})"));
+                    let definition = messages(format!("[x]: #{fragment}"));
+                    assert_eq!(definition, inline, "{config} {flavor:?} #{fragment}");
+                }
+            }
+        }
+        // The comparison is not vacuous: some fragments are reported.
+        let reported = check(&rule("{}"), MarkdownFlavor::Standard, "## Setup\n\n[x]: #setpu\n");
+        assert_eq!(
+            reported.iter().map(|w| w.message.as_str()).collect::<Vec<_>>(),
+            ["Link anchor '#setpu' does not exist in document headings (did you mean '#setup'?)"]
+        );
+    }
+
+    /// Used and unused definitions are both checked, once each, and each
+    /// warning covers the definition's destination.
+    #[test]
+    fn each_definition_is_reported_once_at_its_destination() {
+        let content = "# Doc\n\n## Setup\n\nSee [the setup][used] and [again][used].\n\n\
+                       [used]: #setpu\n[unused]:   <#nowhere> \"#nowhere\"\n[fine]: #setup\n";
+        let warnings = check(&rule("{}"), MarkdownFlavor::Standard, content);
+        let found: Vec<_> = warnings
+            .iter()
+            .map(|w| (w.line, w.column, w.end_line, w.end_column))
+            .collect();
+        assert_eq!(found, [(7, 9, 7, 15), (8, 14, 8, 22)], "{warnings:#?}");
+    }
+
+    /// Text that is not a definition of the body is not checked: frontmatter,
+    /// code blocks and HTML comments.
+    #[test]
+    fn definitions_outside_the_body_are_not_checked() {
+        let content = "---\ntitle: x\n[fm]: #nowhere\n---\n\n# Doc\n\n\
+                       ```\n[code]: #nowhere\n```\n\n    [indented]: #nowhere\n\n\
+                       <!--\n[comment]: #nowhere\n-->\n";
+        let warnings = check(&rule("{}"), MarkdownFlavor::Standard, content);
+        assert!(warnings.is_empty(), "{warnings:#?}");
+    }
+
+    /// A definition naming another file's fragment is checked against that
+    /// file, by MD051 alone: the index entry does not depend on MD057.
+    #[test]
+    fn a_cross_file_definition_fragment_is_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("a.md");
+        let target = dir.path().join("b.md");
+        let source_content = "# Source\n\n[gone]: b.md#missing\n[ok]: b.md#real-heading\n";
+        let target_content = "# Target\n\n## Real Heading\n";
+        std::fs::write(&source, source_content).unwrap();
+        std::fs::write(&target, target_content).unwrap();
+
+        let rules: Vec<_> = rumdl_lib::rules::all_rules(&Config::default())
+            .into_iter()
+            .filter(|rule| rule.name() != "MD057")
+            .collect();
+        let mut workspace = WorkspaceIndex::new();
+        let mut source_index = None;
+        for (path, content) in [(&source, source_content), (&target, target_content)] {
+            let (_, index) = rumdl_lib::lint_and_index(
+                content,
+                &rules,
+                false,
+                MarkdownFlavor::Standard,
+                Some(path.clone()),
+                None,
+            );
+            if path == &source {
+                source_index = Some(index.clone());
+            }
+            workspace.insert_file(path.clone(), index);
+        }
+
+        let warnings = MD051LinkFragments::default()
+            .cross_file_check(&source, &source_index.unwrap(), &workspace)
+            .unwrap();
+        let found: Vec<_> = warnings
+            .iter()
+            .map(|w| (w.line, w.column, w.end_column, w.message.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [(3, 9, 21, "Link fragment 'missing' not found in 'b.md'")],
+            "{warnings:#?}"
+        );
+    }
+}
+
+/// Every CommonMark spelling of an inline link's destination and title is
+/// checked, by the same-file check and by the cross-file one alike.
+mod inline_link_forms {
+    use rumdl_lib::config::{Config, MarkdownFlavor};
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD051LinkFragments;
+    use rumdl_lib::workspace_index::WorkspaceIndex;
+
+    /// Inline links with the path written as `P` and the fragment as `F`.
+    const FORMS: &[&str] = &[
+        "[x](P#F)",
+        "[x](P#F \"#F\")",
+        "[x](P#F '#F')",
+        "[x](P#F (#F))",
+        "[x](<P#F>)",
+        "[x](<P#F> '#F')",
+        "[x](P#F\n  '#F')",
+        "[x](  P#F\t)",
+        "[x](\nP#F\n)",
+    ];
+
+    fn link(form: &str, path: &str, fragment: &str) -> String {
+        form.replace('P', path).replace('F', fragment)
+    }
+
+    #[test]
+    fn every_form_of_a_same_file_link_is_checked() {
+        for form in FORMS {
+            for (fragment, expected) in [("missing", 1), ("setup", 0)] {
+                let content = format!("# Setup\n\n{}\n", link(form, "", fragment));
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                let warnings = MD051LinkFragments::default().check(&ctx).unwrap();
+                assert_eq!(warnings.len(), expected, "{content:?}: {warnings:#?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_form_of_a_cross_file_link_is_checked() {
+        let rules: Vec<_> = rumdl_lib::rules::all_rules(&Config::default())
+            .into_iter()
+            .filter(|rule| rule.name() != "MD057")
+            .collect();
+        for form in FORMS {
+            // Bare destinations cannot hold a space; angle brackets can.
+            let paths: &[&str] = if form.contains('<') {
+                &["t.md", "f(1).md", "t x.md"]
+            } else {
+                &["t.md", "f(1).md", "f((1)).md"]
+            };
+            for path in paths {
+                for (fragment, expected) in [("missing", 1), ("setup", 0)] {
+                    let dir = tempfile::tempdir().unwrap();
+                    let source = dir.path().join("s.md");
+                    let target = dir.path().join(path);
+                    let source_content = format!("{}\n", link(form, path, fragment));
+                    let target_content = "# Setup\n";
+                    let mut workspace = WorkspaceIndex::new();
+                    let mut source_index = None;
+                    for (file, content) in [(&source, source_content.as_str()), (&target, target_content)] {
+                        std::fs::write(file, content).unwrap();
+                        let (_, index) = rumdl_lib::lint_and_index(
+                            content,
+                            &rules,
+                            false,
+                            MarkdownFlavor::Standard,
+                            Some(file.clone()),
+                            None,
+                        );
+                        if file == &source {
+                            source_index = Some(index.clone());
+                        }
+                        workspace.insert_file(file.clone(), index);
+                    }
+                    let warnings = MD051LinkFragments::default()
+                        .cross_file_check(&source, &source_index.unwrap(), &workspace)
+                        .unwrap();
+                    assert_eq!(warnings.len(), expected, "{source_content:?}: {warnings:#?}");
+                }
+            }
+        }
+    }
+
+    /// Containers as the prefix of a link's first line and of its
+    /// continuation lines.
+    const CONTAINERS: &[(&str, &str)] = &[
+        ("", ""),
+        ("> ", "> "),
+        ("> > ", "> > "),
+        (">> ", ">>"),
+        ("- ", "  "),
+        ("- > ", "  > "),
+        ("> - ", ">   "),
+        ("- ", "\t"),
+        ("> -\t", ">\t  "),
+    ];
+
+    /// Inline links with the destination written as `D` and continuation
+    /// lines opening with `C`: destination, title, or both on a later line.
+    const WRAPPED_FORMS: &[&str] = &["[x](\nCD)", "[x](D\nC\"title\")", "[x](\nCD\nC'title')", "[x](\nC<D>)"];
+
+    #[test]
+    fn cross_file_links_wrapped_inside_containers_are_checked() {
+        let rules = rumdl_lib::rules::all_rules(&Config::default());
+        for (first, continuation) in CONTAINERS {
+            for form in WRAPPED_FORMS {
+                for (fragment, expected) in [("missing", 1), ("setup", 0)] {
+                    let dir = tempfile::tempdir().unwrap();
+                    let source = dir.path().join("s.md");
+                    let target = dir.path().join("t.md");
+                    let link = form
+                        .replace('C', continuation)
+                        .replace('D', &format!("t.md#{fragment}"));
+                    let source_content = format!("# S\n\n{first}{link}\n");
+                    let files = [(&source, source_content.as_str()), (&target, "# Setup\n")];
+                    for (file, content) in files {
+                        std::fs::write(file, content).unwrap();
+                    }
+                    let mut workspace = WorkspaceIndex::new();
+                    let mut source_index = None;
+                    for (file, content) in files {
+                        let (warnings, index) = rumdl_lib::lint_and_index(
+                            content,
+                            &rules,
+                            false,
+                            MarkdownFlavor::Standard,
+                            Some(file.clone()),
+                            None,
+                        );
+                        assert!(
+                            warnings
+                                .as_ref()
+                                .unwrap()
+                                .iter()
+                                .all(|warning| warning.rule_name.as_deref() != Some("MD057")),
+                            "{content:?}: {warnings:#?}"
+                        );
+                        if file == &source {
+                            source_index = Some(index.clone());
+                        }
+                        workspace.insert_file(file.clone(), index);
+                    }
+                    let source_index = source_index.unwrap();
+                    let indexed: Vec<_> = source_index
+                        .cross_file_links
+                        .iter()
+                        .map(|link| (link.target_path.as_str(), link.fragment.as_str(), link.line))
+                        .collect();
+                    assert_eq!(indexed, [("t.md", fragment, 3)], "{source_content:?}");
+                    let warnings = MD051LinkFragments::default()
+                        .cross_file_check(&source, &source_index, &workspace)
+                        .unwrap();
+                    assert_eq!(warnings.len(), expected, "{source_content:?}: {warnings:#?}");
+                }
+            }
+        }
+    }
+}

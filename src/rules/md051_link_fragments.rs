@@ -1,4 +1,4 @@
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, SourcePositions};
 use crate::rule::{CrossFileScope, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::{LinkResolution, LinkResolver};
@@ -7,7 +7,6 @@ use crate::utils::anchor_suggestions::AnchorSuggester;
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
-use pulldown_cmark::LinkType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::OnceCell;
@@ -290,6 +289,43 @@ impl MD051LinkFragments {
         Some((&url[..fragment_pos], &url[fragment_pos + 1..]))
     }
 
+    /// The fragment of a destination that names an anchor in this document,
+    /// for a destination this rule checks locally.
+    ///
+    /// `None` for a destination without a fragment or with an empty one, a URL,
+    /// a fragment on another document (`cross_file_check` resolves those), and
+    /// template or cross-reference syntax that only resembles a fragment.
+    fn same_document_fragment(url: &str) -> Option<&str> {
+        if !url.contains('#') || Self::is_external_url_fast(url) {
+            return None;
+        }
+
+        // mdbook template placeholders ({{#VARIABLE}}): the `#` is part of the
+        // template, not a fragment.
+        if url.contains("{{#") && url.contains("}}") {
+            return None;
+        }
+
+        // Quarto/RMarkdown cross-references (@fig-, @tbl-, @sec-, @eq-, or a
+        // bare @identifier) are not HTML anchors.
+        if url.starts_with('@') {
+            return None;
+        }
+
+        if !crate::workspace_index::strip_query_and_fragment(url).is_empty() {
+            return None;
+        }
+
+        let fragment = &url[url.find('#')? + 1..];
+
+        // Liquid template variables and filters.
+        if (url.contains("{{") && fragment.contains('|')) || fragment.ends_with("}}") || fragment.ends_with("%}") {
+            return None;
+        }
+
+        (!fragment.is_empty()).then_some(fragment)
+    }
+
     /// Whether this document has frontmatter the rule is configured to check.
     ///
     /// Gates the body-link early exits, which would otherwise skip a document
@@ -475,7 +511,8 @@ impl Rule for MD051LinkFragments {
         }
 
         let front_matter_links = self.front_matter_links(ctx);
-        if ctx.links().is_empty() && front_matter_links.is_empty() {
+        if ctx.links().is_empty() && ctx.body_reference_definitions().next().is_none() && front_matter_links.is_empty()
+        {
             return Ok(warnings);
         }
 
@@ -484,78 +521,18 @@ impl Rule for MD051LinkFragments {
         let anchors = OnceCell::new();
         let suggester = OnceCell::new();
 
-        for link in ctx.links() {
-            if link.is_reference {
-                continue;
-            }
-
-            // Skip links inside PyMdown blocks (MkDocs flavor)
-            if ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block) {
-                continue;
-            }
-
-            // Skip wiki-links - they reference other files and may have their own fragment validation
-            if matches!(link.link_type, LinkType::WikiLink { .. }) {
-                continue;
-            }
-
-            // Skip links inside Jinja templates
-            if ctx.is_in_jinja_range(link.byte_offset) {
-                continue;
-            }
-
+        // Inline links of the document body. Reference links are checked once,
+        // at their definition, below; wiki-links name files, not fragments.
+        for link in ctx.body_links() {
             // Skip Pandoc/Quarto citations ([@citation], @citation)
             // Citations are bibliography references, not link fragments
             if ctx.flavor.is_pandoc_compatible() && ctx.is_in_citation(link.byte_offset) {
                 continue;
             }
 
-            // Skip links inside shortcodes ({{< ... >}} or {{% ... %}})
-            // Shortcodes may contain template syntax that looks like fragment links
-            if ctx.is_in_shortcode(link.byte_offset) {
-                continue;
-            }
-
-            let url = &link.url;
-
-            // Skip links without fragments or external URLs
-            if !url.contains('#') || Self::is_external_url_fast(url) {
-                continue;
-            }
-
-            // Skip mdbook template placeholders ({{#VARIABLE}})
-            // mdbook uses {{#VARIABLE}} syntax where # is part of the template, not a fragment
-            if url.contains("{{#") && url.contains("}}") {
-                continue;
-            }
-
-            // Skip Quarto/RMarkdown cross-references (@fig-, @tbl-, @sec-, @eq-, etc.)
-            // These are special cross-reference syntax, not HTML anchors
-            // Format: @prefix-identifier or just @identifier
-            if url.starts_with('@') {
-                continue;
-            }
-
-            // A fragment on another document is checked against that document
-            // in `cross_file_check`.
-            if !crate::workspace_index::strip_query_and_fragment(url).is_empty() {
-                continue;
-            }
-
-            let Some(fragment_pos) = url.find('#') else {
+            let Some(fragment) = Self::same_document_fragment(&link.url) else {
                 continue;
             };
-
-            let fragment = &url[fragment_pos + 1..];
-
-            // Skip Liquid template variables and filters
-            if (url.contains("{{") && fragment.contains('|')) || fragment.ends_with("}}") || fragment.ends_with("%}") {
-                continue;
-            }
-
-            if fragment.is_empty() {
-                continue;
-            }
 
             if self.fragment_is_exempt(ctx, fragment) {
                 continue;
@@ -576,6 +553,40 @@ impl Rule for MD051LinkFragments {
                     fix: None,
                 });
             }
+        }
+
+        // A reference definition is checked whether or not anything uses it,
+        // and reported once, on its destination, however many links use it.
+        // A definition is the parser's, read as the parser decoded it; one whose
+        // destination cannot be located is reported at its label.
+        let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
+        for definition in ctx.body_reference_definitions() {
+            let Some(fragment) = Self::same_document_fragment(definition.url) else {
+                continue;
+            };
+            if self.fragment_is_exempt(ctx, fragment) || self.fragment_resolves(ctx, fragment, &anchors) {
+                continue;
+            }
+            let range = definition
+                .destination
+                .clone()
+                .unwrap_or(definition.start..definition.start);
+            let (_, line, column) = positions.position(range.start);
+            let (_, end_line, end_column) = positions.position(range.end);
+            let (line, column, end_line, end_column) = (line, column + 1, end_line, end_column + 1);
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                message: format!(
+                    "Link anchor '#{fragment}' does not exist in document headings{}",
+                    self.anchor_hint(ctx, fragment, &anchors, &suggester)
+                ),
+                line,
+                column,
+                end_line,
+                end_column,
+                severity: Severity::Error,
+                fix: None,
+            });
         }
 
         self.check_front_matter(ctx, &front_matter_links, &anchors, &suggester, &mut warnings);
@@ -684,6 +695,30 @@ impl Rule for MD051LinkFragments {
                     origin: LinkOrigin::Body,
                 });
             }
+        }
+
+        // Reference definitions, used or not, positioned at their destination.
+        let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
+        for definition in ctx.body_reference_definitions() {
+            let Some((path_part, fragment)) = Self::cross_file_parts(definition.url) else {
+                continue;
+            };
+            if fragment.is_empty() || fragment.contains("{{") || fragment.contains("{%") {
+                continue;
+            }
+            let at = definition
+                .destination
+                .as_ref()
+                .map_or(definition.start, |range| range.start);
+            let (_, line, column) = positions.position(at);
+            let column = column + 1;
+            file_index.add_cross_file_link(CrossFileLinkIndex {
+                target_path: path_part.to_string(),
+                fragment: fragment.to_string(),
+                line,
+                column,
+                origin: LinkOrigin::Body,
+            });
         }
 
         // Extract cross-file links from frontmatter values that carry a
