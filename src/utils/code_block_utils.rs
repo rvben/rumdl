@@ -206,9 +206,13 @@ pub fn item_runs(enclosing: &[Enclosure]) -> Vec<usize> {
 /// whitespace after it when 1 to 4 columns of text follow, otherwise a single
 /// column. Returns where its content starts on the marker line, and that line's
 /// start.
+///
+/// The parser reports some items, such as a tab-indented list inside a
+/// definition, at an offset before the marker that can fall inside a character.
+/// Such an offset names no marker and yields `None`.
 fn item_content_start(content: &str, marker: usize) -> Option<(StrippedLine, usize)> {
-    let line_start = content[..marker].rfind('\n').map_or(0, |i| i + 1);
     let rest = content.get(marker..)?;
+    let line_start = line_start_of(content, marker);
     let marker_len = match rest.as_bytes().first()? {
         b'-' | b'+' | b'*' => 1,
         b'0'..=b'9' => {
@@ -288,10 +292,17 @@ fn fenced_block_is_closed(content: &str, start: usize, end: usize, literal_lines
     span_lines == literal_lines + 2 && last_line.trim_start_matches(['>', ' ', '\t']).starts_with(['`', '~'])
 }
 
+/// Start of the line holding byte `pos`. Searches bytes, so `pos` may be any
+/// offset the parser reports, including one inside a character or past the end.
+fn line_start_of(content: &str, pos: usize) -> usize {
+    let before = &content.as_bytes()[..pos.min(content.len())];
+    before.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1)
+}
+
 /// Visual column of byte `pos`, counting from the start of its line, with a
 /// tab advancing to the next multiple of four.
 fn visual_column(content: &str, pos: usize) -> usize {
-    let line_start = content[..pos].rfind('\n').map_or(0, |i| i + 1);
+    let line_start = line_start_of(content, pos);
     content[line_start..pos]
         .chars()
         .fold(0, |col, c| if c == '\t' { col + 4 - col % 4 } else { col + 1 })
@@ -649,7 +660,7 @@ impl CodeBlockUtils {
             }
             match &event {
                 Event::Start(Tag::BlockQuote(_)) => {
-                    let line_start = content[..range.start].rfind('\n').map_or(0, |i| i + 1);
+                    let line_start = line_start_of(content, range.start);
                     open_containers.push((Enclosure::Quote { end: range.end }, line_start, StrippedLine::default()));
                 }
                 Event::Start(Tag::Item) => {
@@ -1183,6 +1194,18 @@ mod tests {
             .collect();
         // Outer item holds the inner marker; the empty `-` item has no content.
         assert_eq!(starts, [("-", "-"), ("-", "x"), ("-", "y"), ("-", "z")]);
+    }
+
+    #[test]
+    fn test_item_offset_inside_a_character_is_not_read_as_a_marker() {
+        // The parser reports the tab-indented item in the definition at byte 5,
+        // the second byte of the `¡` on the definition line.
+        let content = "¡\n:¡\n\t* ¡";
+        assert!(!content.is_char_boundary(5));
+        assert!(item_content_start(content, 5).is_none());
+
+        let parsed = CodeBlockUtils::detect_code_blocks_and_spans(content);
+        assert_eq!(parsed.list_items.len(), 1);
     }
 
     #[test]

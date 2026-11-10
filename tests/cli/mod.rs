@@ -7,6 +7,7 @@ mod cli_cache_cross_file_test;
 mod cli_code_block_tool_modes_test;
 mod cli_config_override_test;
 mod cli_config_test;
+mod cli_definition_list_tab_item_test;
 mod cli_disable_all_test;
 mod cli_duplication_test;
 mod cli_exit_codes_test;
