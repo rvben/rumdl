@@ -25,6 +25,7 @@ pub(crate) struct OwnedParsedDocument {
     broken_links: Vec<BrokenLinkInfo>,
     pending_lines: PendingLineEvents,
     text_start_lines: Option<Vec<usize>>,
+    definitions: Vec<super::ParserDefinition>,
 }
 
 impl ParsedDocument<'_> {
@@ -49,6 +50,7 @@ impl ParsedDocument<'_> {
             broken_links: self.pending_links.broken_links,
             pending_lines: self.pending_lines,
             text_start_lines: self.text_start_lines,
+            definitions: self.definitions,
         }
     }
 }
@@ -89,6 +91,7 @@ impl OwnedParsedDocument {
             parser_blocks: self.parser_blocks,
             pending_lines: self.pending_lines,
             text_start_lines: self.text_start_lines,
+            definitions: self.definitions,
             pending_links: PendingLinks {
                 content: source,
                 events: self.events,

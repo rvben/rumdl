@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
+use super::document_parser::ParserDefinition;
 use super::types::*;
 
 // Comprehensive link pattern that captures both inline and reference links
@@ -1269,9 +1270,83 @@ fn utf8_char_len(first_byte: u8) -> usize {
     }
 }
 
-/// Parse reference definitions
-pub(super) fn parse_reference_defs(content: &str, lines: &[LineInfo]) -> Vec<ReferenceDef> {
+/// The destination of each definition the parser reads at `starts`, the
+/// offsets of `[` opening labels, or `None` where it reads none.
+///
+/// The parser lists only the first definition of a label, so each label at
+/// `starts` gets a prefix no other label in the document holds before the
+/// document is parsed again. A prefix of ASCII characters other than
+/// whitespace and brackets changes neither where a definition ends nor
+/// whether its label is valid, so the parser then reads exactly the
+/// definitions it read before and lists every one of them.
+fn parser_destinations_at(content: &str, starts: &[usize]) -> Vec<Option<String>> {
+    let longest_run = content.split(|c| c != '\x7f').map(str::len).max().unwrap_or(0);
+    let marker = "\x7f".repeat(longest_run + 1);
+    let mut relabeled = String::with_capacity(content.len() + starts.len() * (2 * marker.len() + 8));
+    let mut copied = 0;
+    for (index, &start) in starts.iter().enumerate() {
+        relabeled.push_str(&content[copied..=start]);
+        relabeled.push_str(&marker);
+        relabeled.push_str(&index.to_string());
+        relabeled.push_str(&marker);
+        copied = start + 1;
+    }
+    relabeled.push_str(&content[copied..]);
+
+    let mut destinations = vec![None; starts.len()];
+    let parser = pulldown_cmark::Parser::new_ext(&relabeled, rumdl_parser_options_for(content));
+    for (label, definition) in parser.reference_definitions().iter() {
+        let index = label
+            .strip_prefix(marker.as_str())
+            .and_then(|rest| rest.split_once(marker.as_str()))
+            .and_then(|(index, _)| index.parse::<usize>().ok());
+        if let Some(slot) = index.and_then(|index| destinations.get_mut(index)) {
+            *slot = Some(definition.dest.to_string());
+        }
+    }
+    destinations
+}
+
+/// The destination of the definition `text` opens with, as the parser reads
+/// it.
+fn definition_destination(text: &str) -> Option<String> {
+    let parser = pulldown_cmark::Parser::new_ext(text, rumdl_parser_options_for(text));
+    parser
+        .reference_definitions()
+        .iter()
+        .next()
+        .map(|(_, definition)| definition.dest.to_string())
+}
+
+/// The link reference definitions of a document: the lines written as one
+/// that the Markdown parser reads as one, plus those the flavor reads where
+/// the parser sees text.
+///
+/// A line shaped like a definition is text when it continues a paragraph, a
+/// list item or a definition list term, or sits in a code block, heading,
+/// table or HTML block. `parser_definitions`
+/// holds the parser's first definition of each label; a repeated label's
+/// definition is consumed by the parser without being listed there, so a
+/// line not found among them is a definition exactly when the parser reads
+/// one there once its label is unique. A line inside the title of another
+/// definition, or in any block that swallows it, is then text. MkDocs
+/// containers read definitions anywhere in their body, and
+/// a definition straight after a Pandoc div fence, a container's opening or
+/// closing marker, a kramdown block attribute list or extension block, or
+/// after another such definition, is one where the flavor ends the block
+/// before it.
+pub(super) fn parse_reference_defs(
+    content: &str,
+    lines: &[LineInfo],
+    flavor: MarkdownFlavor,
+    parser_definitions: &[ParserDefinition],
+) -> Vec<ReferenceDef> {
     let mut refs = Vec::with_capacity(lines.len() / 20);
+    // Definitions the parser does not list, with their label offsets, to be
+    // checked against the parser once every line is read.
+    let mut unlisted: Vec<(usize, usize)> = Vec::new();
+    // The last line of the latest definition the flavor alone reads.
+    let mut flavor_definition_end: Option<usize> = None;
 
     for (line_idx, line_info) in lines.iter().enumerate() {
         if line_info.in_code_block {
@@ -1359,10 +1434,47 @@ pub(super) fn parse_reference_defs(content: &str, lines: &[LineInfo]) -> Vec<Ref
                 }
             }
 
+            let label_start =
+                byte_offset + (match_obj.as_str().len() - match_obj.as_str().trim_start_matches(' ').len());
+            let destination =
+                match parser_definitions.binary_search_by_key(&label_start, |definition| definition.span.start) {
+                    Ok(index) => parser_definitions[index].dest.clone(),
+                    Err(_) => {
+                        let after_flavor_marker = line_idx
+                            .checked_sub(1)
+                            .and_then(|previous| lines.get(previous))
+                            .is_some_and(|previous| {
+                                previous.is_container_marker
+                                    || previous.is_kramdown_block_ial
+                                    || previous.in_kramdown_extension_block
+                                    || (flavor.is_pandoc_compatible() && previous.is_div_marker)
+                            });
+                        let read_by_flavor = line_info.in_mkdocs_container()
+                            || after_flavor_marker
+                            || flavor_definition_end.is_some_and(|end| end + 1 == line_idx);
+                        if read_by_flavor {
+                            let last_line = lines[line_idx..]
+                                .iter()
+                                .take_while(|line| line.byte_offset < byte_end)
+                                .count();
+                            flavor_definition_end = Some(line_idx + last_line.max(1) - 1);
+                            let first_line_end = content[label_start..]
+                                .find('\n')
+                                .map_or(content.len(), |end| label_start + end);
+                            definition_destination(&content[label_start..first_line_end]).unwrap_or_else(|| url.clone())
+                        } else {
+                            // Set once the parser has been asked about every such line.
+                            unlisted.push((refs.len(), label_start));
+                            String::new()
+                        }
+                    }
+                };
+
             refs.push(ReferenceDef {
                 line: line_num,
                 id,
                 url,
+                destination,
                 title,
                 byte_offset,
                 byte_end,
@@ -1370,6 +1482,19 @@ pub(super) fn parse_reference_defs(content: &str, lines: &[LineInfo]) -> Vec<Ref
                 title_byte_end,
             });
         }
+    }
+
+    if !unlisted.is_empty() {
+        let starts: Vec<usize> = unlisted.iter().map(|&(_, start)| start).collect();
+        let mut read = vec![true; refs.len()];
+        for (&(index, _), destination) in unlisted.iter().zip(parser_destinations_at(content, &starts)) {
+            match destination {
+                Some(destination) => refs[index].destination = destination,
+                None => read[index] = false,
+            }
+        }
+        let mut read = read.into_iter();
+        refs.retain(|_| read.next().unwrap_or(true));
     }
 
     refs

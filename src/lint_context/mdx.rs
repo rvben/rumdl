@@ -405,6 +405,9 @@ impl MdxContext {
                     line: pos.start.line,
                     id: def.identifier.to_lowercase(),
                     url: def.url.clone(),
+                    // The MDX parser has already resolved escapes and
+                    // character references.
+                    destination: def.url.clone(),
                     title,
                     byte_offset: pos.start.offset,
                     byte_end: pos.end.offset,

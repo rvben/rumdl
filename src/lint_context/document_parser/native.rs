@@ -247,6 +247,8 @@ pub(super) fn parse(content: &str) -> Option<ParsedDocument<'_>> {
         parser_blocks: None,
         pending_lines,
         text_start_lines: None,
+        // Any definition makes a line this parser declines.
+        definitions: Vec::new(),
         pending_links: PendingLinks {
             content,
             events: Vec::new(),
@@ -279,6 +281,7 @@ mod tests {
         // document with a pipe.
         reference.structure.top_level_blocks.clear();
         reference.structure.list_items.clear();
+        assert_eq!(native.definitions, reference.definitions, "{content:?}");
         assert_eq!(
             format!("{:?}", native.structure),
             format!("{:?}", reference.structure),
@@ -407,6 +410,10 @@ mod tests {
             "- # *heading*",
             "\u{b}**text**",
             "\u{c}`code`",
+            "[r]: t",
+            "[r]:\nt",
+            "    [r]: t",
+            "text\n[r]: t",
         ];
         for first in fragments {
             for second in fragments {

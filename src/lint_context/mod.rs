@@ -675,6 +675,7 @@ impl<'a> LintContext<'a> {
             pending_links,
             pending_lines,
             text_start_lines,
+            definitions: parser_definitions,
         } = profile_section!("Shared Markdown parse", profile, {
             proof_parsed.unwrap_or_else(|| {
                 handoff.map_or_else(
@@ -1551,7 +1552,7 @@ impl<'a> LintContext<'a> {
                 if let Some(mdx) = &mdx_context {
                     mdx.reference_defs(content)
                 } else {
-                    link_parser::parse_reference_defs(content, &lines)
+                    link_parser::parse_reference_defs(content, &lines, flavor, &parser_definitions)
                 }
             });
 
@@ -1752,12 +1753,12 @@ impl<'a> LintContext<'a> {
                 }
             }
 
-            // Rebuild reference_defs_map after filtering
-            let reference_defs_map: HashMap<String, usize> = reference_defs
-                .iter()
-                .enumerate()
-                .map(|(idx, def)| (def.id.to_lowercase(), idx))
-                .collect();
+            // Rebuild reference_defs_map after filtering. A link resolves to
+            // the first definition of its label; a later one defines nothing.
+            let mut reference_defs_map: HashMap<String, usize> = HashMap::with_capacity(reference_defs.len());
+            for (idx, def) in reference_defs.iter().enumerate() {
+                reference_defs_map.entry(def.id.to_lowercase()).or_insert(idx);
+            }
 
             // Pre-compute sorted link title byte ranges for binary search
             let link_title_ranges: Vec<(usize, usize)> = reference_defs

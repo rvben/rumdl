@@ -25,8 +25,10 @@
 
 use std::collections::HashSet;
 use std::ops::Range;
+use std::sync::LazyLock;
 
 use pulldown_cmark::LinkType;
+use regex::Regex;
 
 use crate::lint_context::LintContext;
 use crate::lint_context::types::{ParsedImage, ParsedLink};
@@ -229,6 +231,27 @@ fn reachable(source: Style, target: Style, facts: LinkFacts) -> bool {
     )
 }
 
+/// Labels written in definition form inside template code that the Markdown
+/// parse reads as text, with the byte offset of their line. The template may
+/// emit them as definitions, so a generated label must not take them.
+fn template_definition_labels<'c>(ctx: &'c LintContext) -> impl Iterator<Item = (usize, &'c str)> + 'c {
+    static TEMPLATE_DEFINITION: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[((?:[^\]\\]|\\.)+)\]:").unwrap());
+    let defined: HashSet<usize> = ctx.reference_definitions().iter().map(|d| d.byte_offset).collect();
+    ctx.lines.iter().filter_map(move |line| {
+        let start = line.byte_offset;
+        let text = line.content(ctx.content);
+        let label = TEMPLATE_DEFINITION.captures(text)?.get(1)?;
+        if label.as_str().starts_with('^')
+            || defined.contains(&start)
+            || !ctx.overlaps_template_code(start, start + text.len())
+        {
+            return None;
+        }
+        Some((start, label.as_str()))
+    })
+}
+
 /// Build the full fix plan for a document.
 pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
     // Seed label generator with existing reference definitions so we never
@@ -237,14 +260,26 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
     // different titles are *different* destinations and must keep distinct
     // labels. Template definitions reserve labels for collision avoidance but
     // cannot be reused: the template engine may consume their contents.
-    let mut labels = LabelGenerator::from_existing(ctx.reference_definitions().iter().map(|d| {
-        (
-            d.id.as_str(),
-            d.url.as_str(),
-            d.title.as_deref(),
-            !ctx.overlaps_template_code(d.byte_offset, d.byte_end),
-        )
-    }));
+    let mut existing: Vec<(usize, &str, &str, Option<&str>, bool)> = ctx
+        .reference_definitions()
+        .iter()
+        .map(|d| {
+            (
+                d.byte_offset,
+                d.id.as_str(),
+                d.url.as_str(),
+                d.title.as_deref(),
+                !ctx.overlaps_template_code(d.byte_offset, d.byte_end),
+            )
+        })
+        .collect();
+    existing.extend(template_definition_labels(ctx).map(|(offset, label)| (offset, label, "", None, false)));
+    existing.sort_by_key(|&(offset, ..)| offset);
+    let mut labels = LabelGenerator::from_existing(
+        existing
+            .into_iter()
+            .map(|(_, label, url, title, can_reuse)| (label, url, title, can_reuse)),
+    );
 
     let content = ctx.content;
 

@@ -275,13 +275,9 @@ fn detect_ref_link_target(text: &str, position: Position, flavor: MarkdownFlavor
     let byte_cursor = utf16_to_byte_offset(line, utf16_cursor)?;
 
     // First, check if cursor is on a reference definition line: `[ref-id]: target`
-    // Only the document's first line can hold the byte order mark.
-    let definition_line = if line_num == 0 {
-        crate::utils::bom::strip_bom(line)
-    } else {
-        line
-    };
-    if let Some(target) = detect_ref_definition(definition_line, flavor) {
+    if line.contains("]:")
+        && let Some(target) = detect_ref_definition(text, line_num, flavor)
+    {
         return Some(target);
     }
 
@@ -368,14 +364,16 @@ fn detect_ref_link_usage(line: &str, byte_cursor: usize) -> Option<String> {
     None
 }
 
-/// Detect a reference definition on the current line: `[ref-id]: target.md#anchor`
-///
-/// Returns a `FullLinkTarget` if the line is a reference definition.
-fn detect_ref_definition(line: &str, flavor: MarkdownFlavor) -> Option<FullLinkTarget> {
-    let context = crate::lint_context::LintContext::new(line, flavor, None);
+/// The target of the reference definition on line `line_num` (0-based) of
+/// `text`, if the document reads one there. A line shaped like a definition
+/// is text inside another definition's title, a code block or an HTML block,
+/// so the whole document is read to tell.
+fn detect_ref_definition(text: &str, line_num: usize, flavor: MarkdownFlavor) -> Option<FullLinkTarget> {
+    let context = crate::lint_context::LintContext::new(crate::utils::bom::strip_bom(text), flavor, None);
     context
         .reference_definitions()
-        .first()
+        .iter()
+        .find(|definition| definition.line == line_num + 1)
         .map(|definition| FullLinkTarget::from_destination(&definition.url))
 }
 
@@ -2012,7 +2010,7 @@ mod tests {
 
     #[test]
     fn test_detect_ref_definition_basic() {
-        let result = detect_ref_definition("[guide]: guide.md", MarkdownFlavor::default());
+        let result = detect_ref_definition("[guide]: guide.md", 0, MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -2021,7 +2019,7 @@ mod tests {
 
     #[test]
     fn test_detect_ref_definition_with_anchor() {
-        let result = detect_ref_definition("[guide]: guide.md#install", MarkdownFlavor::default());
+        let result = detect_ref_definition("[guide]: guide.md#install", 0, MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -2030,7 +2028,7 @@ mod tests {
 
     #[test]
     fn test_detect_ref_definition_indented() {
-        let result = detect_ref_definition("   [guide]: guide.md", MarkdownFlavor::default());
+        let result = detect_ref_definition("   [guide]: guide.md", 0, MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -2038,8 +2036,17 @@ mod tests {
 
     #[test]
     fn test_detect_ref_definition_not_a_definition() {
-        let result = detect_ref_definition("Some [text] here", MarkdownFlavor::default());
+        let result = detect_ref_definition("Some [text] here", 0, MarkdownFlavor::default());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_detect_ref_definition_inside_a_title_is_not_one() {
+        let text = "[a]: a.md \"title\n[b]: b.md\n\"\n";
+        assert!(detect_ref_definition(text, 1, MarkdownFlavor::default()).is_none());
+        let text = "[a]: a.md \"title\"\n[b]: b.md\n";
+        let link = detect_ref_definition(text, 1, MarkdownFlavor::default()).expect("a definition");
+        assert_eq!(link.file_path, "b.md");
     }
 
     #[test]

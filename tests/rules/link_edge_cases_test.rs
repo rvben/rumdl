@@ -85,6 +85,7 @@ fn test_md034_urls_in_special_contexts() {
 <img src=\"https://example.com/img.png\">
 [text](https://example.com)
 ![alt](https://example.com/img.png)
+
 [ref]: https://example.com
 `https://example.com` in inline code
 ```
@@ -100,6 +101,21 @@ https://example.com in code block
         println!("MD034 found URL at line {line}: {message}");
     }
     assert!(result.is_empty(), "Should ignore URLs in special contexts");
+}
+
+#[test]
+fn test_md034_definition_shaped_paragraph_text_is_checked() {
+    // A definition-shaped line continuing a paragraph is paragraph text, so
+    // its URL is bare.
+    let content = "Some text\n[ref]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = MD034NoBareUrls.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert_eq!(result[0].line, 2);
+
+    let content = "Some text\n\n[ref]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(MD034NoBareUrls.check(&ctx).unwrap().is_empty());
 }
 
 #[test]

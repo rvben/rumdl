@@ -350,8 +350,12 @@ pub struct ReferenceDef {
     pub line: usize,
     /// Reference ID (normalized to lowercase)
     pub id: String,
-    /// URL
+    /// The destination as written, with backslash escapes removed and
+    /// without angle brackets
     pub url: String,
+    /// The destination as the Markdown parser reads it: backslash escapes
+    /// and character references resolved, without angle brackets
+    pub destination: String,
     /// Optional title
     pub title: Option<String>,
     /// Byte offset where the reference definition starts

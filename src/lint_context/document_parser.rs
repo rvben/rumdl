@@ -33,6 +33,19 @@ pub(crate) struct ParsedDocument<'a> {
     /// paragraph opens with. `None` when the document was read without the
     /// parser, or holds no definition.
     pub(super) text_start_lines: Option<Vec<usize>>,
+    /// The link reference definitions the parser read, in source order.
+    pub(super) definitions: Vec<ParserDefinition>,
+}
+
+/// One link reference definition as the parser read it. Only the first
+/// definition of a label is kept: a later one defines nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ParserDefinition {
+    /// Byte range of the whole definition, from its label's opening `[`.
+    pub span: Range<usize>,
+    /// The destination with backslash escapes and character references
+    /// resolved, without angle brackets.
+    pub dest: String,
 }
 
 /// Compact, source-only facts used by line classification. These contain no
@@ -342,13 +355,19 @@ impl<'a> ParsedDocument<'a> {
             }),
         );
 
+        // The parser's first pass, run on construction, has already collected
+        // every definition, so reading them costs no further parse.
+        let mut definitions: Vec<ParserDefinition> = parser
+            .reference_definitions()
+            .iter()
+            .map(|(_, definition)| ParserDefinition {
+                span: definition.span.clone(),
+                dest: definition.dest.to_string(),
+            })
+            .collect();
+        definitions.sort_unstable_by_key(|definition| definition.span.start);
         if let Some(references) = references {
-            references.extend(
-                parser
-                    .reference_definitions()
-                    .iter()
-                    .map(|(_, definition)| definition.span.clone()),
-            );
+            references.extend(definitions.iter().map(|definition| definition.span.clone()));
         }
         let mut parser = parser.into_offset_iter().inspect(|(event, range)| {
             observe(event, range);
@@ -404,6 +423,7 @@ impl<'a> ParsedDocument<'a> {
             parser_blocks: Some(parser_blocks),
             pending_lines,
             text_start_lines,
+            definitions,
             pending_links: PendingLinks {
                 content,
                 events,

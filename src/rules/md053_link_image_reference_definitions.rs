@@ -935,14 +935,16 @@ mod tests {
     #[test]
     fn test_find_definitions() {
         let rule = MD053LinkImageReferenceDefinitions::new();
-        let content = "[ref1]: url1\n[ref2]: url2\nSome text\n[ref3]: url3";
+        let content = "[ref1]: url1\n[ref2]: url2\nSome text\n[ref3]: url3\n\n[ref4]: url4";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let defs = rule.find_definitions(&ctx);
 
+        // `[ref3]: url3` continues the paragraph `Some text`, so it is text.
         assert_eq!(defs.len(), 3);
         assert!(defs.contains_key("ref1"));
         assert!(defs.contains_key("ref2"));
-        assert!(defs.contains_key("ref3"));
+        assert!(!defs.contains_key("ref3"));
+        assert!(defs.contains_key("ref4"));
     }
 
     #[test]

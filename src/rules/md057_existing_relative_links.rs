@@ -3686,6 +3686,26 @@ Use [spaces] and [missing] here.
     }
 
     #[test]
+    fn test_definition_shaped_paragraph_continuation_is_not_checked() {
+        let temp_dir = tempdir().unwrap();
+        let rule = MD057ExistingRelativeLinks::new().with_path(temp_dir.path());
+        for content in [
+            "Some text\n[r]: missing.md\n",
+            "- item\n  [r]: missing.md\n",
+            "> quoted\n> [r]: missing.md\n",
+            "Term\n: definition\n[r]: missing.md\n",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(result.is_empty(), "{content:?} is text, not a definition: {result:?}");
+        }
+        // The control: the same line after a blank line is a definition.
+        let content = "Some text\n\n[r]: missing.md\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    }
+
+    #[test]
     fn test_inline_and_reference_both_checked() {
         // Both inline links and reference definitions should be checked
         let temp_dir = tempdir().unwrap();
@@ -3694,6 +3714,7 @@ Use [spaces] and [missing] here.
         let content = r#"# Test Document
 
 [inline link](./inline-missing.md)
+
 [ref]: ./ref-missing.md
 
 Use [ref] here.
