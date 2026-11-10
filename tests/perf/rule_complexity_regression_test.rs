@@ -378,7 +378,9 @@ fn test_workspace_link_extraction_linear_complexity() {
                     count + usize::from(name == "tail-angle")
                 );
                 if name == "tail-angle" {
-                    assert!(links.relative.iter().all(|link| link.target_path == "last.md"));
+                    let (last, rest) = links.relative.split_last().unwrap();
+                    assert_eq!(last.target_path, "last.md");
+                    assert!(rest.iter().all(|link| link.target_path == "target.md"));
                 }
                 let mut times: Vec<_> = (0..5)
                     .map(|_| {

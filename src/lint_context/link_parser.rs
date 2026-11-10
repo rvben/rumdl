@@ -622,7 +622,7 @@ pub(crate) fn reference_label_start(source: &str) -> Option<usize> {
     open
 }
 
-fn fold_label(label: &str) -> String {
+pub(super) fn fold_label(label: &str) -> String {
     unicase::UniCase::new(collapse_label(label)).to_folded_case()
 }
 
@@ -1198,7 +1198,7 @@ pub(super) fn has_explicit_empty_title_ending(span: &str) -> bool {
 /// `with \"quote\"` to MD054/MD053, and a transformer that copies that string
 /// back into the document would either double-escape or leave the wrong
 /// character count.
-fn unescape_commonmark_punctuation(input: &str) -> String {
+pub(super) fn unescape_commonmark_punctuation(input: &str) -> String {
     if !input.contains('\\') {
         return input.to_string();
     }
@@ -1498,4 +1498,69 @@ pub(super) fn parse_reference_defs(
     }
 
     refs
+}
+
+/// A definition a link may resolve to, with its label folded for matching.
+pub(super) struct DefinitionCandidate {
+    pub(super) label: String,
+    pub(super) definition: ParserDefinition,
+}
+
+/// The definitions links may resolve to, in source order: those the Markdown
+/// parser reads, and those in `reference_defs` that only the flavor reads,
+/// where it starts a block the parser continues. A label can occur more than
+/// once; which occurrence a link resolves to depends on which of them are in
+/// the document body, so the choice is left to the reader of this list.
+pub(super) fn definition_candidates(
+    content: &str,
+    parser_definitions: Vec<ParserDefinition>,
+    reference_defs: &[ReferenceDef],
+) -> Vec<DefinitionCandidate> {
+    let parser_starts: HashSet<usize> = parser_definitions.iter().map(|d| d.span.start).collect();
+    let mut candidates: Vec<DefinitionCandidate> = parser_definitions
+        .into_iter()
+        .filter_map(|definition| {
+            Some(DefinitionCandidate {
+                label: fold_label(written_label(content, definition.span.start)?),
+                definition,
+            })
+        })
+        .collect();
+    for def in reference_defs {
+        let start = definition_label_start(content, def);
+        if parser_starts.contains(&start) {
+            continue;
+        }
+        candidates.push(DefinitionCandidate {
+            label: fold_label(&def.id),
+            definition: ParserDefinition {
+                span: start..def.byte_end,
+                dest: def.destination.clone(),
+            },
+        });
+    }
+    candidates.sort_by_key(|candidate| candidate.definition.span.start);
+    candidates
+}
+
+/// Byte offset of the `[` opening the label of `def`.
+pub(super) fn definition_label_start(content: &str, def: &ReferenceDef) -> usize {
+    let rest = &content[def.byte_offset..];
+    def.byte_offset + rest.len() - rest.trim_start_matches(' ').len()
+}
+
+/// The label of the definition whose `[` is at `start`, as written: up to
+/// the first unescaped `]`.
+fn written_label(content: &str, start: usize) -> Option<&str> {
+    let rest = content.get(start..)?.strip_prefix('[')?;
+    let mut escaped = false;
+    for (i, c) in rest.char_indices() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            ']' => return Some(&rest[..i]),
+            _ => {}
+        }
+    }
+    None
 }

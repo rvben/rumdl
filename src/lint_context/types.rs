@@ -368,6 +368,44 @@ pub struct ReferenceDef {
     pub title_byte_end: Option<usize>,
 }
 
+impl ReferenceDef {
+    /// Byte range of the destination in the document, without angle brackets.
+    ///
+    /// Both the label and the title can repeat the destination text, so the
+    /// search is bounded to what sits between the label's closing bracket and
+    /// the title. Anchoring anywhere else risks an edit rewriting the label,
+    /// which would leave every usage of the reference dangling. `None` when the
+    /// source does not spell the destination as `url` reads, as when it holds
+    /// a backslash escape.
+    pub(crate) fn destination_range(&self, content: &str) -> Option<Range<usize>> {
+        let def = content.get(self.byte_offset..self.byte_end)?;
+        let label_end = definition_label_end(def)?;
+        let search_end = self
+            .title_byte_start
+            .map_or(def.len(), |title| title.saturating_sub(self.byte_offset).min(def.len()));
+        let offset = def.get(label_end..search_end)?.find(self.url.as_str())? + label_end;
+        let start = self.byte_offset + offset;
+        Some(start..start + self.url.len())
+    }
+}
+
+/// Offset just past the `]:` that closes a reference definition's label.
+///
+/// A label may itself contain a bracket when the bracket is escaped, so
+/// escapes are skipped rather than matched.
+fn definition_label_end(def: &str) -> Option<usize> {
+    let bytes = def.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b']' if bytes.get(i + 1) == Some(&b':') => return Some(i + 2),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
 /// Parsed code span information
 #[derive(Debug, Clone)]
 pub struct CodeSpan {

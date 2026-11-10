@@ -770,40 +770,6 @@ impl MD057ExistingRelativeLinks {
         }
     }
 
-    /// Byte range of a reference definition's destination in the document.
-    ///
-    /// Both the label and the title can repeat the destination text, so the
-    /// search is bounded to what sits between the label's closing bracket and
-    /// the title. Anchoring anywhere else risks a fix rewriting the label,
-    /// which would leave every usage of the reference dangling.
-    fn ref_def_url_range(content: &str, ref_def: &crate::lint_context::ReferenceDef) -> Option<std::ops::Range<usize>> {
-        let def = content.get(ref_def.byte_offset..ref_def.byte_end)?;
-        let label_end = Self::label_end(def)?;
-        let search_end = ref_def.title_byte_start.map_or(def.len(), |title| {
-            title.saturating_sub(ref_def.byte_offset).min(def.len())
-        });
-        let offset = def.get(label_end..search_end)?.find(ref_def.url.as_str())? + label_end;
-        let start = ref_def.byte_offset + offset;
-        Some(start..start + ref_def.url.len())
-    }
-
-    /// Offset just past the `]:` that closes a reference definition's label.
-    ///
-    /// A label may itself contain a bracket when the bracket is escaped, so
-    /// escapes are skipped rather than matched.
-    fn label_end(def: &str) -> Option<usize> {
-        let bytes = def.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'\\' => i += 2,
-                b']' if bytes.get(i + 1) == Some(&b':') => return Some(i + 2),
-                _ => i += 1,
-            }
-        }
-        None
-    }
-
     /// Whether this document has frontmatter the rule is configured to check.
     /// Gates the body-link early exits, which would otherwise skip a document
     /// whose only destinations sit in its frontmatter.
@@ -1618,13 +1584,20 @@ impl Rule for MD057ExistingRelativeLinks {
                     line,
                     column,
                     end_line: line,
-                    end_column: position(destination.fix_range.end).1,
+                    end_column: position(
+                        destination
+                            .fix_range
+                            .as_ref()
+                            .map_or(destination.url_range.end, |range| range.end),
+                    )
+                    .1,
                     message: Self::self_referential_message(&full_url, &self_link),
                     severity: Severity::Warning,
                     fix: match &self_link {
-                        SelfReferentialLink::Fragment(fragment) => {
-                            Some(Fix::new(destination.fix_range.clone(), fragment.clone()))
-                        }
+                        SelfReferentialLink::Fragment(fragment) => destination
+                            .fix_range
+                            .clone()
+                            .map(|range| Fix::new(range, fragment.clone())),
                         SelfReferentialLink::WholeFile => None,
                     },
                 });
@@ -1638,10 +1611,16 @@ impl Rule for MD057ExistingRelativeLinks {
                     line,
                     column,
                     end_line: line,
-                    end_column: position(destination.fix_range.end).1,
+                    end_column: position(
+                        destination
+                            .fix_range
+                            .as_ref()
+                            .map_or(destination.url_range.end, |range| range.end),
+                    )
+                    .1,
                     message: format!("Relative link '{full_url}' can be simplified to '{suggestion}'"),
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(destination.fix_range.clone(), suggestion)),
+                    fix: destination.fix_range.clone().map(|range| Fix::new(range, suggestion)),
                 });
             }
 
@@ -1783,7 +1762,7 @@ impl Rule for MD057ExistingRelativeLinks {
             // Where this definition's destination sits, shared by every report
             // on it. Without a located destination a warning falls back to the
             // start of the definition's line and offers no fix.
-            let url_range = Self::ref_def_url_range(ctx.content, ref_def);
+            let url_range = ref_def.destination_range(ctx.content);
             let (line, col) = url_range
                 .as_ref()
                 .map_or((ref_def.line, 1), |range| position(range.start));
@@ -6191,8 +6170,12 @@ mod cached_position_tests {
                 assert_eq!(warnings.len(), 6);
                 for (warning, destination) in warnings.iter().zip(destinations) {
                     let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+                    let fix_range = destination
+                        .fix_range
+                        .clone()
+                        .expect("every destination here is located");
                     let end = if warning.fix.is_some() {
-                        destination.fix_range.end
+                        fix_range.end
                     } else {
                         destination.url_range.end
                     };
@@ -6201,7 +6184,7 @@ mod cached_position_tests {
                         (line, column, line, ctx.offset_to_line_col(end).1)
                     );
                     if let Some(fix) = &warning.fix {
-                        assert_eq!(fix.range, destination.fix_range);
+                        assert_eq!(fix.range, fix_range);
                         assert_eq!(
                             fix.replacement,
                             if destination.url == "page.md" {
@@ -6213,7 +6196,7 @@ mod cached_position_tests {
                     }
                 }
                 let definition = &ctx.reference_definitions()[0];
-                let range = MD057ExistingRelativeLinks::ref_def_url_range(&content, definition).unwrap();
+                let range = definition.destination_range(&content).unwrap();
                 let (line, column) = ctx.offset_to_line_col(range.start);
                 let warning = warnings.last().unwrap();
                 assert_eq!(

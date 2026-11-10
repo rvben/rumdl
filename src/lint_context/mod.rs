@@ -403,16 +403,18 @@ pub struct LintContext<'a> {
     blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
     document_anchors_cache: OnceLock<anchors::DocumentAnchors>,
     link_destinations_cache: OnceLock<link_destinations::LinkDestinations>,
-    links: Vec<ParsedLink<'a>>,                     // Pre-parsed links
-    rendered_link_ends_cache: OnceLock<Vec<usize>>, // Prefix maxima for containment queries
-    parsed_link_ranges: Vec<(usize, usize)>,        // Native links, without undefined-reference fallbacks
-    images: Vec<ParsedImage<'a>>,                   // Pre-parsed images
-    unresolved_links: Vec<ParsedLink<'a>>,          // Reference candidates with no definition (literal text)
-    unresolved_images: Vec<ParsedImage<'a>>,        // Image reference candidates with no definition (literal text)
-    broken_links: Vec<BrokenLinkInfo>,              // Broken/undefined references
-    footnote_refs: Vec<FootnoteRef>,                // Pre-parsed footnote references
-    reference_defs: Vec<ReferenceDef>,              // Reference definitions
-    reference_defs_map: HashMap<String, usize>,     // O(1) lookup by lowercase ID -> index in reference_defs
+    links: Vec<ParsedLink<'a>>,                                   // Pre-parsed links
+    rendered_link_ends_cache: OnceLock<Vec<usize>>,               // Prefix maxima for containment queries
+    parsed_link_ranges: Vec<(usize, usize)>,                      // Native links, without undefined-reference fallbacks
+    images: Vec<ParsedImage<'a>>,                                 // Pre-parsed images
+    unresolved_links: Vec<ParsedLink<'a>>, // Reference candidates with no definition (literal text)
+    unresolved_images: Vec<ParsedImage<'a>>, // Image reference candidates with no definition (literal text)
+    broken_links: Vec<BrokenLinkInfo>,     // Broken/undefined references
+    footnote_refs: Vec<FootnoteRef>,       // Pre-parsed footnote references
+    reference_defs: Vec<ReferenceDef>,     // Reference definitions
+    reference_defs_map: OnceLock<HashMap<String, usize>>, // Lowercase ID -> index in reference_defs of the definition links resolve to
+    definition_candidates: Vec<link_parser::DefinitionCandidate>, // Definitions links may resolve to, in source order
+    body_definitions: OnceLock<Vec<usize>>, // Indices into definition_candidates of the body definitions, first per label
     inline_code_ranges: Vec<(usize, usize)>,
     code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>,
     source_code_spans: OnceLock<Vec<SourceCodeSpan>>, // Lazy-loaded inline code spans
@@ -1753,12 +1755,18 @@ impl<'a> LintContext<'a> {
                 }
             }
 
-            // Rebuild reference_defs_map after filtering. A link resolves to
-            // the first definition of its label; a later one defines nothing.
-            let mut reference_defs_map: HashMap<String, usize> = HashMap::with_capacity(reference_defs.len());
-            for (idx, def) in reference_defs.iter().enumerate() {
-                reference_defs_map.entry(def.id.to_lowercase()).or_insert(idx);
-            }
+            // The definitions links may resolve to. MDX documents are read by
+            // the MDX parser alone, whose definitions are all in
+            // `reference_defs`.
+            let definition_candidates = link_parser::definition_candidates(
+                content,
+                if mdx_context.is_some() {
+                    Vec::new()
+                } else {
+                    parser_definitions
+                },
+                &reference_defs,
+            );
 
             // Pre-compute sorted link title byte ranges for binary search
             let link_title_ranges: Vec<(usize, usize)> = reference_defs
@@ -1935,7 +1943,9 @@ impl<'a> LintContext<'a> {
                 broken_links,
                 footnote_refs,
                 reference_defs,
-                reference_defs_map,
+                reference_defs_map: OnceLock::new(),
+                definition_candidates,
+                body_definitions: OnceLock::new(),
                 inline_code_ranges,
                 code_spans_cache: OnceLock::new(),
                 source_code_spans: OnceLock::new(),
@@ -2723,9 +2733,32 @@ impl<'a> LintContext<'a> {
     }
 
     /// Find a reference definition by its case-insensitive identifier.
+    ///
+    /// A link resolves to the first definition of its label in the document
+    /// body; a later one defines nothing. Text shaped like a definition in
+    /// front matter or another region outside the body never shadows a body
+    /// definition, and is used only when the body defines no such label.
     pub fn reference_definition(&self, ref_id: &str) -> Option<&ReferenceDef> {
         let normalized_id = ref_id.to_lowercase();
         self.reference_defs_map
+            .get_or_init(|| {
+                let mut chosen: HashMap<String, (usize, bool)> = HashMap::with_capacity(self.reference_defs.len());
+                for (idx, def) in self.reference_defs.iter().enumerate() {
+                    let in_body =
+                        self.is_body_markdown(def.line, link_parser::definition_label_start(self.content, def));
+                    match chosen.entry(def.id.to_lowercase()) {
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            entry.insert((idx, in_body));
+                        }
+                        std::collections::hash_map::Entry::Occupied(mut entry) => {
+                            if in_body && !entry.get().1 {
+                                entry.insert((idx, true));
+                            }
+                        }
+                    }
+                }
+                chosen.into_iter().map(|(id, (idx, _))| (id, idx)).collect()
+            })
             .get(&normalized_id)
             .map(|&index| &self.reference_defs[index])
     }

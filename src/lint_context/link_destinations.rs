@@ -1,57 +1,80 @@
-//! Raw inline destinations, with source spelling and byte positions retained.
+//! Link destinations of the document body, as the parser read them, with the
+//! source spelling and byte positions retained where they can be located.
+//!
+//! What a destination is, and what it reads as, always comes from the parser.
+//! The source is consulted only to find where it is written, and a place
+//! counts only when its text reads as the parser's destination. A place whose
+//! text equals that destination byte for byte may also be rewritten; one
+//! spelled with backslash escapes or character references may not, because a
+//! rewrite derived from the decoded value would change what those spell.
 
 use super::{LintContext, ParsedImage, ParsedLink};
-use crate::workspace_index::{URL_EXTRACT_ANGLE_BRACKET_REGEX, URL_EXTRACT_REGEX};
 use pulldown_cmark::LinkType;
-use regex::Regex;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::OnceLock;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SourceDestination {
-    syntax: Range<usize>,
-    pub url: Range<usize>,
-    fragment: Option<Range<usize>>,
-    angle: bool,
+/// Splits a destination at its first `#` into the path part and the fragment
+/// with its `#`, empty when there is none.
+fn split_fragment(url: &str) -> (&str, &str) {
+    url.find('#').map_or((url, ""), |hash| url.split_at(hash))
+}
+
+/// Where an inline link's destination is written, without angle brackets.
+struct SourceDestination {
+    range: Range<usize>,
+    /// Whether the written text is the parser's destination byte for byte.
+    verbatim: bool,
 }
 
 impl SourceDestination {
-    fn from_captures(caps: &regex::Captures<'_>, base: usize, angle: bool) -> Option<Self> {
-        let absolute = |range: Range<usize>| base + range.start..base + range.end;
-        Some(Self {
-            syntax: absolute(caps.get(0)?.range()),
-            url: absolute(caps.get(1)?.range()),
-            fragment: caps.get(2).map(|group| absolute(group.range())),
-            angle,
-        })
+    fn locate(content: &str, link: &ParsedLink<'_>) -> Option<Self> {
+        let range = inline_destination_range(content, link)?;
+        let verbatim = content[range.clone()] == *link.url;
+        Some(Self { range, verbatim })
     }
 
-    pub(crate) fn fragment<'a>(&self, content: &'a str) -> &'a str {
-        self.fragment.as_ref().map_or("", |range| &content[range.clone()])
-    }
-
-    fn body<'a>(&self, content: &'a str) -> BodyLinkDestination<'a> {
+    fn body<'s>(&self, link: &'s ParsedLink<'_>) -> BodyLinkDestination<'s> {
+        let (url, fragment) = split_fragment(&link.url);
         BodyLinkDestination {
-            url: content[self.url.clone()].trim(),
-            fragment: self.fragment(content),
-            url_range: self.url.clone(),
-            fix_range: self.url.start..self.fragment.as_ref().map_or(self.url.end, |range| range.end),
+            link_start: link.byte_offset,
+            url,
+            fragment,
+            url_range: if self.verbatim {
+                self.range.start..self.range.start + url.len()
+            } else {
+                self.range.clone()
+            },
+            fix_range: self.verbatim.then(|| self.range.clone()),
         }
+    }
+}
+
+/// The destination of a body link whose source spelling could not be matched
+/// to the URL the parser read: the parser's URL, with no source range to
+/// rewrite. Diagnostics point at the link's first line.
+fn unlocated_body<'s>(content: &str, link: &'s ParsedLink<'_>) -> BodyLinkDestination<'s> {
+    let (path, fragment) = split_fragment(&link.url);
+    let first_line_end = content[link.byte_offset..link.byte_end]
+        .find(['\n', '\r'])
+        .map_or(link.byte_end, |end| link.byte_offset + end);
+    BodyLinkDestination {
+        link_start: link.byte_offset,
+        url: path,
+        fragment,
+        url_range: link.byte_offset..first_line_end,
+        fix_range: None,
     }
 }
 
 /// Source facts align with the parser's links. The secondary views are built
 /// only when requested, and never cache rule configuration or disk answers.
 pub(super) struct LinkDestinations {
-    destinations: Vec<LocatedDestination>,
-    by_anchor: OnceLock<Vec<(usize, usize)>>,
-    body: OnceLock<Vec<usize>>,
-}
-
-struct LocatedDestination {
-    link: usize,
-    source: SourceDestination,
+    /// The written destination of each entry of `ctx.links()`, for inline links.
+    destinations: Vec<Option<SourceDestination>>,
+    /// Indices into `ctx.links()` of the inline links rendered as body hyperlinks.
+    body_links: OnceLock<Vec<usize>>,
 }
 
 impl LinkDestinations {
@@ -60,33 +83,18 @@ impl LinkDestinations {
             destinations: ctx
                 .links()
                 .iter()
-                .enumerate()
-                .filter_map(|(link, parsed)| {
-                    locate_destination(ctx.content, parsed).map(|source| LocatedDestination { link, source })
+                .map(|link| {
+                    matches!(link.link_type, LinkType::Inline)
+                        .then(|| SourceDestination::locate(ctx.content, link))
+                        .flatten()
                 })
                 .collect(),
-            by_anchor: OnceLock::new(),
-            body: OnceLock::new(),
+            body_links: OnceLock::new(),
         }
     }
 
-    fn at(&self, anchor: usize) -> Option<&SourceDestination> {
-        let indices = self.by_anchor.get_or_init(|| {
-            let mut indices: Vec<_> = self
-                .destinations
-                .iter()
-                .enumerate()
-                .map(|(i, destination)| (destination.source.syntax.start, i))
-                .collect();
-            indices.sort_unstable();
-            indices
-        });
-        let i = indices.binary_search_by_key(&anchor, |&(anchor, _)| anchor).ok()?;
-        Some(&self.destinations[indices[i].1].source)
-    }
-
-    fn body_indices(&self, ctx: &LintContext<'_>) -> &[usize] {
-        self.body.get_or_init(|| {
+    fn body_link_indices(&self, ctx: &LintContext<'_>) -> &[usize] {
+        self.body_links.get_or_init(|| {
             debug_assert!(
                 ctx.links()
                     .windows(2)
@@ -94,18 +102,11 @@ impl LinkDestinations {
             );
             let mut pending_images = ctx.images().iter().peekable();
             let mut open_images: Vec<&ParsedImage<'_>> = Vec::new();
-            self.destinations
+            ctx.links()
                 .iter()
                 .enumerate()
-                .filter_map(|(i, destination)| {
-                    let link = &ctx.links()[destination.link];
-                    if !matches!(link.link_type, LinkType::Inline)
-                        || ctx
-                            .line_info(link.line)
-                            .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
-                        || ctx.is_in_code_span_byte(link.byte_offset)
-                        || ctx.is_in_math_span(link.byte_offset)
-                        || ctx.is_in_shortcode(link.byte_offset)
+                .filter_map(|(i, link)| {
+                    if !matches!(link.link_type, LinkType::Inline) || !ctx.is_body_markdown(link.line, link.byte_offset)
                     {
                         return None;
                     }
@@ -143,14 +144,25 @@ fn renders_as_image(ctx: &LintContext<'_>, image: &ParsedImage<'_>) -> bool {
             .is_some_and(|id| ctx.reference_definition(id).is_some())
 }
 
-/// The destination of one inline link, located in the original document.
+/// The destination of one inline link of the document body.
 pub(crate) struct BodyLinkDestination<'a> {
-    /// Raw path spelling, without the fragment; filesystem policy is separate.
+    /// Byte offset of the link's opening `[`, the `byte_offset` of its entry
+    /// in `ctx.links()`.
+    pub link_start: usize,
+    /// Path, as the parser read it, without the fragment; empty for a
+    /// fragment-only link. Filesystem policy is separate.
     pub url: &'a str,
+    /// Fragment with its `#`, as the parser read it; empty when there is none.
     pub fragment: &'a str,
-    /// Diagnostic range. A rewrite also includes the fragment in `fix_range`.
+    /// Diagnostic range: the written path when the destination is written
+    /// verbatim, the whole written destination when it is spelled with
+    /// escapes or references, or the link's first line when it could not be
+    /// located.
     pub url_range: Range<usize>,
-    pub fix_range: Range<usize>,
+    /// The written path and fragment, which a rewrite replaces. `None` unless
+    /// the source spells the destination verbatim: nothing may be rewritten
+    /// then.
+    pub fix_range: Option<Range<usize>>,
 }
 
 impl<'a> BodyLinkDestination<'a> {
@@ -163,186 +175,293 @@ impl<'a> BodyLinkDestination<'a> {
     }
 }
 
-/// `captures_at` searches forward; a parsed link must use its own bracket's
-/// destination, never one borrowed from a later link in the same span.
-fn extract_url_at<'a>(re: &Regex, source: &'a str, anchor: usize) -> Option<regex::Captures<'a>> {
-    let caps = re.captures_at(source, anchor)?;
-    (caps.get(0)?.start() == anchor).then_some(caps)
-}
-
-fn locate_destination(content: &str, link: &ParsedLink<'_>) -> Option<SourceDestination> {
-    if !matches!(link.link_type, LinkType::Inline) {
-        return None;
-    }
-    let span = content.get(link.byte_offset..link.byte_end)?;
-    let anchor = 1 + link.text.len();
-    if !span.get(anchor..).is_some_and(|rest| rest.starts_with("](")) {
-        return None;
-    }
-    if span[anchor..].contains('<')
-        && let Some(caps) = extract_url_at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, span, anchor)
-    {
-        return SourceDestination::from_captures(&caps, link.byte_offset, true);
-    }
-    SourceDestination::from_captures(
-        &extract_url_at(&URL_EXTRACT_REGEX, span, anchor)?,
-        link.byte_offset,
-        false,
-    )
-}
-
-/// A regex result stays valid while later queries have not passed its start.
-/// Keep misses too: searching an angle-free suffix again is quadratic. Starting
-/// inside an earlier match requires a fresh search, since matches can overlap.
-#[derive(Default)]
-struct DestinationSearch {
-    from: Option<usize>,
-    found: Option<SourceDestination>,
-}
-
-impl DestinationSearch {
-    fn at(
-        &mut self,
-        regex: &Regex,
-        source: &str,
-        base: usize,
-        anchor: usize,
-        angle: bool,
-    ) -> Option<SourceDestination> {
-        if self.from.is_none_or(|from| anchor < from)
-            || self
-                .found
-                .as_ref()
-                .is_some_and(|found| found.syntax.start < base + anchor)
-        {
-            self.from = Some(anchor);
-            self.found = regex
-                .captures_at(source, anchor)
-                .and_then(|caps| SourceDestination::from_captures(&caps, base, angle));
-        }
-        self.found.clone()
-    }
-}
-
-/// Workspace indexing searches ahead on a line and prefers angle destinations.
-/// Reuse those searches for successive link anchors without changing that policy.
-/// Backward queries restart the relevant search and preserve the same answer.
-pub(crate) struct LineDestinationSearch<'a> {
-    parsed: &'a LinkDestinations,
-    source: &'a str,
-    base: usize,
-    last_angle: Option<usize>,
-    angle: DestinationSearch,
-    bare: DestinationSearch,
-}
-
-impl LineDestinationSearch<'_> {
-    pub(crate) fn at(&mut self, anchor: usize) -> Option<SourceDestination> {
-        let parsed = self
-            .parsed
-            .at(self.base + anchor)
-            .filter(|destination| destination.syntax.end <= self.base + self.source.len());
-        if let Some(destination) =
-            parsed.filter(|destination| destination.angle || self.last_angle.is_none_or(|last| last < anchor))
-        {
-            return Some(destination.clone());
-        }
-        if let Some(destination) = self
-            .angle
-            .at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, self.source, self.base, anchor, true)
-        {
-            return Some(destination);
-        }
-        self.bare.at(&URL_EXTRACT_REGEX, self.source, self.base, anchor, false)
-    }
-}
-
 impl<'a> LintContext<'a> {
     fn link_destinations(&self) -> &LinkDestinations {
         self.link_destinations_cache.get_or_init(|| LinkDestinations::new(self))
     }
 
-    /// Inline destinations rendered as body hyperlinks. Each consumer still
-    /// applies its own configuration, path policy and filesystem checks.
-    pub(crate) fn body_link_destinations(&self) -> impl Iterator<Item = BodyLinkDestination<'a>> + '_ {
-        let facts = self.link_destinations();
-        facts
-            .body_indices(self)
-            .iter()
-            .map(|&i| facts.destinations[i].source.body(self.content))
+    /// Whether the byte at `offset`, on 1-based `line`, is Markdown the renderer
+    /// reads as part of the document body.
+    ///
+    /// Front matter, code, math, comments, raw HTML, and template, shortcode,
+    /// JSX and extension regions are text there, however much of it looks like
+    /// a link or a reference definition. Inline links and definitions are both
+    /// judged by this one test, so the two can never disagree about a region.
+    pub(crate) fn is_body_markdown(&self, line: usize, offset: usize) -> bool {
+        let in_text_lines = self.line_info(line).is_some_and(|info| {
+            info.in_front_matter
+                || info.in_code_block
+                || info.in_math_block
+                || (info.in_html_block && !info.in_mkdocs_html_markdown)
+                || info.in_pymdown_block
+                || info.in_kramdown_extension_block
+                || info.in_mkdocstrings
+                || info.in_esm_block
+        });
+        !(in_text_lines
+            || self.is_in_code_span_byte(offset)
+            || self.is_in_math_span(offset)
+            || self.is_in_html_comment(offset)
+            || self.is_in_obsidian_comment(offset)
+            || self.is_in_mdx_comment(offset)
+            || self.is_in_jsx_expression(offset)
+            || self.is_in_jinja_range(offset)
+            || self.is_in_shortcode(offset))
     }
 
-    /// Build a reusable search for the workspace index's legacy single-line
-    /// destination policy. Parsed destinations are reused only when they give
-    /// the same answer as the original angle-first regex searches.
-    pub(crate) fn index_link_destinations(&self, line: usize) -> Option<LineDestinationSearch<'_>> {
-        let info = self.line_info(line)?;
-        Some(LineDestinationSearch {
-            parsed: self.link_destinations(),
-            source: info.content(self.content),
-            base: info.byte_offset,
-            last_angle: info.content(self.content).rfind('<'),
-            angle: DestinationSearch::default(),
-            bare: DestinationSearch::default(),
+    /// The inline links rendered as hyperlinks of the document body, whether
+    /// or not their destination could be located in the source.
+    pub(crate) fn body_links(&self) -> impl Iterator<Item = &ParsedLink<'a>> + '_ {
+        let links = self.links();
+        self.link_destinations()
+            .body_link_indices(self)
+            .iter()
+            .map(move |&i| &links[i])
+    }
+
+    /// Destinations of the inline links rendered as body hyperlinks,
+    /// fragment-only ones included, one per link. Each consumer still applies
+    /// its own configuration, path policy and filesystem checks.
+    pub(crate) fn body_link_destinations(&self) -> impl Iterator<Item = BodyLinkDestination<'_>> + '_ {
+        let facts = self.link_destinations();
+        let links = self.links();
+        facts
+            .body_link_indices(self)
+            .iter()
+            .map(move |&i| match &facts.destinations[i] {
+                Some(destination) => destination.body(&links[i]),
+                None => unlocated_body(self.content, &links[i]),
+            })
+    }
+
+    /// The link reference definitions of the document body: those the
+    /// parser read, which excludes text that only resembles one (after a
+    /// paragraph line, indented as code), and those the flavor reads, outside
+    /// the regions `is_body_markdown` excludes. Only the first body
+    /// definition of a label is a link target, so a later duplicate is not
+    /// listed. Regions are excluded before the first is chosen, so text
+    /// shaped like a definition in front matter, say, never hides the body
+    /// definition of its label.
+    pub(crate) fn body_reference_definitions(&self) -> impl Iterator<Item = BodyDefinition<'_>> + '_ {
+        let content = self.content;
+        let indices = self.body_definitions.get_or_init(|| {
+            let mut labels = HashSet::new();
+            self.definition_candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| {
+                    let start = candidate.definition.span.start;
+                    let line = self.line_offsets.partition_point(|&offset| offset <= start);
+                    self.is_body_markdown(line, start)
+                })
+                .filter(|(_, candidate)| labels.insert(candidate.label.as_str()))
+                .map(|(index, _)| index)
+                .collect()
+        });
+        indices.iter().map(move |&index| {
+            let definition = &self.definition_candidates[index].definition;
+            let start = definition.span.start;
+            BodyDefinition {
+                start,
+                url: &definition.dest,
+                destination: definition_destination_range(content, &definition.span, &definition.dest),
+            }
         })
     }
+}
+
+/// One link reference definition of the document body.
+pub(crate) struct BodyDefinition<'a> {
+    /// Byte offset of the label's opening `[`.
+    pub start: usize,
+    /// The destination as the parser read it: escapes and character
+    /// references resolved, without angle brackets, fragment included.
+    pub url: &'a str,
+    /// Byte range of the written destination, without angle brackets. `None`
+    /// when no place in the definition is written so that it reads as `url`.
+    pub destination: Option<Range<usize>>,
+}
+
+/// Byte range of an inline link's destination, without angle brackets, or
+/// `None` when no place in the source spells the destination the parser read.
+///
+/// The destination follows the label's closing `](`. Whitespace and line
+/// breaks may come first, and on a continuation line also the `>` markers of
+/// the blockquotes holding the link; list indentation is whitespace. Each place
+/// the destination could start is tried in turn, and a candidate counts only
+/// when it reads as the parser's destination. A container marker, or anything
+/// else mistaken for the destination, thus yields no range rather than a
+/// wrong one.
+fn inline_destination_range(content: &str, link: &ParsedLink<'_>) -> Option<Range<usize>> {
+    let span = content.get(link.byte_offset..link.byte_end)?;
+    let open = 1 + link.text.len();
+    span.get(open..)?.strip_prefix("](")?;
+    destination_after(content, link.byte_offset + open + 2, link.byte_end, &link.url)
+}
+
+/// Byte range of a reference definition's destination, without angle
+/// brackets, or `None` when no place in the definition spanning `span` spells
+/// `dest`, the destination the parser read. The destination follows the
+/// label's `]:`, as an inline link's follows its `](`.
+fn definition_destination_range(content: &str, span: &Range<usize>, dest: &str) -> Option<Range<usize>> {
+    let bytes = content.get(span.clone())?.as_bytes();
+    if bytes.first() != Some(&b'[') {
+        return None;
+    }
+    // A label may hold an escaped bracket, never an unescaped one.
+    let mut close = 1;
+    loop {
+        match *bytes.get(close)? {
+            b'\\' => close += 2,
+            b']' => break,
+            _ => close += 1,
+        }
+    }
+    if bytes.get(close + 1) != Some(&b':') {
+        return None;
+    }
+    destination_after(content, span.start + close + 2, span.end, dest)
+}
+
+/// Byte range of the destination written after `gap_start` and before `end`,
+/// without angle brackets, that reads as `dest`.
+///
+/// Whitespace and line breaks may come first, and on a continuation line also
+/// the `>` markers of the blockquotes holding the construct; list indentation
+/// is whitespace. Each place the destination could start is tried in turn, and
+/// a candidate counts only when it reads as the parser's destination. A
+/// container marker, or anything else mistaken for the destination, thus
+/// yields no range rather than a wrong one.
+fn destination_after(content: &str, gap_start: usize, end: usize, dest: &str) -> Option<Range<usize>> {
+    let mut at_line_start = false;
+    for (offset, ch) in content.get(gap_start..end)?.char_indices() {
+        let start = gap_start + offset;
+        match ch {
+            ' ' | '\t' => {}
+            '\n' | '\r' => at_line_start = true,
+            // A `>` opening a continuation line is a blockquote marker, unless
+            // the destination itself starts with it.
+            '>' if at_line_start => {
+                if let Some(range) = destination_at(content, start, end)
+                    && decode_destination(&content[range.clone()]) == dest
+                {
+                    return Some(range);
+                }
+            }
+            _ => {
+                let range = destination_at(content, start, end)?;
+                return (decode_destination(&content[range.clone()]) == dest).then_some(range);
+            }
+        }
+    }
+    None
+}
+
+/// A destination as written in the source, read the way the parser reads it
+/// (CommonMark 2.4, 2.5): in one pass, a backslash before ASCII punctuation
+/// escapes it, an entity or numeric character reference stands for its
+/// character, and a carriage return is dropped. One pass means the text a
+/// step produces is never read again, so `\&amp;` reads as `&amp;`.
+pub(crate) fn decode_destination(written: &str) -> Cow<'_, str> {
+    if !written.contains(['\\', '&', '\r']) {
+        return Cow::Borrowed(written);
+    }
+    let bytes = written.as_bytes();
+    let mut decoded = String::with_capacity(written.len());
+    let mut mark = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if bytes.get(i + 1).is_some_and(u8::is_ascii_punctuation) => {
+                decoded.push_str(&written[mark..i]);
+                mark = i + 1;
+                i += 2;
+            }
+            b'&' => match character_reference(&written[i..]) {
+                Some((len, value)) => {
+                    decoded.push_str(&written[mark..i]);
+                    decoded.push_str(&value);
+                    i += len;
+                    mark = i;
+                }
+                None => i += 1,
+            },
+            b'\r' => {
+                decoded.push_str(&written[mark..i]);
+                i += 1;
+                mark = i;
+            }
+            _ => i += 1,
+        }
+    }
+    decoded.push_str(&written[mark..]);
+    Cow::Owned(decoded)
+}
+
+/// The character reference opening `source`, which starts with `&`: its
+/// length and the text it stands for. A numeric reference takes up to seven
+/// decimal or six hexadecimal digits; zero, a surrogate or a value past
+/// U+10FFFF stands for U+FFFD. A named one is an HTML5 entity name. Both end
+/// with `;`.
+fn character_reference(source: &str) -> Option<(usize, String)> {
+    let bytes = source.as_bytes();
+    if bytes.get(1) == Some(&b'#') {
+        let hex = bytes.get(2).is_some_and(|&b| b | 0x20 == b'x');
+        let (digits, radix, limit) = if hex { (3, 16, 6) } else { (2, 10, 7) };
+        let count = bytes[digits..]
+            .iter()
+            .take(limit)
+            .take_while(|b| if hex { b.is_ascii_hexdigit() } else { b.is_ascii_digit() })
+            .count();
+        if count == 0 || bytes.get(digits + count) != Some(&b';') {
+            return None;
+        }
+        let character = u32::from_str_radix(&source[digits..digits + count], radix)
+            .ok()
+            .filter(|&codepoint| codepoint != 0)
+            .and_then(char::from_u32)
+            .unwrap_or('\u{FFFD}');
+        return Some((digits + count + 1, character.to_string()));
+    }
+    let name_end = 1 + bytes[1..].iter().take_while(|b| b.is_ascii_alphanumeric()).count();
+    if name_end == 1 || bytes.get(name_end) != Some(&b';') {
+        return None;
+    }
+    let value = crate::mdx_parser::decode_named(&source[1..name_end], true)?;
+    Some((name_end + 1, value))
+}
+
+/// Byte range of the destination starting at `start`, without angle brackets.
+///
+/// Written in angle brackets it runs to the closing `>`; otherwise it ends at
+/// whitespace, at `end`, or at a `)` that closes no parenthesis opened inside
+/// it, with a backslash escaping the character after it (CommonMark 6.3).
+fn destination_at(content: &str, start: usize, end: usize) -> Option<Range<usize>> {
+    let rest = &content[start..end];
+    if let Some(inner) = rest.strip_prefix('<') {
+        let close = inner.find(['>', '\n'])?;
+        return (inner.as_bytes()[close] == b'>').then_some(start + 1..start + 1 + close);
+    }
+    let mut depth = 0usize;
+    let mut escaped = false;
+    for (offset, ch) in rest.char_indices() {
+        match ch {
+            _ if escaped => escaped = false,
+            '\\' => escaped = true,
+            '(' => depth += 1,
+            ')' if depth == 0 => return Some(start..start + offset),
+            ')' => depth -= 1,
+            ' ' | '\t' | '\n' | '\r' => return Some(start..start + offset),
+            _ => {}
+        }
+    }
+    Some(start..end)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::MarkdownFlavor;
-    use proptest::prelude::*;
-
-    fn compare_index_search(content: &str) {
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-        for (i, line) in ctx.lines.iter().enumerate() {
-            let source = line.content(content);
-            let mut search = ctx.index_link_destinations(i + 1).unwrap();
-            let anchors: Vec<_> = source
-                .char_indices()
-                .map(|(byte, _)| byte)
-                .chain([source.len()])
-                .collect();
-            for &anchor in anchors
-                .iter()
-                .chain(anchors.iter().rev())
-                .chain(anchors.iter().step_by(2))
-            {
-                let expected = URL_EXTRACT_ANGLE_BRACKET_REGEX
-                    .captures_at(source, anchor)
-                    .and_then(|caps| SourceDestination::from_captures(&caps, line.byte_offset, true))
-                    .or_else(|| {
-                        URL_EXTRACT_REGEX
-                            .captures_at(source, anchor)
-                            .and_then(|caps| SourceDestination::from_captures(&caps, line.byte_offset, false))
-                    });
-                assert_eq!(search.at(anchor), expected, "{content:?}, anchor {anchor}");
-            }
-        }
-    }
-
-    #[test]
-    fn cached_destinations_preserve_each_consumers_search_boundaries() {
-        for source in [
-            "[first](one.md) [second](<two.md>)",
-            "[a](<a[b](<b[c](<c.md>)>)>)",
-            "[bad](<never closed [good](later.md)",
-            "[a](one.md) <not a destination> [b](two.md)",
-            "[first](#fragment) [second](two.md#part)",
-            "[first]() [second](<two.md>)",
-            "[outer [inner]](one.md) [after](two.md)",
-            "é [label](one(inner).md#part) [after](two.md)",
-            "[label](<with space.md> \"title\") [after](two.md)",
-            "[multi\nline](one.md#part) [after](two.md)",
-            "[label](\n<one.md>\n) [after](two.md)\r\n",
-            "[a](one.md) text <unclosed [b](two.md)",
-            "![outer [inner](one.md)](image.png)",
-            "[link](one.md \"title](<two.md>)\")",
-        ] {
-            compare_index_search(source);
-        }
-    }
 
     #[test]
     fn body_candidates_reuse_source_ranges_without_losing_exclusions() {
@@ -353,7 +472,7 @@ mod tests {
             let found: Vec<_> = ctx
                 .body_link_destinations()
                 .map(|d| {
-                    assert_eq!(&content[d.fix_range.clone()], d.full_url().as_ref());
+                    assert_eq!(&content[d.fix_range.clone().unwrap()], d.full_url().as_ref());
                     (d.url.to_string(), d.fragment.to_string())
                 })
                 .collect();
@@ -368,19 +487,187 @@ mod tests {
         }
     }
 
-    proptest! {
-        #[test]
-        fn cached_index_search_matches_original_regexes(
-            pieces in prop::collection::vec(prop_oneof![
-                Just("[x](a.md#part)"), Just("[x](<b.md>)"), Just("[x](#part)"),
-                Just("[x]()"), Just("![a [b](c.md)](d.png)"), Just("[x]"),
-                Just("[x](a(b).md)"), Just("[x](<a b.md> \"title\")"),
-                Just("é🦀"), Just("\n"), Just("\r\n"), Just(" "),
-                Just("("), Just(")"), Just("<"), Just(">"), Just("#"), Just("\\"),
-                Just("["), Just("]"), Just("\""), Just("`"),
-            ], 0..35)
-        ) {
-            compare_index_search(&pieces.concat());
+    /// Containers as the prefix of a link's first line and of its continuation
+    /// lines.
+    const CONTAINERS: &[(&str, &str)] = &[
+        ("", ""),
+        ("> ", "> "),
+        ("> > ", "> > "),
+        (">> ", ">>"),
+        ("- ", "  "),
+        ("- > ", "  > "),
+        ("> - ", ">   "),
+        ("- ", "\t"),
+        ("> -\t", ">\t  "),
+    ];
+
+    /// Inline links with the destination written as `D` and continuation
+    /// lines opening with `C`.
+    const WRAPPED_FORMS: &[&str] = &[
+        "[x](\nCD)",
+        "[x](D\nC\"title\")",
+        "[x](\nCD\nC'title')",
+        "[x](  \nC  D  \nC  (title)  )",
+        "[x](\nC<D>)",
+    ];
+
+    /// Destinations as written, each with whether its source text is the
+    /// destination the parser reads byte for byte.
+    const SPELLINGS: &[(&str, bool)] = &[
+        ("t.md", true),
+        ("t.md#sec", true),
+        ("f(1).md#sec", true),
+        ("a\\_b.md", false),
+        ("t&amp;.md", false),
+        ("t.md#se&#99;", false),
+        ("t.md#se&#x63;", false),
+        ("t\\&amp;.md", false),
+        ("t&bogus;.md", true),
+        ("t&#0;.md", false),
+        (">t.md", true),
+    ];
+
+    #[test]
+    fn located_destinations_read_as_the_parsed_destination() {
+        let mut verbatim = 0;
+        let mut decoded = 0;
+        for (first, continuation) in CONTAINERS {
+            for form in WRAPPED_FORMS {
+                for &(written, is_verbatim) in SPELLINGS {
+                    // A `>` opening a line starts a blockquote, so a
+                    // destination starting with one stays on the `[` line.
+                    if written.starts_with('>') && !form.starts_with("[x](D") {
+                        continue;
+                    }
+                    let link = form.replace('C', continuation).replace('D', written);
+                    let content = format!("# H\n\n{first}{link}\n");
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    let found: Vec<_> = ctx.body_link_destinations().collect();
+                    assert_eq!(found.len(), 1, "{content:?}");
+                    let destination = &found[0];
+                    let parsed = ctx
+                        .links()
+                        .iter()
+                        .find(|link| link.byte_offset == destination.link_start)
+                        .unwrap();
+                    // The destination is always the parser's.
+                    assert_eq!(destination.full_url(), parsed.url.as_ref(), "{content:?}");
+                    match destination.fix_range.clone() {
+                        Some(range) => {
+                            assert!(is_verbatim, "{content:?} must not be rewritten");
+                            assert_eq!(&content[range.clone()], parsed.url.as_ref(), "{content:?}");
+                            assert_eq!(&content[destination.url_range.clone()], destination.url, "{content:?}");
+                            verbatim += 1;
+                        }
+                        None if destination.url_range.start != destination.link_start => {
+                            assert!(!is_verbatim, "{content:?}");
+                            assert_eq!(
+                                decode_destination(&content[destination.url_range.clone()]),
+                                parsed.url.as_ref(),
+                                "{content:?}"
+                            );
+                            decoded += 1;
+                        }
+                        None => panic!("{content:?} is not located"),
+                    }
+                }
+            }
+        }
+        assert!(verbatim > 0 && decoded > 0);
+    }
+
+    /// Definition sources with the destination written as `D` and
+    /// continuation lines opening with `C`.
+    const DEFINITION_FORMS: &[&str] = &[
+        "[r]: D",
+        "[r]:D",
+        "[r]: D \"title\"",
+        "[r]:\nCD",
+        "[r]:\nCD\nC'title'",
+        "[r]: <D>",
+        "[r\\]]: D",
+        "[r]:\nC<D> (title)",
+    ];
+
+    #[test]
+    fn located_definition_destinations_read_as_the_parsed_destination() {
+        let mut checked = 0;
+        for (first, continuation) in CONTAINERS {
+            for form in DEFINITION_FORMS {
+                for &(written, _) in SPELLINGS {
+                    if written.starts_with('>') && form.contains("\nCD") {
+                        continue;
+                    }
+                    let source = form.replace('C', continuation).replace('D', written);
+                    let content = format!("# H\n\n{first}{source}\n\n[x][r]\n");
+                    let parsed = pulldown_cmark::Parser::new_ext(
+                        &content,
+                        crate::utils::parser_options::rumdl_parser_options_for(&content),
+                    );
+                    let expected: Vec<_> = parsed
+                        .reference_definitions()
+                        .iter()
+                        .map(|(_, definition)| definition.dest.to_string())
+                        .collect();
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    let found: Vec<_> = ctx.body_reference_definitions().collect();
+                    assert_eq!(
+                        found.iter().map(|d| d.url.to_string()).collect::<Vec<_>>(),
+                        expected,
+                        "{content:?}"
+                    );
+                    for definition in &found {
+                        let Some(range) = definition.destination.clone() else {
+                            continue;
+                        };
+                        assert_eq!(
+                            decode_destination(&content[range.clone()]),
+                            definition.url,
+                            "{content:?}"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 0);
+    }
+
+    #[test]
+    fn destinations_decode_as_the_parser_reads_them() {
+        for written in [
+            "plain.md",
+            "a\\_b",
+            "a\\b",
+            "a\\",
+            "&amp;",
+            "&amp",
+            "&AMP;",
+            "&bogus;",
+            "&;",
+            "&#;",
+            "&#x;",
+            "&#45;",
+            "&#X2d;",
+            "&#1234567;",
+            "&#12345678;",
+            "&#x10FFFF;",
+            "&#x110000;",
+            "&#xFFFFFF;",
+            "&#xD800;",
+            "&#0;",
+            "&#x0000000;",
+            "\\&amp;",
+            "&amp;amp;",
+            "&#38;amp;",
+            "&ngE;",
+            "&NotNestedGreaterGreater;",
+            "é&eacute;",
+        ] {
+            let content = format!("[r]: {written}\n\n[r]\n");
+            let parsed = pulldown_cmark::Parser::new(&content);
+            let (_, definition) = parsed.reference_definitions().iter().next().expect(written);
+            assert_eq!(decode_destination(written), definition.dest.as_ref(), "{written:?}");
         }
     }
 }

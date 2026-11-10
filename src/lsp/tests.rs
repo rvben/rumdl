@@ -5501,6 +5501,110 @@ async fn test_find_references_positions_links_after_multibyte_text() {
     }
 }
 
+/// A workspace of `(file name, content)` pairs, written to disk, opened in a
+/// test server and indexed the way the index worker indexes them.
+async fn indexed_workspace(files: &[(&str, &str)]) -> (tempfile::TempDir, RumdlLanguageServer, Vec<Url>) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().resolve_like_server();
+    let server = create_test_server();
+    let rules = crate::lsp::index_worker::cross_file_rules(&Config::default());
+    let mut uris = Vec::new();
+    for (name, content) in files {
+        let path = root.join(name);
+        std::fs::write(&path, content).unwrap();
+        let uri = Url::from_file_path(&path).unwrap();
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: content.to_string(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+        let file_index = crate::build_file_index_only(
+            content,
+            &rules,
+            crate::config::MarkdownFlavor::Standard,
+            Some(path.clone()),
+        );
+        server.workspace_index.write().await.insert_file(path, file_index);
+        uris.push(uri);
+    }
+    (dir, server, uris)
+}
+
+/// Text that only resembles a link, written beside real links on the same
+/// line, alongside a reference definition that is a link.
+const LINK_LOOKALIKES: &str = "\
+[ref][r] and `[code](t.md#a)` here
+<!-- [comment](t.md#a) -->
+\\[escaped](t.md#a) text
+![alt [inner](t.md#a)](img.png)
+[shortcut] `[span](t.md#a)` [real](t.md#b)
+
+[r]: t.md#c
+[shortcut]: t.md
+
+<!--
+[hidden]: t.md#a
+-->
+";
+
+#[test]
+fn link_index_holds_parsed_links_and_definitions_only() {
+    let rules = crate::lsp::index_worker::cross_file_rules(&Config::default());
+    let index = crate::build_file_index_only(
+        LINK_LOOKALIKES,
+        &rules,
+        crate::config::MarkdownFlavor::Standard,
+        Some(std::path::PathBuf::from("s.md")),
+    );
+    let mut found: Vec<_> = index
+        .cross_file_links
+        .iter()
+        .map(|link| {
+            (
+                link.target_path.as_str(),
+                link.fragment.as_str(),
+                link.line,
+                link.column,
+            )
+        })
+        .collect();
+    found.sort_unstable();
+    // Inline links report the link's start, definitions their destination's.
+    assert_eq!(
+        found,
+        [("t.md", "", 8, 13), ("t.md", "b", 5, 29), ("t.md", "c", 7, 6)],
+        "{:#?}",
+        index.cross_file_links
+    );
+}
+
+#[tokio::test]
+async fn references_skip_lookalikes_and_include_definitions() {
+    let target = "# Doc\n\n## A\n\n## B\n\n## C\n";
+    let (_dir, server, uris) = indexed_workspace(&[("t.md", target), ("s.md", LINK_LOOKALIKES)]).await;
+    let (target_uri, source_uri) = (&uris[0], &uris[1]);
+
+    let references = |line: u32| {
+        let server = &server;
+        async move {
+            server
+                .handle_references(target_uri, Position { line, character: 3 })
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|location| &location.uri == source_uri)
+                .map(|location| (location.range.start.line, location.range.start.character))
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(references(2).await, [], "nothing links to `#a`");
+    assert_eq!(references(4).await, [(4, 28)]);
+    assert_eq!(references(6).await, [(6, 5)], "the definition links to `#c`");
+}
+
 #[tokio::test]
 async fn test_find_references_heading_with_incoming_links() {
     use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};

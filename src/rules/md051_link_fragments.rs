@@ -665,23 +665,11 @@ impl Rule for MD051LinkFragments {
             }
         }
 
-        // Extract cross-file links (for validation against other files)
-        for link in ctx.links() {
-            if link.is_reference {
-                continue;
-            }
-
-            // Skip links inside PyMdown blocks (MkDocs flavor)
-            if ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block) {
-                continue;
-            }
-
-            // Skip wiki-links - they use a different linking system and are not validated
-            // as relative file paths
-            if matches!(link.link_type, LinkType::WikiLink { .. }) {
-                continue;
-            }
-
+        // Extract cross-file links (for validation against other files). Only
+        // links the document renders as hyperlinks are recorded: a link written
+        // inside an image description is alt text, as is anything in code,
+        // math or a PyMdown block.
+        for link in ctx.body_links() {
             if let Some((path_part, fragment)) = Self::cross_file_parts(&link.url) {
                 // Skip empty fragments or template syntax
                 if fragment.is_empty() || fragment.contains("{{") || fragment.contains("{%") {

@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::lint_context::{LintContext, SourcePositions};
-use crate::utils::range_utils::byte_to_char_count;
 
 // =============================================================================
 // URL Decoding Helper
@@ -107,34 +106,9 @@ pub(crate) fn url_encode_path(path: &str) -> std::borrow::Cow<'_, str> {
 // =============================================================================
 // Shared cross-file link extraction utilities
 //
-// These regexes and helpers are the canonical implementation for extracting
-// cross-file links. Both MD057 and LSP use this shared code path for correct
-// position tracking.
+// These helpers classify the link destinations the parser found, for MD057,
+// MD051 and the LSP alike.
 // =============================================================================
-
-/// Regex to match the start of a link
-static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\]]*\]").unwrap());
-
-/// Regex to extract the URL from an angle-bracketed markdown link
-/// Format: `](<URL>)` or `](<URL> "title")`
-///
-/// MD057 extracts link destinations with this same pair, applying it to a
-/// parsed link's own source span rather than to the raw lines this indexer
-/// reads. The regexes therefore stay shared: a destination spelling one of them
-/// accepts and the other does not means a link one side sees and the other
-/// misses.
-pub(crate) static URL_EXTRACT_ANGLE_BRACKET_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"\]\(\s*<([^>]+)>(#[^\)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
-
-/// Regex to extract the URL from a normal markdown link (without angle brackets)
-/// Format: `](URL)` or `](URL "title")`
-///
-/// The destination admits one level of balanced parentheses, so
-/// `](file(inner).md)` yields the whole path. Stopping at the first `)` truncates
-/// it to `file(inner`, which then fails the markdown-extension test and drops the
-/// link from the index entirely.
-pub(crate) static URL_EXTRACT_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"]\(\s*((?:[^()>\s#]|\([^()]*\))+)(#[^)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
 
 /// Regex to detect URLs with explicit schemes
 pub(crate) static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
@@ -244,144 +218,117 @@ pub struct ExtractedCrossFileLinks {
     pub root_relative: Vec<CrossFileLinkIndex>,
 }
 
-/// Extract cross-file links from content using correct regex-based position tracking.
+/// Where a destination a document wrote points, for the purpose of indexing.
+pub(crate) enum IndexedDestination<'a> {
+    /// Resolved against the directory of the document that wrote it. The path
+    /// keeps its spelling, without query string or fragment.
+    Relative(&'a str),
+    /// Resolved against the content roots. The leading `/` is stripped, so the
+    /// path joins directly onto a root.
+    RootRelative(&'a str),
+}
+
+/// Classify a destination's path part (no fragment) as a Markdown file link.
 ///
-/// This is the canonical implementation used by both MD057 and LSP to ensure
-/// consistent and correct column positions for diagnostic reporting.
+/// `None` for anything that is not one: an empty or fragment-only destination,
+/// an external URL, a template variable or framework alias, a non-Markdown file,
+/// or a root-relative path that is protocol-relative (`//host`) or climbs out of
+/// its content root with `..`.
+pub(crate) fn indexed_destination(path: &str) -> Option<IndexedDestination<'_>> {
+    let path = path.trim();
+    if let Some(rel) = path.strip_prefix('/') {
+        if rel.starts_with('/')
+            || Path::new(rel)
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return None;
+        }
+        let stripped = strip_query_and_fragment(rel);
+        return is_markdown_file(&url_decode(stripped)).then_some(IndexedDestination::RootRelative(stripped));
+    }
+
+    if path.is_empty()
+        || PROTOCOL_DOMAIN_REGEX.is_match(path)
+        || path.starts_with("www.")
+        || path.starts_with('#')
+        || path.starts_with("{{")
+        || path.starts_with("{%")
+        || path.starts_with('~')
+        || path.starts_with('@')
+        || (path.starts_with('`') && path.ends_with('`'))
+    {
+        return None;
+    }
+
+    // The extension is read from the decoded name, so `guide%2Emd` is the
+    // Markdown file `guide.md`.
+    let stripped = strip_query_and_fragment(path);
+    is_markdown_file(&url_decode(stripped)).then_some(IndexedDestination::Relative(stripped))
+}
+
+/// Extract the Markdown file links a document holds, from the parser's inline
+/// link destinations and reference definitions.
+///
+/// Text that only resembles a link, in a code span, math, an HTML comment or an
+/// image description, is never parsed as one and so is never indexed, nor is
+/// text that only resembles a reference definition. An inline link's entry is
+/// positioned at the link's start, a definition's at its destination's.
 ///
 /// Returns one `CrossFileLinkIndex` per markdown file link, split into directory
 /// relative links and root-relative links (see `ExtractedCrossFileLinks`).
 pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
     let content = ctx.content;
-
-    // Early returns for performance
-    if content.is_empty() || !content.contains("](") {
-        return ExtractedCrossFileLinks::default();
-    }
-
     let mut links = ExtractedCrossFileLinks::default();
-    // Track which lines we've already processed to avoid duplicates
-    // (ctx.links() may have multiple entries for the same line)
-    let mut processed_lines = HashSet::new();
-    let mut positions = SourcePositions::new(content, &ctx.lines);
-
-    for link in ctx.links() {
-        let line_idx = link.line - 1;
-        if line_idx >= ctx.lines.len() {
-            continue;
-        }
-
-        // YAML values can contain Markdown-looking message templates. They are
-        // frontmatter data, not body links, and MD057 handles path-shaped
-        // frontmatter values separately when explicitly enabled.
-        if ctx.line_info(link.line).is_some_and(|info| info.in_front_matter) {
-            continue;
-        }
-
-        // Skip if we've already processed this line
-        if !processed_lines.insert(line_idx) {
-            continue;
-        }
-
-        let line_info = &ctx.lines[line_idx];
-        let line = line_info.content(content);
-        if !line.contains("](") {
-            continue;
-        }
-
-        let Some(mut destinations) = ctx.index_link_destinations(link.line) else {
-            continue;
-        };
-
-        // Most ordinary lines have only one indexed link. Allocate character
-        // checkpoints only when this line actually needs repeated columns.
-        let mut first_column = true;
-        let mut column_at = |offset| {
-            if std::mem::replace(&mut first_column, false) {
-                byte_to_char_count(line, offset - line_info.byte_offset)
-            } else {
-                positions.column_on_line(line_idx, offset) + 1
-            }
-        };
-
-        // Find all links in this line
-        for link_match in LINK_START_REGEX.find_iter(line) {
-            let start_pos = link_match.start();
-            let end_pos = link_match.end();
-
-            // Calculate absolute position for code span detection
-            let line_start_byte = ctx.line_start_byte(line_idx + 1).unwrap_or(0);
-            let absolute_start_pos = line_start_byte + start_pos;
-
-            // Skip if in code span
-            if ctx.is_in_code_span_byte(absolute_start_pos) {
-                continue;
-            }
-
-            // Extract the URL (group 1) and fragment (group 2)
-            // Try angle-bracket regex first (handles URLs with parens)
-            if let Some(destination) = destinations.at(end_pos - 1) {
-                let file_path = content[destination.url.clone()].trim();
-                let fragment = destination.fragment(content).trim_start_matches('#');
-
-                // Root-relative links (leading `/`) resolve against content roots
-                // in the LSP, not the source directory, so they are captured in a
-                // separate bucket. Protocol-relative (`//host`) and parent-traversal
-                // links are excluded so they cannot escape a content root.
-                if let Some(rel) = file_path.strip_prefix('/') {
-                    if !rel.starts_with('/')
-                        && !Path::new(rel)
-                            .components()
-                            .any(|c| matches!(c, std::path::Component::ParentDir))
-                    {
-                        let stripped = strip_query_and_fragment(rel);
-                        if is_markdown_file(&url_decode(stripped)) {
-                            links.root_relative.push(CrossFileLinkIndex {
-                                target_path: stripped.to_string(),
-                                fragment: fragment.to_string(),
-                                line: link.line,
-                                column: column_at(destination.url.start),
-                                origin: LinkOrigin::Body,
-                            });
-                        }
-                    }
-                    continue;
-                }
-
-                // Skip empty, external, template variables, framework aliases,
-                // fragment-only URLs, or rustdoc intra-doc links
-                if file_path.is_empty()
-                    || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
-                    || file_path.starts_with("www.")
-                    || file_path.starts_with('#')
-                    || file_path.starts_with("{{")
-                    || file_path.starts_with("{%")
-                    || file_path.starts_with('~')
-                    || file_path.starts_with('@')
-                    || (file_path.starts_with('`') && file_path.ends_with('`'))
-                {
-                    continue;
-                }
-
-                // Strip query parameters before indexing
-                let file_path = strip_query_and_fragment(file_path);
-
-                // Only index markdown file links for cross-file validation. The
-                // extension is read from the decoded name, so `guide%2Emd` is
-                // the Markdown file `guide.md`.
-                if is_markdown_file(&url_decode(file_path)) {
-                    links.relative.push(CrossFileLinkIndex {
-                        target_path: file_path.to_string(),
-                        fragment: fragment.to_string(),
-                        line: link.line,
-                        column: column_at(destination.url.start),
-                        origin: LinkOrigin::Body,
-                    });
-                }
-            }
-        }
+    if content.is_empty() {
+        return links;
     }
 
+    let mut positions = SourcePositions::new(content, &ctx.lines);
+    let mut record = |path: &str, fragment: &str, start: usize| {
+        let Some(destination) = indexed_destination(path) else {
+            return;
+        };
+        let (_, line, column) = positions.position(start);
+        let entry = |target_path: &str| CrossFileLinkIndex {
+            target_path: target_path.to_string(),
+            fragment: fragment.to_string(),
+            line,
+            column: column + 1,
+            origin: LinkOrigin::Body,
+        };
+        match destination {
+            IndexedDestination::Relative(path) => links.relative.push(entry(path)),
+            IndexedDestination::RootRelative(path) => links.root_relative.push(entry(path)),
+        }
+    };
+
+    // MD051 indexes the same inline links on the line of their opening `[`,
+    // and the index merges one link's entries by line. A destination written
+    // on a later line is therefore positioned at the `[` instead.
+    for destination in ctx.body_link_destinations() {
+        let at = if content[destination.link_start..destination.url_range.start].contains('\n') {
+            destination.link_start
+        } else {
+            destination.url_range.start
+        };
+        record(destination.url, destination.fragment.trim_start_matches('#'), at);
+    }
+
+    // A definition whose destination cannot be located is positioned at its
+    // label instead.
+    for definition in ctx.body_reference_definitions() {
+        let (path, fragment) = definition.url.split_once('#').unwrap_or((definition.url, ""));
+        let at = definition
+            .destination
+            .as_ref()
+            .map_or(definition.start, |range| range.start);
+        record(path, fragment, at);
+    }
+
+    // Entries are kept in source order, whichever construct produced them.
+    links.relative.sort_by_key(|link| (link.line, link.column));
+    links.root_relative.sort_by_key(|link| (link.line, link.column));
     links
 }
 
@@ -424,8 +371,14 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// destination such as `guide%2Emd#part` is now a Markdown link in
 /// `cross_file_links`. The content is unchanged, so an entry written before it
 /// would keep omitting that link.
+///
+/// Version 16 builds `cross_file_links` from parsed link destinations and
+/// reference definitions. Entries for text that only resembles a link (code
+/// spans, math, HTML comments, escaped brackets) are gone, a label no longer
+/// reports a destination written by a later link, and reference definitions are
+/// now present. The content is unchanged, so an older entry would keep all three.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 15;
+const CACHE_FORMAT_VERSION: u32 = 16;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -2308,18 +2261,6 @@ mod tests {
                 }
             }
         }
-        // The legacy angle-first search can report the same later destination
-        // for several earlier labels. Its columns must remain unchanged too.
-        let content = format!("{}[last](<目标/é.md>)", "é日本🙂 [label](one.md) ".repeat(160));
-        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
-        let links = extract_cross_file_links(&ctx).relative;
-        assert_eq!(links.len(), 161);
-        let expected = ctx.offset_to_line_col(content.find("目标/é.md").unwrap());
-        assert!(
-            links
-                .iter()
-                .all(|link| (link.line, link.column) == expected && link.target_path == "目标/é.md")
-        );
     }
 
     #[test]

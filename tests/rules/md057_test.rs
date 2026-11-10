@@ -3965,3 +3965,65 @@ fn test_relative_to_roots_html_link_without_source_warns() {
         ".html link with no source should warn, got: {result:?}"
     );
 }
+
+/// Inline links wrapped across lines inside containers.
+mod wrapped_in_containers {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD057ExistingRelativeLinks;
+
+    /// Containers as the prefix of a link's first line and of its
+    /// continuation lines.
+    pub(super) const CONTAINERS: &[(&str, &str)] = &[
+        ("", ""),
+        ("> ", "> "),
+        ("> > ", "> > "),
+        (">> ", ">>"),
+        ("- ", "  "),
+        ("- > ", "  > "),
+        ("> - ", ">   "),
+        ("- ", "\t"),
+        ("> -\t", ">\t  "),
+    ];
+
+    /// Inline links with the destination written as `D` and continuation
+    /// lines opening with `C`: destination, title, or both on a later line.
+    pub(super) const FORMS: &[&str] = &["[x](\nCD)", "[x](D\nC\"title\")", "[x](\nCD\nC'title')", "[x](\nC<D>)"];
+
+    #[test]
+    fn existing_targets_pass_and_missing_ones_are_reported_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("t.md"), "# T\n").unwrap();
+        let rule = MD057ExistingRelativeLinks::new().with_path(dir.path());
+        for (first, continuation) in CONTAINERS {
+            for form in FORMS {
+                for (target, missing) in [("t.md", false), ("nope.md", true)] {
+                    let link = form.replace('C', continuation).replace('D', target);
+                    let content = format!("# H\n\n{first}{link}\n");
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    let reported: Vec<_> = warnings
+                        .iter()
+                        .map(|warning| (warning.line, warning.column, warning.message.as_str()))
+                        .collect();
+                    if missing {
+                        let (line, text) = content
+                            .lines()
+                            .enumerate()
+                            .find(|(_, text)| text.contains(target))
+                            .unwrap();
+                        let column = text[..text.find(target).unwrap()].chars().count() + 1;
+                        assert_eq!(
+                            reported,
+                            [(line + 1, column, "Relative link 'nope.md' does not exist")],
+                            "{content:?}"
+                        );
+                    } else {
+                        assert_eq!(reported, [], "{content:?}");
+                    }
+                }
+            }
+        }
+    }
+}
