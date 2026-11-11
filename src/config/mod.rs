@@ -40,6 +40,9 @@ pub use validation::*;
 pub mod global_keys;
 pub use global_keys::{GlobalKeyValue, is_global_value_key, read_global_key};
 
+pub mod schema_gen;
+pub use schema_gen::config_schema_json;
+
 mod parsers;
 
 #[cfg(test)]

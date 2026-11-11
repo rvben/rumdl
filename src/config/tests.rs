@@ -2107,15 +2107,18 @@ fn test_canonical_project_root_cache_shared_across_clones() {
 
 #[test]
 fn test_generate_json_schema() {
-    use schemars::schema_for;
     use std::env;
 
-    let schema = schema_for!(Config);
-    let schema_json = serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
+    // Same function `rumdl schema generate` writes, so the artifact and the test
+    // cannot diverge: a rule added or renamed without regenerating fails here.
+    let schema_json =
+        serde_json::to_string_pretty(&super::schema_gen::config_schema_json()).expect("Failed to serialize schema");
+
+    let schema_path = env::current_dir().unwrap().join("rumdl.schema.json");
+    let updating = env::var("RUMDL_UPDATE_SCHEMA").is_ok();
 
     // Write schema to file if RUMDL_UPDATE_SCHEMA env var is set
-    if env::var("RUMDL_UPDATE_SCHEMA").is_ok() {
-        let schema_path = env::current_dir().unwrap().join("rumdl.schema.json");
+    if updating {
         fs::write(&schema_path, &schema_json).expect("Failed to write schema file");
         println!("Schema written to: {}", schema_path.display());
     }
@@ -2124,6 +2127,147 @@ fn test_generate_json_schema() {
     assert!(schema_json.contains("\"title\": \"Config\""));
     assert!(schema_json.contains("\"global\""));
     assert!(schema_json.contains("\"per-file-ignores\""));
+    // The committed file is compared against this output by
+    // `test_schema_file_is_up_to_date` in tests/config/, which owns that check;
+    // here the test only owns producing the artifact on demand.
+}
+
+#[test]
+fn test_schema_accepts_every_spelling_rumdl_accepts() {
+    use serde_json::json;
+
+    // Parity, not endorsement. The schema must never reject a file the loader
+    // accepts: key matching normalizes case and separators (`normalize_key`) and
+    // resolves rule names through the alias table, so every instance below loads
+    // in rumdl today. The misspellings in here are pinned to the loader's
+    // current behaviour on purpose — if rumdl starts failing them, this test
+    // should fail too, and the schema may follow.
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+
+    for config in [
+        // [global]: kebab, snake, upper and mixed case are all normalized
+        json!({"global": {"line-length": 100}}),
+        json!({"global": {"line_length": 100}}),
+        json!({"global": {"LINE_LENGTH": 100}}),
+        json!({"global": {"Line-Length": 100}}),
+        json!({"global": {"respect_gitignore": false}}),
+        // the same keys also work as top-level shorthand
+        json!({"line-length": 100}),
+        // rule sections: canonical ID, lower case, name alias and MD013's own
+        // key spelled both ways
+        json!({"MD013": {"line-length": 100}}),
+        json!({"MD013": {"line_length": 100}}),
+        json!({"md013": {"LINE_LENGTH": 100}}),
+        json!({"line-length": {"line_length": 100}}),
+        json!({"blanks_around_headings": {"lines_above": 1}}),
+        // markdownlint-style wrapper and a rule option alias
+        json!({"rules": {"MD033": {"allowed": ["br"]}}}),
+        // severity is matched case-insensitively; enabled is not in RuleConfig
+        json!({"MD013": {"severity": "WARNING", "enabled": true}}),
+        // nullable and polymorphic options cannot be typed from their default,
+        // so they stay unconstrained rather than rejecting the documented forms
+        json!({"MD013": {"heading_line_length": 100}}),
+        json!({"MD013": {"heading_line_length": "unset"}}),
+        json!({"MD054": {"preferred-style": ["inline"]}}),
+        // unknown global keys are only a warning in rumdl, never a load failure,
+        // so an editor must not call this one an error either
+        json!({"global": {"exlude": []}}),
+    ] {
+        assert!(
+            validator.is_valid(&config),
+            "rumdl accepts {config} but the schema rejects it"
+        );
+    }
+}
+
+#[test]
+fn test_schema_lists_each_rule_once() {
+    let schema = super::schema_gen::config_schema_json();
+    let properties = schema["properties"].as_object().expect("root properties");
+
+    // `RULE_ALIAS_MAP` lists each ID as its own alias, and rumdl matches section
+    // names case- and separator-insensitively (`normalize_key`), so two entries
+    // that only differ in case or in `_`/`-` would show the same rule twice in
+    // completion. Comparing normalized forms rather than the `MD###` shape keeps
+    // this true when an alias of some other spelling gets added.
+    let mut seen: std::collections::BTreeMap<String, &String> = std::collections::BTreeMap::new();
+    for (name, property) in properties {
+        let is_rule_section = property
+            .get("$ref")
+            .and_then(|reference| reference.as_str())
+            .is_some_and(|reference| reference.starts_with("#/$defs/MD"));
+        if !is_rule_section {
+            continue;
+        }
+
+        let normalized = super::flavor::normalize_key(name);
+        if let Some(previous) = seen.insert(normalized.clone(), name) {
+            panic!("`{name}` and `{previous}` both normalize to `{normalized}`: one entry covers both");
+        }
+    }
+}
+
+#[test]
+fn test_schema_types_the_options_it_can_derive() {
+    use serde_json::json;
+
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+
+    // The point of the option entries: a typo in a value is caught in the
+    // editor, not at load time. The `[rules.MD013]` spelling is the wrapper the
+    // parser accepts for configs ported from markdownlint, so it has to be typed
+    // like the flat form rather than fall through to the open root schema.
+    for wrong in [
+        json!({"MD013": {"line-length": "eighty"}}),
+        json!({"MD013": {"code_blocks": "no"}}),
+        json!({"global": {"line-length": "eighty"}}),
+        json!({"rules": {"MD013": {"line-length": "eighty"}}}),
+    ] {
+        assert!(
+            !validator.is_valid(&wrong),
+            "the schema should reject the wrong type in {wrong}"
+        );
+    }
+}
+
+#[test]
+fn test_schema_rejects_a_rule_section_written_as_a_value() {
+    use serde_json::json;
+
+    // The one deliberate exception to "never stricter than the loader", and the
+    // only one pinned here. rumdl warns and then ignores a rule section written
+    // as a value (`parsers.rs`, "Expected table for rule …; ignoring"), which
+    // leaves the rule running with its defaults while the file reads as if it
+    // were switched off. The schema says so instead: the name is one it models,
+    // and the shape it accepts is not open to interpretation.
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+
+    for value_instead_of_table in [
+        json!({"MD013": false}),
+        json!({"MD013": "off"}),
+        json!({"rules": {"MD013": false}}),
+    ] {
+        assert!(
+            !validator.is_valid(&value_instead_of_table),
+            "a rule section must be a table, so the schema should reject {value_instead_of_table}"
+        );
+    }
+
+    // The spellings that do disable the rule keep validating, which is what makes
+    // the error above actionable rather than a dead end.
+    for disabled_correctly in [
+        json!({"MD013": {"enabled": false}}),
+        json!({"rules": {"MD013": {"enabled": false}}}),
+        json!({"global": {"disable": ["MD013"]}}),
+    ] {
+        assert!(
+            validator.is_valid(&disabled_correctly),
+            "rumdl accepts {disabled_correctly} but the schema rejects it"
+        );
+    }
 }
 
 #[test]
