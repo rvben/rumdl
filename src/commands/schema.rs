@@ -10,31 +10,8 @@ use crate::SchemaAction;
 
 /// Handle the schema subcommand (print, generate, or check).
 pub fn handle_schema(action: SchemaAction) {
-    use schemars::schema_for;
-
-    // Generate the schema
-    let schema = schema_for!(rumdl_config::Config);
-
-    // Post-process the schema to add additionalProperties for flattened rules
-    // This allows [MD###] sections at the root level alongside [global] and [per-file-ignores]
-    let mut schema_value: serde_json::Value = serde_json::to_value(&schema).unwrap_or_else(|e| {
-        eprintln!("{}: Failed to convert schema to Value: {}", "Error".red().bold(), e);
-        exit::tool_error();
-    });
-
-    if let Some(schema_obj) = schema_value.as_object_mut() {
-        // Add additionalProperties that reference the RuleConfig definition
-        // This allows any additional properties (rule names like MD013, MD007, etc.)
-        // to be validated as RuleConfig objects
-        schema_obj.insert(
-            "additionalProperties".to_string(),
-            serde_json::json!({
-                "$ref": "#/$defs/RuleConfig"
-            }),
-        );
-    }
-
-    let schema_json = serde_json::to_string_pretty(&schema_value).unwrap_or_else(|e| {
+    // One generator, shared with the test that holds the committed file to it.
+    let schema_json = serde_json::to_string_pretty(&rumdl_config::config_schema_json()).unwrap_or_else(|e| {
         eprintln!("{}: Failed to serialize schema: {}", "Error".red().bold(), e);
         exit::tool_error();
     });
