@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- MD076 preserves loose-list spacing when blank-separated blocks inside an item
+  or required structural separators keep the list loose, preventing repeated
+  formatting changes when used with Prettier (#989).
+
 ## [0.3.4](https://github.com/rvben/rumdl/compare/v0.3.3...v0.3.4) - 2026-11-12
 
 ### Breaking Changes

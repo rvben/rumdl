@@ -12,6 +12,10 @@ pub(crate) enum BlockKind {
     QuoteStart,
     QuoteEnd,
     HeadingStart,
+    ListStart,
+    ListEnd,
+    BlockStart,
+    BlockEnd,
     Rule,
     Other,
 }
@@ -24,6 +28,37 @@ impl BlockKind {
             Event::Start(Tag::BlockQuote(_)) => Self::QuoteStart,
             Event::End(TagEnd::BlockQuote(_)) => Self::QuoteEnd,
             Event::Start(Tag::Heading { .. }) => Self::HeadingStart,
+            Event::Start(Tag::List(_)) => Self::ListStart,
+            Event::End(TagEnd::List(_)) => Self::ListEnd,
+            Event::Start(
+                Tag::Paragraph
+                | Tag::CodeBlock(_)
+                | Tag::HtmlBlock
+                | Tag::FootnoteDefinition(_)
+                | Tag::DefinitionList
+                | Tag::DefinitionListTitle
+                | Tag::DefinitionListDefinition
+                | Tag::Table(_)
+                | Tag::TableHead
+                | Tag::TableRow
+                | Tag::TableCell
+                | Tag::MetadataBlock(_),
+            ) => Self::BlockStart,
+            Event::End(
+                TagEnd::Paragraph
+                | TagEnd::Heading(_)
+                | TagEnd::CodeBlock
+                | TagEnd::HtmlBlock
+                | TagEnd::FootnoteDefinition
+                | TagEnd::DefinitionList
+                | TagEnd::DefinitionListTitle
+                | TagEnd::DefinitionListDefinition
+                | TagEnd::Table
+                | TagEnd::TableHead
+                | TagEnd::TableRow
+                | TagEnd::TableCell
+                | TagEnd::MetadataBlock(_),
+            ) => Self::BlockEnd,
             Event::Rule => Self::Rule,
             _ => Self::Other,
         }

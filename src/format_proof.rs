@@ -488,7 +488,18 @@ impl<'a> FormatProof<'a> {
                 return;
             }
             match event {
+                Event::Start(Tag::Paragraph) if !list_stack.is_empty() => {
+                    // Paragraph events are emitted for loose lists. Their
+                    // inter-item gaps can all be tight while blank-separated
+                    // blocks inside an item still require MD076 to add gaps.
+                    facts.reject(&[76]);
+                }
                 Event::Start(Tag::CodeBlock(kind)) => {
+                    if !list_stack.is_empty() {
+                        // Required structural blanks can keep a list loose
+                        // even when all of its items contain only code.
+                        facts.reject(&[76]);
+                    }
                     literals.push(range.clone());
                     if lines[line_at(range.start)].text(source).starts_with(' ') {
                         facts.reject(&[77]);
@@ -644,6 +655,9 @@ impl<'a> FormatProof<'a> {
                     quote_depth -= 1;
                 }
                 Event::Start(Tag::HtmlBlock) => {
+                    if !list_stack.is_empty() {
+                        facts.reject(&[76]);
+                    }
                     html_block = true;
                     let raw = source[range.clone()].trim();
                     if raw.starts_with("<!--") && raw.ends_with("-->") {
@@ -703,6 +717,9 @@ impl<'a> FormatProof<'a> {
                     inline_code.push(range.clone());
                 }
                 Event::Rule => {
+                    if !list_stack.is_empty() {
+                        facts.reject(&[76]);
+                    }
                     thematic_breaks.push(line_at(range.start));
                 }
                 Event::Start(Tag::Table(_)) => {
@@ -1524,6 +1541,22 @@ mod tests {
     fn assert_proofs(source: &str) {
         let failures = proof_failures(source);
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn loose_list_blocks_keep_native_spacing_analysis() {
+        for source in [
+            "- item\nBefore  after.\n- item\n\n\n  text\n",
+            "- a\n  - b\n\n  c\n- d\n- e\n",
+            "- a\n  ```\n  x\n  ```\n\n- b\n\n- c\n- d\n",
+            "- ```\n  one\n  ```\n\n- ```\n  two\n  ```\n- ```\n  three\n  ```\n",
+            "- <!-- one -->\n\n- <!-- two -->\n- <!-- three -->\n",
+            "- ---\n\n  ---\n- ---\n- ---\n",
+        ] {
+            let facts = FormatProof::analyze(source, MarkdownFlavor::Standard);
+            assert!(!NativeFormatPolicy::new(76).proven(&facts), "{source}");
+            assert_proofs(source);
+        }
     }
 
     #[test]

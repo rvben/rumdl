@@ -1,4 +1,5 @@
 use std::cell::OnceCell;
+use std::collections::HashSet;
 
 use crate::lint_context::LintContext;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
@@ -36,7 +37,8 @@ pub(super) struct MD076Config {
 /// style = "consistent"  # "loose", "tight", or "consistent" (default)
 /// ```
 ///
-/// - `"consistent"` — within each list, all gaps must use the same style (majority wins)
+/// - `"consistent"` — lists with blank-separated blocks in an item stay loose;
+///   otherwise the majority inter-item style wins
 /// - `"loose"` — blank line required between every pair of items
 /// - `"tight"` — no blank lines allowed between any items
 #[derive(Debug, Clone, Default)]
@@ -108,6 +110,14 @@ impl MD076ListItemSpacing {
         } else {
             false
         }
+    }
+
+    fn is_blank_at_quote_depth(ctx: &LintContext, line: usize, depth: usize) -> bool {
+        Self::is_effectively_blank(ctx, line)
+            && ctx
+                .line_info(line)
+                .and_then(|info| info.blockquote.as_ref())
+                .is_none_or(|quote| quote.nesting_level <= depth)
     }
 
     /// Check whether a non-blank line is structural content (code block, table, HTML block,
@@ -279,19 +289,167 @@ impl MD076ListItemSpacing {
     /// nested list is judged on its own spacing and never on its parent's.
     fn analyze(&self, ctx: &LintContext) -> Vec<ListAnalysis> {
         let fence_starts = OnceCell::new();
-        ctx.list_blocks
+        let mut lists: Vec<_> = ctx
+            .list_blocks
             .iter()
             .flat_map(|block| ctx.list_block_item_groups(block))
-            .filter_map(|items| {
+            .map(|items| (items, false))
+            .collect();
+        if self.config.style == ListItemSpacingStyle::Consistent
+            && !self.config.allow_loose_continuation
+            && lists.iter().any(|(items, _)| items.len() > 1)
+        {
+            // A nested quote can split the line-based list blocks even though
+            // the parser keeps one list. Use its complete membership for loose
+            // lists, but only when every marker is also a known list item.
+            let known: HashSet<_> = lists.iter().flat_map(|(items, _)| items.iter().copied()).collect();
+            let loose_lists: Vec<_> = Self::intrinsically_loose_lists(ctx)
+                .into_iter()
+                .filter(|items| items.len() > 1 && items.iter().all(|line| known.contains(line)))
+                .collect();
+            let loose_items: HashSet<_> = loose_lists.iter().flatten().copied().collect();
+            // A marker line can hold both an outer and an inner item (`- - a`).
+            // Replace complete groups only; a shared first line does not make
+            // the outer list part of the inner list.
+            lists.retain(|(items, _)| !items.iter().all(|line| loose_items.contains(line)));
+            lists.extend(loose_lists.into_iter().map(|items| (items, true)));
+            lists.sort_by_key(|(items, _)| items[0]);
+        }
+        lists
+            .into_iter()
+            .filter_map(|(items, intrinsically_loose)| {
                 Self::analyze_list(
                     ctx,
                     items,
                     &self.config.style,
                     self.config.allow_loose_continuation,
                     &fence_starts,
+                    intrinsically_loose,
                 )
             })
             .collect()
+    }
+
+    /// Find lists whose items contain blank-separated direct child blocks.
+    /// Removing inter-item blanks cannot make these lists tight in CommonMark.
+    /// Keep nested blocks on the stack so their internal blanks do not make
+    /// an enclosing item loose. Shared parser facts avoid a second parse.
+    fn intrinsically_loose_lists(ctx: &LintContext) -> Vec<Vec<usize>> {
+        use crate::lint_context::document_parser::blocks::BlockKind;
+
+        struct Frame {
+            item_quote_depth: Option<usize>,
+            list_items: Vec<usize>,
+            previous_block: Option<std::ops::Range<usize>>,
+            loose: bool,
+        }
+
+        let mut stack: Vec<Frame> = Vec::new();
+        let mut lists = Vec::new();
+        let mut quote_depth = 0;
+        for (kind, range) in &ctx.parser_blocks().events {
+            match kind {
+                BlockKind::ItemEnd | BlockKind::QuoteEnd | BlockKind::ListEnd | BlockKind::BlockEnd => {
+                    if *kind == BlockKind::QuoteEnd {
+                        quote_depth -= 1;
+                    }
+                    if let Some(frame) = stack.pop() {
+                        if *kind == BlockKind::ItemEnd && frame.loose {
+                            if let Some(list) = stack.last_mut() {
+                                list.loose = true;
+                            }
+                        } else if *kind == BlockKind::ListEnd && frame.loose {
+                            lists.push(frame.list_items);
+                        }
+                    }
+                }
+                BlockKind::Other => {}
+                _ => {
+                    if let Some(parent) = stack.last_mut() {
+                        if *kind == BlockKind::ItemStart {
+                            parent.list_items.push(ctx.offset_to_line_col(range.start).0);
+                        }
+                        if let Some(depth) = parent.item_quote_depth {
+                            if let Some(previous) = &parent.previous_block {
+                                let first = ctx.offset_to_line_col(previous.start).0;
+                                let mut last = ctx.offset_to_line_col(previous.end.saturating_sub(1)).0;
+                                // Some container ranges include their trailing
+                                // blank lines and the next block's indentation.
+                                // Inspect only the part covered by this range.
+                                while last > first
+                                    && ctx.line_info(last).is_some_and(|info| {
+                                        let end = previous.end.min(info.byte_offset + info.byte_len);
+                                        let tail = &ctx.content[info.byte_offset..end];
+                                        if info.blockquote.is_some() {
+                                            tail.trim_matches([' ', '\t', '\r', '\n', '>']).is_empty()
+                                        } else {
+                                            tail.trim_matches([' ', '\t', '\r', '\n']).is_empty()
+                                        }
+                                    })
+                                {
+                                    last -= 1;
+                                }
+                                let next = ctx.offset_to_line_col(range.start).0;
+                                parent.loose |=
+                                    (last + 1..next).any(|line| Self::is_blank_at_quote_depth(ctx, line, depth));
+                            }
+                            parent.previous_block = Some(range.clone());
+                        }
+                    }
+                    if *kind == BlockKind::QuoteStart {
+                        quote_depth += 1;
+                    }
+                    if *kind != BlockKind::Rule {
+                        stack.push(Frame {
+                            item_quote_depth: (*kind == BlockKind::ItemStart).then_some(quote_depth),
+                            list_items: Vec::new(),
+                            previous_block: None,
+                            loose: false,
+                        });
+                    }
+                }
+            }
+        }
+        lists
+    }
+
+    /// The existing structural exemption also covers ordinary text in an
+    /// enclosing blockquote. Only a nested quote or an actual structural block
+    /// requires its blank to remain when choosing the default list style.
+    fn required_structural_gap(
+        ctx: &LintContext,
+        first: usize,
+        next: usize,
+        fence_starts: &OnceCell<Vec<usize>>,
+    ) -> bool {
+        let mut last = next - 1;
+        while last > first && Self::is_effectively_blank(ctx, last) {
+            last -= 1;
+        }
+        let depth = ctx
+            .line_info(first)
+            .and_then(|info| info.blockquote.as_ref())
+            .map_or(0, |quote| quote.nesting_level);
+        if !(last + 1..next).any(|line| Self::is_blank_at_quote_depth(ctx, line, depth)) {
+            return false;
+        }
+        if Self::is_fenced_code_block_list_item(ctx, next, fence_starts) {
+            return true;
+        }
+        ctx.line_info(last).is_some_and(|info| {
+            info.in_code_block
+                || info.in_html_block
+                || info
+                    .blockquote
+                    .as_ref()
+                    .is_some_and(|quote| quote.nesting_level > depth)
+                || is_table_line(
+                    info.blockquote
+                        .as_ref()
+                        .map_or(info.content(ctx.content), |quote| quote.content.as_str())
+                        .trim_start(),
+                )
+        })
     }
 
     /// Analyze one list, given the lines of its items in order, to determine
@@ -305,6 +463,7 @@ impl MD076ListItemSpacing {
         style: &ListItemSpacingStyle,
         allow_loose_continuation: bool,
         fence_starts: &OnceCell<Vec<usize>>,
+        intrinsically_loose: bool,
     ) -> Option<ListAnalysis> {
         if items.len() < 2 {
             return None;
@@ -316,9 +475,9 @@ impl MD076ListItemSpacing {
             .map(|w| Self::classify_gap(ctx, w[0], w[1], fence_starts))
             .collect();
 
-        // Structural gaps and (when allowed) continuation gaps are excluded
-        // from consistency analysis — they should not influence whether the
-        // list is considered loose or tight.
+        // Structural gaps and (when allowed) continuation gaps do not vote in
+        // the majority policy. Required structural blanks keep the list loose
+        // before that policy is considered.
         let loose_count = gaps
             .iter()
             .filter(|&&g| g == GapKind::Loose || (g == GapKind::ContinuationLoose && !allow_loose_continuation))
@@ -329,6 +488,20 @@ impl MD076ListItemSpacing {
             ListItemSpacingStyle::Loose => (false, true),
             ListItemSpacingStyle::Tight => (true, false),
             ListItemSpacingStyle::Consistent => {
+                if intrinsically_loose
+                    || (!allow_loose_continuation
+                        && gaps.iter().zip(items.windows(2)).any(|(gap, pair)| {
+                            *gap == GapKind::Structural
+                                && Self::required_structural_gap(ctx, pair[0], pair[1], fence_starts)
+                        }))
+                {
+                    return Some(ListAnalysis {
+                        items,
+                        gaps,
+                        warn_loose_gaps: false,
+                        warn_tight_gaps: true,
+                    });
+                }
                 if loose_count == 0 || tight_count == 0 {
                     return None; // Already consistent (structural gaps excluded)
                 }
@@ -551,6 +724,167 @@ impl Rule for MD076ListItemSpacing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn intrinsically_loose_lists_keep_separators_and_fill_missing_ones() {
+        for body in [
+            "  trailing paragraph.\n",
+            "  ```bash\n  echo hi\n  ```\n",
+            "  > quoted text\n",
+            "  <div>\n  content\n  </div>\n",
+            "  - nested item\n",
+        ] {
+            for prefix in ["", "> "] {
+                let content = format!("- item one\n\n{body}\n- item two\n- item three\n");
+                let expected = content.replace("- item two\n- item three", "- item two\n\n- item three");
+                let quote = |text: &str| {
+                    text.lines()
+                        .map(|line| {
+                            if line.is_empty() {
+                                format!("{}\n", prefix.trim_end())
+                            } else {
+                                format!("{prefix}{line}\n")
+                            }
+                        })
+                        .collect::<String>()
+                };
+                let content = quote(&content);
+                let expected = quote(&expected);
+                let warnings = check(&content, ListItemSpacingStyle::Consistent);
+                assert_eq!(warnings.len(), 1, "{content}: {warnings:?}");
+                assert_eq!(warnings[0].message, "Missing blank line between list items");
+                let fixed = fix(&content, ListItemSpacingStyle::Consistent);
+                assert_eq!(fixed, expected, "{content}");
+                assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty(), "{fixed}");
+                assert_eq!(fix(&fixed, ListItemSpacingStyle::Consistent), fixed);
+                let html = |source: &str| {
+                    let mut html = String::new();
+                    pulldown_cmark::html::push_html(&mut html, pulldown_cmark::Parser::new(source));
+                    html
+                };
+                assert_eq!(html(&content), html(&fixed), "fix must preserve rendering");
+            }
+        }
+    }
+
+    #[test]
+    fn intrinsic_looseness_in_last_item_overrides_a_tight_majority() {
+        let content = "1. first\n2. second\n3. third\n\n   continuation\n";
+        let expected = "1. first\n\n2. second\n\n3. third\n\n   continuation\n";
+        assert_eq!(fix(content, ListItemSpacingStyle::Consistent), expected);
+    }
+
+    #[test]
+    fn nested_looseness_does_not_spread_to_parent_or_other_lists() {
+        let content = "- parent one\n  - child one\n\n    continuation\n  - child two\n- parent two\n\n---\n\n- other one\n\n- other two\n- other three\n";
+        let expected = content
+            .replace("continuation\n  - child two", "continuation\n\n  - child two")
+            .replace("- other one\n\n- other two", "- other one\n- other two");
+        assert_eq!(fix(content, ListItemSpacingStyle::Consistent), expected);
+    }
+
+    #[test]
+    fn intrinsic_looseness_respects_explicit_spacing_options() {
+        let content = "- first\n\n  continuation\n\n- second\n- third\n";
+        let tight = content.replace("continuation\n\n- second", "continuation\n- second");
+        assert_eq!(fix(content, ListItemSpacingStyle::Tight), tight);
+        assert_eq!(
+            fix_with_continuation(content, ListItemSpacingStyle::Consistent, true),
+            content
+        );
+    }
+
+    #[test]
+    fn nested_items_sharing_a_marker_line_do_not_make_the_parent_loose() {
+        for content in ["- - a\n\n    b\n- c\n- d\n", "- - a\n\n    b\n\n  - c\n- d\n- e\n"] {
+            assert!(check(content, ListItemSpacingStyle::Consistent).is_empty());
+            assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+        }
+    }
+
+    #[test]
+    fn intrinsic_looseness_does_not_cross_marker_changes() {
+        for (content, expected) in [
+            ("- a\n\n  b\n- c\n* d\n* e\n", "- a\n\n  b\n\n- c\n* d\n* e\n"),
+            ("1. a\n\n   b\n2. c\n1) d\n2) e\n", "1. a\n\n   b\n\n2. c\n1) d\n2) e\n"),
+        ] {
+            let fixed = fix(content, ListItemSpacingStyle::Consistent);
+            assert_eq!(fixed, expected);
+            assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
+        }
+    }
+
+    #[test]
+    fn an_enclosing_quote_does_not_force_continuation_text_loose() {
+        let content = "> - a\n>   cont\n>\n> - b\n> - c\n> - d\n";
+        assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+    }
+
+    #[test]
+    fn a_blank_inside_a_nested_quote_does_not_loosen_its_parent_list() {
+        for content in [
+            "* a\n  > b\n  >\n* c\n* d\n",
+            "* a\n  > b\n  >\n  c\n* d\n* e\n",
+            "> * a\n>   > b\n>   >\n> * c\n> * d\n",
+            "> * a\n>   > b\n>   >\n>   c\n> * d\n> * e\n",
+        ] {
+            assert!(check(content, ListItemSpacingStyle::Consistent).is_empty(), "{content}");
+            assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+        }
+    }
+
+    #[test]
+    fn the_formatter_executes_spacing_fixes_for_loose_lists() {
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD076ListItemSpacing::default())];
+        for source in [
+            "- first\n\n  paragraph\n\n- second\n- third\n",
+            "- a\n  - b\n\n  c\n- d\n- e\n",
+            "- item\nBefore  after.\n- item\n\n\n  text\n",
+        ] {
+            let mut content = source.to_owned();
+            let result = crate::fix_coordinator::FixCoordinator::new()
+                .apply_fixes_iterative(&rules, &[], &mut content, &crate::config::Config::default(), 10, None)
+                .unwrap();
+            assert!(result.converged, "{source}");
+            assert_ne!(content, source, "{source}");
+            assert!(
+                check(&content, ListItemSpacingStyle::Consistent).is_empty(),
+                "{content}"
+            );
+        }
+    }
+
+    #[test]
+    fn blank_after_a_nested_block_also_makes_the_list_loose() {
+        for content in [
+            "- a\n  - b\n\n  c\n- d\n- e\n",
+            "-     code\n\n  paragraph\n- d\n- e\n",
+            "- <div>\n  html\n  </div>\n\n  paragraph\n- d\n- e\n",
+            "> - a\n>\n>   > quote\n> - d\n> - e\n",
+        ] {
+            let fixed = fix(content, ListItemSpacingStyle::Consistent);
+            let expected = if content.starts_with('>') {
+                content.replace("> - d\n> - e", ">\n> - d\n>\n> - e")
+            } else {
+                content.replace("- d\n- e", "\n- d\n\n- e")
+            };
+            assert_eq!(fixed, expected, "{content}");
+            assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
+        }
+    }
+
+    #[test]
+    fn required_structural_gaps_keep_the_whole_list_loose() {
+        for content in [
+            "- a\n  ```\n  x\n  ```\n\n- b\n\n- c\n- d\n",
+            "- a\n\n- ```\n  x\n  ```\n- b\n- c\n",
+        ] {
+            let fixed = fix(content, ListItemSpacingStyle::Consistent);
+            assert!(!fixed.contains("\n- c\n- d"));
+            assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
+            assert!(fixed.contains("\n\n- c\n"), "{fixed}");
+        }
+    }
 
     fn check(content: &str, style: ListItemSpacingStyle) -> Vec<LintWarning> {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -1207,8 +1541,7 @@ mod tests {
     // ── Structural blank lines (code blocks, tables, HTML) ──────────
 
     #[test]
-    fn code_block_in_tight_list_no_false_positive() {
-        // Blank line after closing fence is structural (required by MD031), not a separator
+    fn code_block_makes_list_loose() {
         let content = "\
 - Item 1 with code:
 
@@ -1219,15 +1552,19 @@ mod tests {
 - Item 2 simple.
 - Item 3 simple.
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "Structural blank after code block should not make item 1 appear loose"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     #[test]
-    fn table_in_tight_list_no_false_positive() {
-        // Blank line after table is structural (required by MD058), not a separator
+    fn table_makes_list_loose() {
         let content = "\
 - Item 1 with table:
 
@@ -1238,14 +1575,19 @@ mod tests {
 - Item 2 simple.
 - Item 3 simple.
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "Structural blank after table should not make item 1 appear loose"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     #[test]
-    fn html_block_in_tight_list_no_false_positive() {
+    fn html_block_makes_list_loose() {
         let content = "\
 - Item 1 with HTML:
 
@@ -1257,15 +1599,19 @@ mod tests {
 - Item 2 simple.
 - Item 3 simple.
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "Structural blank after HTML block should not make item 1 appear loose"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     #[test]
-    fn blockquote_in_tight_list_no_false_positive() {
-        // Blank line around a blockquote in a list item is structural, not a separator
+    fn blockquote_makes_list_loose_in_consistent_mode() {
         let content = "\
 - Item 1 with quote:
 
@@ -1275,10 +1621,15 @@ mod tests {
 - Item 2 simple.
 - Item 3 simple.
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "Structural blank around blockquote should not make item 1 appear loose"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
         assert!(
             check(content, ListItemSpacingStyle::Tight).is_empty(),
             "Blockquote in tight list should not trigger a violation"
@@ -1391,7 +1742,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_code_and_table_in_tight_list() {
+    fn mixed_code_and_table_make_list_loose() {
         let content = "\
 1. Item with code:
 
@@ -1407,10 +1758,15 @@ mod tests {
    | Row 1 | Row 1 |
    | Row 2 | Row 2 |
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "Mix of code blocks and tables should not cause false positives"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     #[test]
@@ -1464,7 +1820,7 @@ mod tests {
     }
 
     #[test]
-    fn tilde_fence_code_block_in_list() {
+    fn tilde_fence_makes_list_loose() {
         let content = "\
 - Item 1:
 
@@ -1475,10 +1831,15 @@ mod tests {
 - Item 2 simple.
 - Item 3 simple.
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "Tilde fences should be recognized as structural content"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     #[test]
@@ -1542,7 +1903,7 @@ mod tests {
     }
 
     #[test]
-    fn blockquote_list_with_code_block() {
+    fn quoted_list_with_code_block_stays_loose() {
         let content = "\
 > - Item 1:
 >
@@ -1553,18 +1914,21 @@ mod tests {
 > - Item 2.
 > - Item 3.
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "Blockquote-prefixed list with code block should not cause false positives"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     // ── Indented code block (not fenced) in list item ─────────────────
 
     #[test]
-    fn indented_code_block_in_list_no_false_positive() {
-        // A 4-space indented code block inside a list item should be treated
-        // as structural content, not trigger a loose gap detection.
+    fn indented_code_block_makes_list_loose() {
         let content = "\
 1. Item with indented code:
 
@@ -1574,10 +1938,15 @@ mod tests {
 1. Simple item
 1. Another item
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "Structural blank after indented code block should not make item 1 appear loose"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     // ── Issue #787: the marker-line exemption ends where MD031 does ───
@@ -1853,8 +2222,7 @@ mod tests {
     }
 
     #[test]
-    fn code_block_in_item_all_tight_no_warnings() {
-        // All non-structural gaps are tight → consistent, no warnings.
+    fn code_block_makes_all_tight_gaps_loose() {
         let content = "\
 - Item 1
 - Item 2
@@ -1866,10 +2234,15 @@ mod tests {
 - Item 3
 - Item 4
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "All tight gaps with structural code block should not warn"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     #[test]
@@ -1916,12 +2289,7 @@ mod tests {
     }
 
     #[test]
-    fn code_block_in_item_fix_removes_loose_outlier_on_tie() {
-        // Gap classification: 1→2 tight, 2→3 structural (excluded — fenced
-        // code block in the body of item 2), 3→4 loose. After excluding the
-        // structural gap, that's a 1 tight / 1 loose tie. The tight
-        // tie-breaker (analyze_block) warns the loose gap, so fix removes the
-        // blank between items 3 and 4 rather than adding one between 1 and 2.
+    fn code_block_in_item_preserves_loose_gap_on_tie() {
         let content = "\
 - Item 1
 - Item 2
@@ -1936,12 +2304,12 @@ mod tests {
 ";
         let fixed = fix(content, ListItemSpacingStyle::Consistent);
         assert!(
-            fixed.contains("- Item 3\n- Item 4"),
-            "Fix should remove blank line between items 3 and 4. Got:\n{fixed}"
+            fixed.contains("- Item 3\n\n- Item 4"),
+            "Fix should preserve blank line between items 3 and 4. Got:\n{fixed}"
         );
         assert!(
-            !fixed.contains("- Item 1\n\n- Item 2"),
-            "Fix should not insert a blank between items 1 and 2. Got:\n{fixed}"
+            fixed.contains("- Item 1\n\n- Item 2"),
+            "Fix should insert a blank between items 1 and 2. Got:\n{fixed}"
         );
     }
 
@@ -1967,8 +2335,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_code_blocks_all_tight_no_warnings() {
-        // All non-structural gaps are tight → consistent.
+    fn multiple_code_blocks_require_loose_spacing() {
         let content = "\
 - Item 1
 
@@ -1985,10 +2352,15 @@ mod tests {
 - Item 3
 - Item 4
 ";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(
-            check(content, ListItemSpacingStyle::Consistent).is_empty(),
-            "All non-structural gaps are tight, so list is consistent"
+            warnings
+                .iter()
+                .all(|w| w.message == "Missing blank line between list items")
         );
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(check(&fixed, ListItemSpacingStyle::Consistent).is_empty());
     }
 
     #[test]

@@ -20,6 +20,7 @@ struct ProofEvent {
 
 #[derive(Clone, Copy)]
 enum Kind {
+    Paragraph,
     CodeBlock(bool),
     Code,
     Link {
@@ -59,6 +60,7 @@ impl ProofEvents {
 
     pub(crate) fn push(&mut self, event: &Event<'_>, range: &Range<usize>) {
         let kind = match event {
+            Event::Start(Tag::Paragraph) => Kind::Paragraph,
             Event::Start(Tag::CodeBlock(kind)) => Kind::CodeBlock(matches!(kind, CodeBlockKind::Fenced(_))),
             Event::Code(_) => Kind::Code,
             Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => Kind::Link {
@@ -97,6 +99,7 @@ impl ProofEvents {
         for saved in &self.events {
             let empty = || CowStr::Borrowed("");
             let event = match saved.kind {
+                Kind::Paragraph => Event::Start(Tag::Paragraph),
                 Kind::CodeBlock(true) => Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(empty()))),
                 Kind::CodeBlock(false) => Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)),
                 Kind::Code => Event::Code(empty()),

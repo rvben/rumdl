@@ -1225,6 +1225,22 @@ fn test_md031_list_membership_linear_complexity() {
     }
 }
 
+/// Intrinsic looseness must be indexed once, not rescanned for each list.
+#[test]
+fn test_md076_intrinsically_loose_lists_linear_complexity() {
+    let rule = MD076ListItemSpacing::default();
+    let times: Vec<_> = [256, 512, 1024]
+        .into_iter()
+        .map(|count| {
+            let content = "- first\n\n  continuation\n- second\n- third\n\n---\n\n".repeat(count);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), count * 2);
+            measure_rule_time_with_context(&rule, &ctx, 7)
+        })
+        .collect();
+    assert_linear_complexity("MD076 intrinsically loose lists", &times, 3.0);
+}
+
 /// Spacing checks must not search every fence for each source line or list gap.
 #[test]
 fn test_spacing_fence_lookup_linear_complexity() {
