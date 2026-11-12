@@ -8,7 +8,7 @@ use super::flavor::normalize_key;
 ///
 /// Rule config schemas (valid keys, types, aliases) are intrinsic to each rule type
 /// and do not change based on runtime configuration. This static registry avoids
-/// repeatedly constructing 67+ rule instances just to extract their schemas.
+/// repeatedly constructing 90 rule instances just to extract their schemas.
 static DEFAULT_REGISTRY: LazyLock<RuleRegistry> = LazyLock::new(|| {
     let default_config = super::types::Config::default();
     let rules = crate::rules::all_rules(&default_config);
@@ -30,6 +30,8 @@ pub struct RuleRegistry {
     pub rule_schemas: std::collections::BTreeMap<String, toml::map::Map<String, toml::Value>>,
     /// Map of rule name to config key aliases
     pub rule_aliases: std::collections::BTreeMap<String, std::collections::HashMap<String, String>>,
+    /// Map of rule name to the one-line summary the rule reports about itself
+    pub rule_descriptions: std::collections::BTreeMap<String, String>,
 }
 
 impl RuleRegistry {
@@ -37,6 +39,7 @@ impl RuleRegistry {
     pub fn from_rules(rules: &[Box<dyn Rule>]) -> Self {
         let mut rule_schemas = std::collections::BTreeMap::new();
         let mut rule_aliases = std::collections::BTreeMap::new();
+        let mut rule_descriptions = std::collections::BTreeMap::new();
 
         for rule in rules {
             let norm_name = if let Some((name, toml::Value::Table(mut table))) = rule.config_schema() {
@@ -59,6 +62,11 @@ impl RuleRegistry {
                 norm_name
             };
 
+            // Metadata only, collected while the instance is already here: callers
+            // that just want to describe a rule should not have to construct every
+            // rule again (see the note on `default_registry`).
+            rule_descriptions.insert(norm_name.clone(), rule.description().to_string());
+
             // Store aliases if the rule provides them
             if let Some(aliases) = rule.config_aliases() {
                 rule_aliases.insert(norm_name, aliases);
@@ -68,6 +76,7 @@ impl RuleRegistry {
         RuleRegistry {
             rule_schemas,
             rule_aliases,
+            rule_descriptions,
         }
     }
 
