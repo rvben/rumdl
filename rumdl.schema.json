@@ -2106,6 +2106,12 @@
         "code_spans": {
           "type": "boolean"
         },
+        "front-matter": {
+          "type": "boolean"
+        },
+        "front_matter": {
+          "type": "boolean"
+        },
         "heading-line-length": {},
         "heading_line_length": {},
         "headings": {

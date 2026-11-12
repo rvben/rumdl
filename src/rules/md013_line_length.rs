@@ -20,6 +20,7 @@ use pulldown_cmark::LinkType;
 use toml;
 
 mod block_builder;
+mod front_matter;
 mod helpers;
 pub mod md013_config;
 use crate::rules::md030_list_marker_space::MD030Config;
@@ -320,6 +321,7 @@ impl MD013LineLength {
                 headings,
                 math_blocks: true,
                 bracket_display_math: false,
+                front_matter: false,
                 paragraphs: true,  // Default to true for backwards compatibility
                 blockquotes: true, // Default to true for backwards compatibility
                 strict,
@@ -614,6 +616,13 @@ impl Rule for MD013LineLength {
                 {
                     config.bracket_display_math = enabled;
                 }
+                if let Some(front_matter) = obj
+                    .get("front_matter")
+                    .or_else(|| obj.get("front-matter"))
+                    .and_then(serde_json::Value::as_bool)
+                {
+                    config.front_matter = front_matter;
+                }
                 if let Some(blockquotes) = obj.get("blockquotes").and_then(serde_json::Value::as_bool) {
                     config.blockquotes = blockquotes;
                 }
@@ -678,10 +687,22 @@ impl Rule for MD013LineLength {
         let prefilter_limit = effective_config.min_effective_line_length();
         let prefilter_skip = prefilter_limit.is_unlimited();
         let mut candidate_lines = Vec::new();
+        let check_front_matter = effective_config.front_matter
+            && matches!(
+                crate::rules::front_matter_utils::FrontMatterUtils::detect_front_matter_type(ctx.content),
+                crate::rules::front_matter_utils::FrontMatterType::Yaml
+                    | crate::rules::front_matter_utils::FrontMatterType::Toml
+            );
+        // Wrapping front matter needs `reflow`; without it the lines are only reported.
+        let mut front_matter_fixes = if check_front_matter && effective_config.reflow {
+            front_matter::wrap_fixes(self, ctx, effective_config.line_length.get())
+        } else {
+            std::collections::HashMap::new()
+        };
         if !skip_length_checks && !prefilter_skip {
             for (line_idx, line_info) in ctx.lines.iter().enumerate() {
-                // Skip front matter - it should never be linted
-                if line_info.in_front_matter {
+                // Front matter is only measured when opted in, and only YAML or TOML
+                if line_info.in_front_matter && !check_front_matter {
                     continue;
                 }
 
@@ -766,6 +787,26 @@ impl Rule for MD013LineLength {
 
             // A context-specific limit of 0 means "unlimited for this context".
             if line_limit == 0 {
+                continue;
+            }
+
+            // Front matter is data: measure the whole line before applying
+            // Markdown's unwrappable-line and trailing-token exemptions.
+            if ctx.lines[line_idx].in_front_matter {
+                if effective_length > line_limit {
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_excess_range(line_number, line, line_limit);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        message: format!("Line length {effective_length} exceeds {line_limit} characters"),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        severity: Severity::Warning,
+                        fix: front_matter_fixes.remove(&line_idx),
+                    });
+                }
                 continue;
             }
 
