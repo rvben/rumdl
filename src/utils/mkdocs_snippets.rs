@@ -247,12 +247,6 @@ pub fn is_within_snippet_section(content: &str, position: usize) -> bool {
     false
 }
 
-/// Check if a line contains a snippet reference that could be a broken link
-pub fn looks_like_snippet_reference(text: &str) -> bool {
-    // More conservative check for link syntax that might be snippets
-    text.contains("--8<--") || text.contains("-8<-")
-}
-
 /// Check if a line is a bare snippet block delimiter (for multi-line blocks)
 pub fn is_snippet_block_delimiter(line: &str) -> bool {
     let trimmed = line.trim();

@@ -107,11 +107,6 @@ pub(crate) fn replace_inline_code_cow(line: &str) -> std::borrow::Cow<'_, str> {
     mask_matches(line, '`', &INLINE_CODE, b'X')
 }
 
-/// Replace inline math ($...$ and $$...$$) with placeholder characters.
-pub fn replace_inline_math(line: &str) -> String {
-    replace_inline_math_cow(line).into_owned()
-}
-
 pub(crate) fn replace_inline_math_cow(line: &str) -> std::borrow::Cow<'_, str> {
     mask_matches(line, '$', &INLINE_MATH, b'M')
 }

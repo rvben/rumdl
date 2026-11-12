@@ -22,9 +22,6 @@ use std::sync::LazyLock;
 /// Linguist commit hash this data was generated from
 pub const LINGUIST_VERSION: &str = "e51c2270";
 
-/// Linguist commit date
-pub const LINGUIST_DATE: &str = "2026-01-14";
-
 /// Maps lowercase alias -> canonical language name
 pub static ALIAS_TO_CANONICAL: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::with_capacity(1210);

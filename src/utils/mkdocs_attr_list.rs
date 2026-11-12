@@ -89,12 +89,6 @@ impl AttrList {
         !self.classes.is_empty()
     }
 
-    /// Check if this attr_list has any attributes
-    #[inline]
-    pub fn has_attributes(&self) -> bool {
-        !self.attributes.is_empty()
-    }
-
     /// Check if this attr_list is empty (no id, classes, or attributes)
     #[inline]
     pub fn is_empty(&self) -> bool {

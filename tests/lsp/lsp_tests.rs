@@ -10,7 +10,7 @@
 #![allow(deprecated)]
 
 use rumdl_lib::lsp::RumdlLanguageServer;
-use rumdl_lib::lsp::types::{RumdlLspConfig, warning_to_code_action, warning_to_diagnostic};
+use rumdl_lib::lsp::types::{RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
 use rumdl_lib::rule::{Fix, LintWarning, Severity};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};
@@ -118,7 +118,9 @@ fn test_warning_to_code_action_with_fix() {
 
     let uri = Url::parse("file:///test.md").expect("Invalid URI");
     let document_text = "This line is too long and needs to be shortened";
-    let code_action = warning_to_code_action(&warning, &uri, document_text);
+    let code_action = warning_to_code_actions(&warning, &uri, document_text)
+        .into_iter()
+        .find(|action| action.is_preferred == Some(true));
 
     assert!(code_action.is_some());
     let action = code_action.unwrap();
@@ -156,7 +158,9 @@ fn test_warning_to_code_action_without_fix() {
 
     let uri = Url::parse("file:///test.md").expect("Invalid URI");
     let document_text = "Test document content";
-    let code_action = warning_to_code_action(&warning, &uri, document_text);
+    let code_action = warning_to_code_actions(&warning, &uri, document_text)
+        .into_iter()
+        .find(|action| action.is_preferred == Some(true));
 
     assert!(code_action.is_none());
 }

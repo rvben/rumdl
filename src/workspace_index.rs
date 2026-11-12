@@ -377,8 +377,13 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// spans, math, HTML comments, escaped brackets) are gone, a label no longer
 /// reports a destination written by a later link, and reference definitions are
 /// now present. The content is unchanged, so an older entry would keep all three.
+///
+/// Version 17 drops `FileIndex::reference_links` and
+/// `FileIndex::defined_references`, which were always written empty. The
+/// encoding is positional, so an entry written with them would be decoded
+/// with every later field shifted.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 16;
+const CACHE_FORMAT_VERSION: u32 = 17;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -416,8 +421,6 @@ pub struct WorkspaceIndex {
 pub struct FileIndex {
     /// Headings in this file with their anchors
     pub headings: Vec<HeadingIndex>,
-    /// Reference links in this file (for cross-file analysis)
-    pub reference_links: Vec<ReferenceLinkIndex>,
     /// Cross-file links in this file (for MD051 cross-file validation)
     pub cross_file_links: Vec<CrossFileLinkIndex>,
     /// Root-relative links (leading `/`) in this file. Resolved against the
@@ -432,9 +435,6 @@ pub struct FileIndex {
     /// paths, absolute-link policy, and per-file flavor during cache lookup.
     #[serde(default)]
     pub md057_link_targets: Vec<Md057LinkTarget>,
-    /// Defined reference IDs (e.g., from `[ref]: url` definitions)
-    /// Used to filter out reference links that have explicit definitions
-    pub defined_references: HashSet<String>,
     /// Content hash for change detection
     pub content_hash: String,
     /// O(1) anchor lookup: lowercased anchor → heading index
@@ -502,17 +502,6 @@ impl HeadingIndex {
     pub fn covers_line(&self, line: usize) -> bool {
         (self.first_line()..=self.line).contains(&line)
     }
-}
-
-/// Information about a reference link for cross-file analysis
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReferenceLinkIndex {
-    /// The reference ID (the part in `[text][ref]`)
-    pub reference_id: String,
-    /// Line number (1-indexed)
-    pub line: usize,
-    /// Column number (1-indexed)
-    pub column: usize,
 }
 
 /// Where a cross-file link was written.
@@ -826,13 +815,6 @@ impl WorkspaceIndex {
         vulnerable
     }
 
-    /// Get all headings across the workspace (for debugging/testing)
-    pub fn all_headings(&self) -> impl Iterator<Item = (&Path, &HeadingIndex)> {
-        self.files
-            .iter()
-            .flat_map(|(path, index)| index.headings.iter().map(move |h| (path.as_path(), h)))
-    }
-
     /// Iterate over all files in the index
     pub fn files(&self) -> impl Iterator<Item = (&Path, &FileIndex)> {
         self.files.iter().map(|(p, i)| (p.as_path(), i))
@@ -1116,11 +1098,9 @@ impl FileIndex {
         // look like no change and leave a stale diagnostic on screen.
         let Self {
             headings,
-            reference_links,
             cross_file_links,
             root_relative_links,
             md057_link_targets,
-            defined_references,
             content_hash: _,
             anchor_to_heading,
             anchor_to_heading_exact,
@@ -1134,11 +1114,9 @@ impl FileIndex {
         } = self;
 
         headings != &other.headings
-            || reference_links != &other.reference_links
             || cross_file_links != &other.cross_file_links
             || root_relative_links != &other.root_relative_links
             || md057_link_targets != &other.md057_link_targets
-            || defined_references != &other.defined_references
             || anchor_to_heading != &other.anchor_to_heading
             || anchor_to_heading_exact != &other.anchor_to_heading_exact
             || html_anchors != &other.html_anchors
@@ -1285,11 +1263,6 @@ impl FileIndex {
             .and_then(|&idx| self.headings.get(idx))
     }
 
-    /// Add a reference link to the index
-    pub fn add_reference_link(&mut self, link: ReferenceLinkIndex) {
-        self.reference_links.push(link);
-    }
-
     /// Check if a rule is disabled at a specific line
     ///
     /// Used by cross-file rules to respect inline disable directives.
@@ -1378,29 +1351,9 @@ impl FileIndex {
         self.md057_link_targets.push(target);
     }
 
-    /// Add a defined reference ID (e.g., from `[ref]: url`)
-    pub fn add_defined_reference(&mut self, ref_id: String) {
-        self.defined_references.insert(ref_id);
-    }
-
-    /// Check if a reference ID has an explicit definition
-    pub fn has_defined_reference(&self, ref_id: &str) -> bool {
-        self.defined_references.contains(ref_id)
-    }
-
     /// Check if the content hash matches
     pub fn hash_matches(&self, hash: &str) -> bool {
         self.content_hash == hash
-    }
-
-    /// Get the number of headings
-    pub fn heading_count(&self) -> usize {
-        self.headings.len()
-    }
-
-    /// Get the number of reference links
-    pub fn reference_link_count(&self) -> usize {
-        self.reference_links.len()
     }
 }
 
@@ -2049,19 +2002,21 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 
-        // Write data with correct magic but wrong version
-        let mut data = Vec::new();
-        data.extend_from_slice(b"RWSI"); // Correct magic
-        data.extend_from_slice(&999u32.to_le_bytes()); // Future version
-        data.extend_from_slice(&[0; 100]); // Some garbage data
-        fs::write(temp_dir.join("workspace_index.bin"), &data).unwrap();
+        // Version 16 still contains the removed reference bookkeeping fields.
+        // Use a valid payload so decoding alone cannot mask a reused version.
+        let cache_file = temp_dir.join("workspace_index.bin");
+        for version in [16u32, 999u32] {
+            WorkspaceIndex::new().save_to_cache(&temp_dir).unwrap();
+            let mut data = fs::read(&cache_file).unwrap();
+            data[4..8].copy_from_slice(&version.to_le_bytes());
+            fs::write(&cache_file, data).unwrap();
 
-        // Should return None for version mismatch
-        let result = WorkspaceIndex::load_from_cache(&temp_dir);
-        assert!(result.is_none());
+            let result = WorkspaceIndex::load_from_cache(&temp_dir);
+            assert!(result.is_none(), "cache version {version} must be rejected");
 
-        // File should be removed to trigger rebuild
-        assert!(!temp_dir.join("workspace_index.bin").exists());
+            // Remove incompatible entries to trigger a rebuild.
+            assert!(!cache_file.exists());
+        }
 
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);

@@ -21,9 +21,6 @@ static TAB_MARKER: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Simple pattern to check for any tab marker
-static TAB_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)===\s+").unwrap());
-
 /// Check if a line is a tab marker
 pub fn is_tab_marker(line: &str) -> bool {
     // First check if it starts like a tab marker
@@ -52,11 +49,6 @@ pub fn is_tab_marker(line: &str) -> bool {
 
     // Use the original regex as a final check
     TAB_MARKER.is_match(line)
-}
-
-/// Check if a line starts a tab section
-pub fn is_tab_start(line: &str) -> bool {
-    TAB_START.is_match(line)
 }
 
 /// Get the indentation level of a tab marker

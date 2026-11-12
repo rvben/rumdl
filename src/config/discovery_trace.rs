@@ -342,12 +342,6 @@ impl DiscoveryTrace {
         self.events.iter().any(|e| matches!(e, TraceEvent::Home { .. }))
     }
 
-    pub fn has_start_directory(&self) -> bool {
-        self.events
-            .iter()
-            .any(|e| matches!(e, TraceEvent::StartDirectory { .. }))
-    }
-
     /// Every file discovery selected, in the order it selected them.
     pub fn selected(&self) -> impl Iterator<Item = (&SearchStage, &str)> {
         self.events.iter().filter_map(|e| match e {

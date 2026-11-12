@@ -691,31 +691,6 @@ impl InlineConfig {
         None
     }
 
-    /// Get all disabled rules at a specific line
-    pub fn get_disabled_rules(&self, line_number: usize) -> HashSet<String> {
-        let mut disabled = HashSet::new();
-
-        // Add persistent disables via state transitions (binary search)
-        if let Some(transition) = self.find_transition(line_number) {
-            if transition.disabled.contains("*") {
-                disabled.insert("*".to_string());
-            } else {
-                for rule in &transition.disabled {
-                    disabled.insert(rule.clone());
-                }
-            }
-        }
-
-        // Add line-specific disables
-        if let Some(line_rules) = self.line_disabled_rules.get(&line_number) {
-            for rule in line_rules {
-                disabled.insert(rule.clone());
-            }
-        }
-
-        disabled
-    }
-
     /// Get configuration overrides for a specific rule from configure-file comments
     pub fn get_rule_config(&self, rule_name: &str) -> Option<&JsonValue> {
         self.file_rule_config.get(rule_name)
@@ -1026,62 +1001,6 @@ fn directive_comment_type(kind: DirectiveKind) -> Option<&'static str> {
     }
 }
 
-// ── Backward-compatible wrapper functions ────────────────────────────────────
-//
-// These delegate to parse_inline_directives and filter by DirectiveKind.
-// External callers (e.g., MD040) use these; internal code uses the unified parser.
-
-fn find_directive_rules(line: &str, kind: DirectiveKind) -> Option<Vec<&str>> {
-    parse_inline_directives(line)
-        .into_iter()
-        .find(|d| d.kind == kind)
-        .map(|d| d.rules)
-}
-
-/// Parse a disable comment and return the list of rules (empty vec means all rules)
-pub fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
-    find_directive_rules(line, DirectiveKind::Disable)
-}
-
-/// Parse an enable comment and return the list of rules (empty vec means all rules)
-pub fn parse_enable_comment(line: &str) -> Option<Vec<&str>> {
-    find_directive_rules(line, DirectiveKind::Enable)
-}
-
-/// Parse a disable-line comment
-pub fn parse_disable_line_comment(line: &str) -> Option<Vec<&str>> {
-    find_directive_rules(line, DirectiveKind::DisableLine)
-}
-
-/// Parse a disable-next-line comment
-pub fn parse_disable_next_line_comment(line: &str) -> Option<Vec<&str>> {
-    find_directive_rules(line, DirectiveKind::DisableNextLine)
-}
-
-/// Parse a disable-file comment and return the list of rules (empty vec means all rules)
-pub fn parse_disable_file_comment(line: &str) -> Option<Vec<&str>> {
-    find_directive_rules(line, DirectiveKind::DisableFile)
-}
-
-/// Parse an enable-file comment and return the list of rules (empty vec means all rules)
-pub fn parse_enable_file_comment(line: &str) -> Option<Vec<&str>> {
-    find_directive_rules(line, DirectiveKind::EnableFile)
-}
-
-/// Check if line contains a capture comment
-pub fn is_capture_comment(line: &str) -> bool {
-    parse_inline_directives(line)
-        .iter()
-        .any(|d| d.kind == DirectiveKind::Capture)
-}
-
-/// Check if line contains a restore comment
-pub fn is_restore_comment(line: &str) -> bool {
-    parse_inline_directives(line)
-        .iter()
-        .any(|d| d.kind == DirectiveKind::Restore)
-}
-
 const CONFIGURE_FILE_KEYWORD: &str = "configure-file";
 
 /// Half-open range membership shared by every directive in a source operation.
@@ -1254,13 +1173,6 @@ fn scan_configure_file_comments(text: &str) -> Vec<(usize, JsonValue)> {
     }
 
     found
-}
-
-/// Parse a configure-file comment and return the JSON configuration.
-///
-/// Returns the first payload found. The text may span lines.
-pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
-    scan_configure_file_comments(line).into_iter().next().map(|(_, v)| v)
 }
 
 // ── Disable-comment inventory ────────────────────────────────────────────────
@@ -1763,6 +1675,27 @@ fn collect_inline_config_warnings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rules named by the first directive of `kind` on the line, where an
+    /// empty list means every rule.
+    fn find_directive_rules(line: &str, kind: DirectiveKind) -> Option<Vec<&str>> {
+        parse_inline_directives(line)
+            .into_iter()
+            .find(|d| d.kind == kind)
+            .map(|d| d.rules)
+    }
+
+    fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
+        find_directive_rules(line, DirectiveKind::Disable)
+    }
+
+    fn parse_enable_comment(line: &str) -> Option<Vec<&str>> {
+        find_directive_rules(line, DirectiveKind::Enable)
+    }
+
+    fn parse_disable_line_comment(line: &str) -> Option<Vec<&str>> {
+        find_directive_rules(line, DirectiveKind::DisableLine)
+    }
 
     #[test]
     fn code_range_index_preserves_arbitrary_range_membership() {

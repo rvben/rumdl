@@ -31,10 +31,6 @@ pub(super) const SAFE_FIXABLE_TAGS: &[&str] = &[
     "img",  // image: ![alt](src) - requires src attribute
 ];
 
-/// Tags that require attribute extraction for conversion (unlike simple tags like em/strong).
-/// These tags are fixable only when they have the required attributes.
-pub(super) const ATTRIBUTE_FIXABLE_TAGS: &[&str] = &["a", "img"];
-
 /// Value accepted inside `allowed-elements` and `table-allowed-elements` that permits
 /// every element Markdown has no syntax for.
 pub(super) const NO_MARKDOWN_EQUIVALENT: &str = "no-markdown-equivalent";
@@ -339,11 +335,6 @@ impl MD033Config {
     /// Check if a tag is safe to auto-fix (has a simple Markdown equivalent)
     pub fn is_safe_fixable_tag(tag_name: &str) -> bool {
         SAFE_FIXABLE_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
-    }
-
-    /// Check if a tag requires attribute extraction for conversion
-    pub fn requires_attribute_extraction(tag_name: &str) -> bool {
-        ATTRIBUTE_FIXABLE_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
     }
 
     /// Convert drop attributes to lowercase `HashSet` for efficient lookup.

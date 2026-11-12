@@ -37,7 +37,7 @@ Thank you for your interest in contributing to rumdl! This document provides gui
    Or manually:
 
    ```bash
-   cargo install cargo-nextest cargo-watch maturin
+   cargo install cargo-nextest maturin
    ```
 
 3. **Install prek hooks**:
@@ -57,9 +57,8 @@ Thank you for your interest in contributing to rumdl! This document provides gui
 5. **Run tests**:
 
    ```bash
-   make test-dev    # Recommended: ~20s, skips slowest tests
    make test-quick  # Faster: ~15s, skips slow/stress tests
-   make test        # Full suite with dev profile
+   make test        # Development default (dev profile)
    ```
 
 ## Commit Message Convention
@@ -242,8 +241,7 @@ rumdl uses [cargo-nextest](https://nexte.st/) with optimized test profiles:
 | ---------------------- | -------- | ----------------------------------- |
 | `make test-prek`       | ~6s      | prek hook (lib tests only)          |
 | `make test-quick`      | ~15s     | Quick feedback (skips slow tests)   |
-| `make test-dev`        | ~20s     | Development default (skips slowest) |
-| `make test`            | ~30s     | Full suite with dev profile         |
+| `make test`            | ~30s     | Development default (dev profile)   |
 | `make test-ci`         | varies   | CI environment                      |
 
 **⚠️ Never use `cargo test` directly** - it's 30-100x slower!
@@ -345,7 +343,7 @@ make lint
 1. **Run tests**:
 
    ```bash
-   make test-dev
+   make test
    ```
 
 2. **Format code**:
@@ -393,7 +391,7 @@ Brief description of changes
 ## Testing
 
 - [ ] Tests added/updated
-- [ ] All tests passing (`make test-dev`)
+- [ ] All tests passing (`make test`)
 - [ ] Manual testing performed
 
 ## Checklist

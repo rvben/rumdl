@@ -275,27 +275,9 @@ pub static UNORDERED_LIST_MARKER_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex
 pub static ORDERED_LIST_MARKER_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)(\d+)([.)])(\s+)").unwrap());
 
-// Emphasis patterns
-
-// MD037 specific emphasis patterns - improved to avoid false positives
-// Only match emphasis with spaces that are actually complete emphasis blocks
-// Use word boundaries and negative lookbehind/lookahead to avoid matching across emphasis boundaries
-pub static ASTERISK_EMPHASIS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|[^*])\*(\s+[^*]+\s*|\s*[^*]+\s+)\*(?:[^*]|$)").unwrap());
-pub static UNDERSCORE_EMPHASIS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|[^_])_(\s+[^_]+\s*|\s*[^_]+\s+)_(?:[^_]|$)").unwrap());
-pub static DOUBLE_UNDERSCORE_EMPHASIS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|[^_])__(\s+[^_]+\s*|\s*[^_]+\s+)__(?:[^_]|$)").unwrap());
-// Code block patterns
-pub static FENCED_CODE_BLOCK_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap());
-pub static FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```\s*$").unwrap());
-
 // HTML patterns
 pub static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([a-zA-Z][^>]*)>").unwrap());
 pub static HTML_TAG_QUICK_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new("(?i)</?[a-zA-Z]").unwrap());
-
-// Image patterns
-pub static IMAGE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap());
 
 // Blockquote patterns
 pub static BLOCKQUOTE_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*>+\s*)").unwrap());
@@ -346,20 +328,10 @@ pub fn is_blank_in_blockquote_context(line: &str) -> bool {
 pub static IMAGE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^!\[.*?\]\[.*?\]$").unwrap());
 pub static LINK_REF_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^\[.*?\]:\s*\S+(\s+["'(].*)?\s*$"#).unwrap());
-pub static ABBREVIATION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap()
-});
-pub static LIST_ITEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\d+\.\s+").unwrap());
 
 // Email pattern
 pub static EMAIL_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap());
-
-// Third lazy_static block for link and image patterns used by MD052 and text_reflow
-// Reference link patterns (shared by MD052 and text_reflow)
-// Pattern to match reference links: [text][reference] or [text][]
-pub static REF_LINK_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"(?<!\\)\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap());
 
 // Pattern for shortcut reference links: [reference]
 // Must not be preceded by ] or ) (to avoid matching second part of [text][ref])
@@ -367,42 +339,6 @@ pub static REF_LINK_REGEX: LazyLock<FancyRegex> =
 // The capturing group handles nested brackets to support cases like [`Union[T, None]`]
 pub static SHORTCUT_REF_REGEX: LazyLock<FancyRegex> =
     LazyLock::new(|| FancyRegex::new(r"(?<![\\)\]])\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\](?!\s*[\[\(])").unwrap());
-
-// Inline link with fancy regex for better escaping handling (used by text_reflow)
-pub static INLINE_LINK_FANCY_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"(?<!\\)\[([^\]]+)\]\(([^)]+)\)").unwrap());
-
-// Inline image (used by MD052 and text_reflow)
-pub static INLINE_IMAGE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap());
-
-// Linked images (clickable badges) - all 4 variants
-// Must be detected before inline_image and inline_link to treat as atomic units
-//
-// Limitation: Alt text containing brackets like [![[v1.0]](img)](link) is not supported.
-// The [^\]]* pattern cannot match nested brackets. This is rare in practice.
-//
-// Pattern 1: Inline image in inline link - [![alt](img-url)](link-url)
-pub static LINKED_IMAGE_INLINE_INLINE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)").unwrap());
-
-// Pattern 2: Reference image in inline link - [![alt][img-ref]](link-url)
-pub static LINKED_IMAGE_REF_INLINE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[!\[([^\]]*)\]\[([^\]]*)\]\]\(([^)]+)\)").unwrap());
-
-// Pattern 3: Inline image in reference link - [![alt](img-url)][link-ref]
-pub static LINKED_IMAGE_INLINE_REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[!\[([^\]]*)\]\(([^)]+)\)\]\[([^\]]*)\]").unwrap());
-
-// Pattern 4: Reference image in reference link - [![alt][img-ref]][link-ref]
-pub static LINKED_IMAGE_REF_REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[!\[([^\]]*)\]\[([^\]]*)\]\]\[([^\]]*)\]").unwrap());
-
-// Reference image: ![alt][ref] or ![alt][]
-pub static REF_IMAGE_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"!\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]\[([^\]]*)\]").unwrap());
-
-// Footnote reference: [^note]
-pub static FOOTNOTE_REF_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\^([^\]]+)\]").unwrap());
 
 // Wiki-style links: [[wiki]] or [[wiki|display text]]
 pub static WIKI_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]]+)\]\]").unwrap());

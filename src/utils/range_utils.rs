@@ -73,22 +73,6 @@ impl<'a> LineIndex<'a> {
         index
     }
 
-    /// Create a `LineIndex` from pre-computed line start byte offsets.
-    /// Each entry is the byte offset of the first character on that line.
-    /// The first entry must be 0 (start of content).
-    pub fn with_line_starts(content: &'a str, line_starts: Vec<usize>) -> Self {
-        let mut index = Self {
-            line_starts: Cow::Owned(line_starts),
-            content,
-            code_block_lines: None,
-        };
-
-        // Pre-compute code block lines for better performance
-        index.compute_code_block_lines();
-
-        index
-    }
-
     /// Create a `LineIndex` from pre-computed line starts and code block byte ranges.
     ///
     /// Instead of re-scanning content to find code blocks, this converts
@@ -532,16 +516,6 @@ pub fn calculate_emphasis_range(
     (line, char_start, line, char_end)
 }
 
-/// Calculate range for HTML tags
-pub fn calculate_html_tag_range(
-    line: usize,
-    line_content: &str,
-    tag_start: usize,
-    tag_len: usize,
-) -> (usize, usize, usize, usize) {
-    calculate_match_range(line, line_content, tag_start, tag_len)
-}
-
 /// Calculate range for URLs
 pub fn calculate_url_range(
     line: usize,
@@ -550,16 +524,6 @@ pub fn calculate_url_range(
     url_len: usize,
 ) -> (usize, usize, usize, usize) {
     calculate_match_range(line, line_content, url_start, url_len)
-}
-
-/// Calculate range for list markers
-pub fn calculate_list_marker_range(
-    line: usize,
-    line_content: &str,
-    marker_start: usize,
-    marker_len: usize,
-) -> (usize, usize, usize, usize) {
-    calculate_match_range(line, line_content, marker_start, marker_len)
 }
 
 /// Calculate range that exceeds a limit (like line length)

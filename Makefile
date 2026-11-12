@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long fuzz-reflow fuzz-sentence-layout fuzz-seed-corpus reflow-sweep check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics docs-search-test docs-site sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc doc-check dev-install setup-mise dev-setup dev-verify build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long fuzz-reflow fuzz-sentence-layout fuzz-seed-corpus reflow-sweep check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics docs-search-test docs-site sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -33,29 +33,6 @@ dev-verify:
 	@echo "maturin: $$(maturin --version 2>/dev/null || echo 'not installed')"
 	@echo "cargo-binstall: $$(cargo binstall --version 2>/dev/null || echo 'not installed')"
 	@echo "===================="
-
-# CI-specific setup (uses mise if available, falls back to direct installation)
-ci-setup:
-	@if command -v mise >/dev/null 2>&1; then \
-		echo "Using mise for CI setup..."; \
-		mise install; \
-	else \
-		echo "mise not found, using direct installation..."; \
-		if ! command -v cargo-nextest >/dev/null 2>&1; then \
-			echo "Installing cargo-nextest..."; \
-			curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C $${CARGO_HOME:-~/.cargo}/bin; \
-		fi; \
-		if ! command -v cargo-binstall >/dev/null 2>&1; then \
-			echo "Installing cargo-binstall..."; \
-			curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash; \
-		fi; \
-	fi
-
-# Install mise in CI environment
-ci-install-mise:
-	@echo "Installing mise for CI..."
-	@curl https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
-	@echo "mise installed at: $$(which mise)"
 
 build:
 	cargo build --release
@@ -262,15 +239,6 @@ docker-push: docker-builder
 	done
 
 test:
-	cargo nextest run --profile dev
-
-test-legacy:
-	cargo test
-
-test-nextest:
-	cargo nextest run
-
-test-dev:
 	cargo nextest run --profile dev
 
 test-quick:
@@ -497,9 +465,6 @@ lint-all:
 	cargo clippy --all-targets --all-features -- -D warnings -D clippy::uninlined_format_args
 	$(MAKE) lint-actions
 
-lint-fast:
-	cargo clippy --workspace --lib --bins -- -D warnings -D clippy::uninlined_format_args
-
 check:
 	cargo check --all-targets --all-features
 
@@ -561,106 +526,8 @@ doc-check:
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --document-private-items
 
-watch-test:
-	cargo watch -x "nextest run --profile quick"
-
-all: fmt check test build
-
-# Python-specific targets
-build-python:
-	maturin build --release
-
-build-wheel:
-	maturin build --release --strip --interpreter python3
-
 dev-install:
 	maturin develop --release
-
-maturin-build:
-	uv run --with pip,maturin[zig],cffi maturin build --release
-
-maturin-sdist:
-	uv run --with pip,maturin[zig],cffi maturin sdist
-
-run:
-	cargo run --release --bin rumdl check .
-
-run-readme:
-	cargo run --release --bin rumdl check README.md
-
-run-small:
-	cargo run --release --bin rumdl check benchmark/test-data/small
-
-run-medium:
-	cargo run --release --bin rumdl check benchmark/test-data/medium
-
-run-large:
-	cargo run --release --bin rumdl check benchmark/test-data/large
-
-run-rule:
-	cargo run --release --bin rumdl -- rule MD001
-
-run-config:
-	cargo run --release --bin rumdl -- config
-
-run-config-defaults:
-	cargo run --release --bin rumdl -- config --defaults
-
-run-config-toml:
-	cargo run --release --bin rumdl -- config --output toml
-
-run-config-defaults-toml:
-	cargo run --release --bin rumdl -- config --defaults --output toml
-
-run-config-defaults-smart:
-	cargo run --release --bin rumdl -- config --defaults --output smart
-
-run-help:
-	cargo run --release --bin rumdl -- help
-
-trigger-pre-commit:
-	curl -X POST \
-	-H "Accept: application/vnd.github+json" \
-	-H "Authorization: Bearer $(PRECOMMIT_DISPATCH_TOKEN)" \
-	https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
-	-d '{"event_type": "pypi_release"}'
-
-# Dependency and version update targets
-update-dependencies:
-	@echo "Updating Cargo dependencies to latest compatible versions..."
-	@cargo update
-	@echo "Dependencies updated in Cargo.lock"
-	@echo ""
-	@if command -v cargo-outdated >/dev/null 2>&1; then \
-		echo "Checking for available updates beyond current constraints:"; \
-		cargo outdated; \
-	else \
-		echo "Install cargo-outdated for more detailed update information:"; \
-		echo "  cargo install cargo-outdated"; \
-	fi
-
-update-rust-version:
-	@echo "Checking for latest stable Rust version..."
-	$(eval LATEST_RUST := $(shell curl -s https://api.github.com/repos/rust-lang/rust/releases/latest | grep '"tag_name":' | sed -E 's/.*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/' | head -1))
-	$(eval CURRENT_RUST := $(shell grep '^rust-version' Cargo.toml | sed -E 's/rust-version = "([0-9]+\.[0-9]+\.[0-9]+)"/\1/'))
-	@if [ -z "$(LATEST_RUST)" ]; then \
-		echo "Failed to fetch latest Rust version"; \
-		exit 1; \
-	fi
-	@echo "Current Rust version: $(CURRENT_RUST)"
-	@echo "Latest Rust version: $(LATEST_RUST)"
-	@if [ "$(CURRENT_RUST)" = "$(LATEST_RUST)" ]; then \
-		echo "Already using the latest Rust version"; \
-	else \
-		echo "Updating Rust version to $(LATEST_RUST)..."; \
-		sed -i.bak -E 's/^rust-version = "[0-9]+\.[0-9]+\.[0-9]+"/rust-version = "$(LATEST_RUST)"/' Cargo.toml; \
-		sed -i.bak -E 's/^rust = "[0-9]+\.[0-9]+\.[0-9]+"/rust = "$(LATEST_RUST)"/' .mise.toml; \
-		sed -i.bak -E 's/^channel = "[0-9]+\.[0-9]+\.[0-9]+"/channel = "$(LATEST_RUST)"/' rust-toolchain.toml; \
-		rm -f Cargo.toml.bak .mise.toml.bak rust-toolchain.toml.bak; \
-		echo "Updated Rust version in Cargo.toml, .mise.toml, and rust-toolchain.toml"; \
-		echo "Running 'cargo check' to verify compatibility..."; \
-		cargo check || (echo "Warning: cargo check failed. You may need to fix compatibility issues."; exit 1); \
-	fi
 
 # Benchmark targets
 benchmark: benchmark-run benchmark-chart

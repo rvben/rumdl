@@ -221,11 +221,6 @@ impl Config {
         self.global.flavor
     }
 
-    /// Legacy method for backwards compatibility - redirects to is_mkdocs_flavor
-    pub fn is_mkdocs_project(&self) -> bool {
-        self.is_mkdocs_flavor()
-    }
-
     /// Apply per-rule `enabled` config to the global enable/disable lists.
     ///
     /// For `[MD060] enabled = true`: adds the rule to `extend_enable` and

@@ -209,15 +209,14 @@ jobs:
         # than through `mise exec`, for two reasons. `mise exec` installs
         # every tool in .mise.toml that is missing before it runs the
         # command, and with a cargo-binstall on PATH it now does so for real:
-        # seven cargo: tools this job never uses, one of which (cargo-edit)
-        # has no prebuilt binary for the runner and compiles from source,
-        # eight minutes on Windows. And on Windows with mise 2026.8.x,
-        # rust-cache's silent toolchain probes take 16 minutes when rustc,
-        # rustup and cargo resolve to mise shims (5 seconds on mise
-        # 2025.8.18). The tools' real bin directories ahead of the shims
-        # take both out of every later step; rust-toolchain.toml keeps the
-        # toolchain pinned for the bare rustup proxies. See the Windows job
-        # in ci.yml.
+        # cargo: tools this job never uses, and any of them without a
+        # prebuilt binary for the runner compiles from source. And on
+        # Windows with mise 2026.8.x, rust-cache's silent toolchain probes
+        # take 16 minutes when rustc, rustup and cargo resolve to mise shims
+        # (5 seconds on mise 2025.8.18). The tools' real bin directories ahead
+        # of the shims take both out of every later step; rust-toolchain.toml
+        # keeps the toolchain pinned for the bare rustup proxies. See the
+        # Windows job in ci.yml.
         shell: bash
         run: mise bin-paths >> "$GITHUB_PATH"
 

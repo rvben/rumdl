@@ -29,7 +29,6 @@ disable = ["MD001"]
     // Check that flavor was loaded
     assert_eq!(config.global.flavor, MarkdownFlavor::MkDocs);
     assert!(config.is_mkdocs_flavor());
-    assert!(config.is_mkdocs_project()); // Test backwards compatibility
     assert_eq!(config.global.disable, vec!["MD001".to_string()]);
 }
 

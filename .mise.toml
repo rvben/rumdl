@@ -32,23 +32,14 @@ uv = "latest"
 # Development tools installed via cargo
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-codspeed" = "5.0.2"  # Keep in step with codspeed-criterion-compat in Cargo.toml
-"cargo:cargo-watch" = "latest"
 "cargo:cargo-binstall" = "latest"
 "cargo:cargo-zigbuild" = "latest"  # For building static Linux binaries
 
 # Zig for cross-compilation (used by maturin)
 zig = "0.13"
 
-# Additional Rust development tools for dependency management
-"cargo:cargo-edit" = "latest"     # For cargo add/rm/upgrade commands
-"cargo:cargo-outdated" = "latest" # Check for outdated dependencies
-"cargo:lychee" = "latest"         # Link checker for markdown files
-# Optional: Security and dependency tools
-# "cargo:cargo-audit" = "latest"    # Security audit dependencies
-# "cargo:cargo-deny" = "latest"     # Lint dependencies
-
-# Note: maturin is installed as a prebuilt wheel via the pipx backend above.
-# Other Python packages (cffi, etc.) are installed separately as needed.
+# Link checker for markdown files (`make check-links`)
+"cargo:lychee" = "latest"
 
 [settings]
 # Experimental features
@@ -57,68 +48,6 @@ experimental = true
 # Enable idiomatic version files (like rust-toolchain.toml)
 idiomatic_version_file_enable_tools = ["rust"]
 
-# Configure rust/cargo homes if you want isolation from system rust
-# rust_cache_dir = "./.mise/rust"
-# cargo_home = "./.mise/cargo"
-
 [settings.cargo]
 # Use cargo-binstall when available for faster installations
 binstall = true
-
-[tasks.setup]
-description = "Set up the complete development environment"
-run = """
-echo "Setting up rumdl development environment..."
-echo "Installing Rust toolchain and tools..."
-mise install
-echo "Installing Python tools with uv..."
-uv tool install twine
-echo "Development environment setup complete!"
-echo ""
-echo "Installed tools:"
-mise list
-echo ""
-echo "Python tools:"
-uv tool list
-"""
-
-[tasks.verify]
-description = "Verify all tools are installed correctly"
-run = """
-echo "Verifying development environment..."
-echo "Rust version: $(rustc --version)"
-echo "Cargo version: $(cargo --version)"
-echo "Python version: $(python --version)"
-echo "cargo-nextest version: $(cargo nextest --version)"
-echo "maturin version: $(maturin --version)"
-echo ""
-echo "Running quick test to verify setup..."
-make test-quick
-"""
-
-[tasks.ci]
-description = "Run CI checks"
-run = """
-echo "Running CI checks..."
-make fmt
-make lint
-make test-quick
-"""
-
-# CI environment variables (set these in CI workflow)
-# Example for GitHub Actions:
-# env:
-#   RUST_BACKTRACE: "full"
-#   CARGO_INCREMENTAL: "0"
-#   CARGO_NET_RETRY: "10"
-#   RUSTFLAGS: "-D warnings"
-
-# Platform-specific tool versions (optional)
-# [tools.linux]
-# rust = "1.87.0"
-#
-# [tools.macos]
-# rust = "1.87.0"
-#
-# [tools.windows]
-# rust = "1.87.0"

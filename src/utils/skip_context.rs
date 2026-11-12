@@ -5,13 +5,9 @@
 
 use crate::config::MarkdownFlavor;
 use crate::lint_context::{HtmlTag, LintContext, SourcePositions};
-use crate::utils::mkdocs_admonitions;
-use crate::utils::mkdocs_critic;
 use crate::utils::mkdocs_extensions;
-use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_icons;
 use crate::utils::mkdocs_snippets;
-use crate::utils::mkdocs_tabs;
 use regex::Regex;
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -274,26 +270,6 @@ pub fn is_in_mdx_comment(ctx: &LintContext, byte_pos: usize) -> bool {
 /// Check if a line should be skipped due to MkDocs snippet syntax
 pub fn is_mkdocs_snippet_line(line: &str, flavor: MarkdownFlavor) -> bool {
     flavor == MarkdownFlavor::MkDocs && mkdocs_snippets::is_snippet_marker(line)
-}
-
-/// Check if a line is a MkDocs admonition marker
-pub fn is_mkdocs_admonition_line(line: &str, flavor: MarkdownFlavor) -> bool {
-    flavor == MarkdownFlavor::MkDocs && mkdocs_admonitions::is_admonition_marker(line)
-}
-
-/// Check if a line is a MkDocs footnote definition
-pub fn is_mkdocs_footnote_line(line: &str, flavor: MarkdownFlavor) -> bool {
-    flavor == MarkdownFlavor::MkDocs && mkdocs_footnotes::is_footnote_definition(line)
-}
-
-/// Check if a line is a MkDocs tab marker
-pub fn is_mkdocs_tab_line(line: &str, flavor: MarkdownFlavor) -> bool {
-    flavor == MarkdownFlavor::MkDocs && mkdocs_tabs::is_tab_marker(line)
-}
-
-/// Check if a line contains MkDocs Critic Markup
-pub fn is_mkdocs_critic_line(line: &str, flavor: MarkdownFlavor) -> bool {
-    flavor == MarkdownFlavor::MkDocs && mkdocs_critic::contains_critic_markup(line)
 }
 
 /// Check if a byte position is within an HTML tag

@@ -583,19 +583,6 @@ fn create_ignore_line_action(warning: &crate::rule::LintWarning, uri: &Url, docu
     })
 }
 
-/// Legacy function for backwards compatibility
-/// Use `warning_to_code_actions` instead
-#[deprecated(since = "0.0.167", note = "Use warning_to_code_actions instead")]
-pub fn warning_to_code_action(
-    warning: &crate::rule::LintWarning,
-    uri: &Url,
-    document_text: &str,
-) -> Option<CodeAction> {
-    warning_to_code_actions(warning, uri, document_text)
-        .into_iter()
-        .find(|action| action.is_preferred == Some(true))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1438,32 +1425,6 @@ mod tests {
 
         // Should have no actions (no rule name means can't create ignore comment)
         assert_eq!(actions.len(), 0);
-    }
-
-    #[test]
-    fn test_legacy_warning_to_code_action_compatibility() {
-        let warning = LintWarning {
-            line: 1,
-            column: 1,
-            end_line: 1,
-            end_column: 5,
-            rule_name: Some("MD001".to_string()),
-            message: "Test".to_string(),
-            severity: Severity::Warning,
-            fix: Some(Fix::new(0..5, "Fixed".to_string())),
-        };
-
-        let uri = Url::parse("file:///test.md").unwrap();
-        let document_text = "Hello World";
-
-        #[allow(deprecated)]
-        let action = warning_to_code_action(&warning, &uri, document_text);
-
-        // Should return the preferred (fix) action
-        assert!(action.is_some());
-        let action = action.unwrap();
-        assert_eq!(action.title, "Fix: Test");
-        assert_eq!(action.is_preferred, Some(true));
     }
 
     #[test]

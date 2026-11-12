@@ -43,21 +43,6 @@ manifest-path = "Cargo.toml"
 python-packages = ["rumdl"]
 strip = true
 
-[tool.black]
-line-length = 88
-target-version = ["py39"]
-
-[tool.isort]
-profile = "black"
-line_length = 88
-
-[tool.mypy]
-python_version = "3.9"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
 [dependency-groups]
 dev = [
     "prek>=0.3.13",

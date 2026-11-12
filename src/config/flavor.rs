@@ -167,11 +167,6 @@ impl MarkdownFlavor {
         matches!(self, Self::MDX)
     }
 
-    /// Check if this flavor supports auto-references (MkDocs-specific)
-    pub fn supports_auto_references(self) -> bool {
-        matches!(self, Self::MkDocs)
-    }
-
     /// Check if this flavor supports kramdown syntax (IALs, ALDs, extension blocks)
     pub fn supports_kramdown_syntax(self) -> bool {
         matches!(self, Self::Kramdown)

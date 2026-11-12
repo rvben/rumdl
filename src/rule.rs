@@ -443,10 +443,6 @@ impl<R: Rule + 'static> RuleExt for Box<R> {
     }
 }
 
-// Inline config parsing functions are in inline_config.rs.
-// Use InlineConfig::from_content() for the full inline configuration system,
-// or inline_config::parse_disable_comment/parse_enable_comment for low-level parsing.
-
 #[cfg(test)]
 mod tests {
     use super::*;

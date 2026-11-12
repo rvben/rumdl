@@ -1,7 +1,7 @@
 //! Path-aware document analysis shared by CLI, stdin, LSP, and virtual adapters.
 
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::config::{Config, MarkdownFlavor};
 use crate::fix_coordinator::{FixCoordinator, FixResult};
@@ -249,10 +249,6 @@ impl<'a> DocumentRun<'a> {
             Cow::Owned(restored) => restored,
         };
         Ok((restored, result))
-    }
-
-    pub fn config_path_buf(&self) -> Option<PathBuf> {
-        self.config_path.map(Path::to_path_buf)
     }
 
     fn paths(&self) -> crate::DocumentPaths<'a> {

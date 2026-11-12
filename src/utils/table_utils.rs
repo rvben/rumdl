@@ -1501,25 +1501,6 @@ impl TableUtils {
         inside_container(header) >= 4 && inside_container(delimiter) < 4
     }
 
-    /// Check if the content after a list marker looks like a table row.
-    /// This is used to detect tables that start on the same line as a list marker.
-    pub fn is_list_item_with_table_row(line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
-        let (prefix, content, _) = Self::extract_list_prefix(line);
-        if prefix.is_empty() {
-            return false;
-        }
-
-        // Check if the content after the list marker is a table row
-        // It must start with | (proper table format within a list)
-        let trimmed = content.trim();
-        if !trimmed.starts_with('|') {
-            return false;
-        }
-
-        // Use our table row detection on the content
-        Self::is_potential_table_row_content(content, flavor)
-    }
-
     /// Internal helper: Check if content (without list/blockquote prefix) looks like a table row.
     fn is_potential_table_row_content(content: &str, flavor: crate::config::MarkdownFlavor) -> bool {
         Self::is_potential_table_row_with_flavor(content, flavor)
