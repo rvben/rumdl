@@ -118,6 +118,11 @@ static REF_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+// A definition line holding only its label (`[id]:`), whose destination is on
+// the next line (CommonMark §4.7).
+static REF_DEF_LABEL_ONLY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[((?:[^\]\\]|\\.)+)\]:[ \t]*$").unwrap());
+
 // CommonMark §4.7 allows a reference definition's title to appear on the line
 // immediately after the destination. This matches a line that is *only* such a
 // title (double-quoted, single-quoted, or parenthesised), with the same escape
@@ -1480,6 +1485,34 @@ pub(super) fn parse_reference_defs(
                 byte_end,
                 title_byte_start,
                 title_byte_end,
+            });
+        } else if let Some(cap) = REF_DEF_LABEL_ONLY.captures(line)
+            && !cap[1].starts_with('^')
+        {
+            // CommonMark §4.7: the destination (and title) may sit on the lines
+            // after the label (`[id]:\n  https://…`), as Prettier and markdownlint
+            // wrap a long definition. The line-by-line pattern cannot see across
+            // the line ending, so take the parser's reading of the definition.
+            let label_start = base_offset + (line.len() - line.trim_start_matches(' ').len());
+            let Ok(index) = parser_definitions.binary_search_by_key(&label_start, |definition| definition.span.start)
+            else {
+                continue;
+            };
+            let definition = &parser_definitions[index];
+            let after_colon = base_offset + cap.get(0).unwrap().end();
+            let rest = content.get(after_colon..definition.span.end).unwrap_or_default();
+            let raw = rest.split_whitespace().next().unwrap_or_default();
+            let raw = raw.strip_prefix('<').and_then(|r| r.strip_suffix('>')).unwrap_or(raw);
+            refs.push(ReferenceDef {
+                line: line_num,
+                id: cap[1].to_lowercase(),
+                url: unescape_commonmark_punctuation(raw),
+                destination: definition.dest.clone(),
+                title: None,
+                byte_offset: base_offset,
+                byte_end: definition.span.end,
+                title_byte_start: None,
+                title_byte_end: None,
             });
         }
     }
