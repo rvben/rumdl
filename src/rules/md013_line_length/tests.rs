@@ -12339,3 +12339,50 @@ fn reflow_keeps_the_first_line_indent_of_a_paragraph_in_a_nested_bare_item() {
         "- 1.\n     This is a long sentence that stays\n     in the inner item. Tail words here.\n     More tail words here.\n"
     );
 }
+
+#[test]
+fn front_matter_is_skipped_by_default_and_checked_when_enabled() {
+    let input = "---\ntitle: short\ndescription: this front matter line is much longer than the limit\n---\n\n# Title\n";
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+
+    let default_rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(30),
+        ..Default::default()
+    });
+    assert!(default_rule.check(&ctx).unwrap().is_empty());
+
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(30),
+        front_matter: true,
+        reflow: true,
+        ..Default::default()
+    });
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].line, 3);
+    assert!(warnings[0].fix.is_none());
+    assert_eq!(rule.fix(&ctx).unwrap(), input);
+}
+
+#[test]
+fn front_matter_option_checks_toml_front_matter_without_fix() {
+    let input = "+++\ndescription = \"this front matter line is much longer than the limit\"\n+++\n\n# Title\n";
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(30),
+        front_matter: true,
+        reflow: true,
+        ..Default::default()
+    });
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].line, 2);
+    assert!(warnings[0].fix.is_none());
+    assert_eq!(rule.fix(&ctx).unwrap(), input);
+
+    let default_rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(30),
+        ..Default::default()
+    });
+    assert!(default_rule.check(&ctx).unwrap().is_empty());
+}

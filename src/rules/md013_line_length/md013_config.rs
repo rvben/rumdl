@@ -98,6 +98,15 @@ pub struct MD013Config {
     #[serde(default, alias = "bracket_display_math")]
     pub bracket_display_math: bool,
 
+    /// Check YAML and TOML front matter for line length (default: false).
+    ///
+    /// Front matter is not Markdown, so it is skipped unless this is set. When
+    /// `true`, lines in a `---` delimited YAML or `+++` delimited TOML block are
+    /// measured against `line-length` and reported without a fix: reflow never
+    /// rewrites front matter. JSON front matter is not checked.
+    #[serde(default, alias = "front_matter")]
+    pub front_matter: bool,
+
     /// Check paragraph/text line length (default: true)
     /// When false, line length violations in regular text are not reported,
     /// but reflow can still be used to format paragraphs.
@@ -328,6 +337,7 @@ impl Default for MD013Config {
             headings: default_headings(),
             math_blocks: default_math_blocks(),
             bracket_display_math: false,
+            front_matter: false,
             paragraphs: default_paragraphs(),
             blockquotes: default_blockquotes(),
             strict: false,
