@@ -12379,6 +12379,55 @@ fn front_matter_rule(limit: usize) -> MD013LineLength {
     })
 }
 
+#[test]
+fn front_matter_checks_and_wraps_the_last_word_without_markdown_forgiveness() {
+    for (input, limit) in [
+        ("---\ntitle: alpha beta gamma delta\n---\n", 25),
+        ("+++\ntitle = \"alpha beta gamma delta\"\n+++\n", 30),
+        (
+            "---\ntitle: short abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\n---\n",
+            30,
+        ),
+    ] {
+        let rule = front_matter_rule(limit);
+        let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "missing front matter warning for {input:?}");
+        assert!(warnings[0].fix.is_some(), "missing wrapping fix for {input:?}");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_ne!(fixed, input);
+        if input.starts_with("---") {
+            let before: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(input)).unwrap();
+            let after: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(&fixed)).unwrap();
+            assert_eq!(before, after);
+        } else {
+            let before: toml::Value = toml::from_str(&front_matter_body(input)).unwrap();
+            let after: toml::Value = toml::from_str(&front_matter_body(&fixed)).unwrap();
+            assert_eq!(before, after);
+        }
+        assert_front_matter_idempotent(&rule, &fixed);
+    }
+}
+
+#[test]
+fn front_matter_reports_unwrappable_lines_in_default_and_stern_modes() {
+    let input = "---\nabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\n---\n";
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    for stern in [false, true] {
+        let rule = MD013LineLength::from_config_struct(MD013Config {
+            line_length: crate::types::LineLength::new(30),
+            front_matter: true,
+            reflow: true,
+            stern,
+            ..Default::default()
+        });
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_none());
+        assert_eq!(rule.fix(&ctx).unwrap(), input);
+    }
+}
+
 fn fix_front_matter(rule: &MD013LineLength, input: &str) -> String {
     let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
     rule.fix(&ctx).unwrap()

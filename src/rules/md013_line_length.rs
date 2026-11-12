@@ -790,6 +790,26 @@ impl Rule for MD013LineLength {
                 continue;
             }
 
+            // Front matter is data: measure the whole line before applying
+            // Markdown's unwrappable-line and trailing-token exemptions.
+            if ctx.lines[line_idx].in_front_matter {
+                if effective_length > line_limit {
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_excess_range(line_number, line, line_limit);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        message: format!("Line length {effective_length} exceeds {line_limit} characters"),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        severity: Severity::Warning,
+                        fix: front_matter_fixes.remove(&line_idx),
+                    });
+                }
+                continue;
+            }
+
             // Stern mode: like default, but the trailing-token forgiveness is
             // disabled — a line with whitespace that exceeds the limit is a
             // violation even if the excess is the final token. The "unwrappable"
@@ -818,23 +838,6 @@ impl Rule for MD013LineLength {
 
             // Skip lines where the check length is within the limit
             if check_length <= line_limit {
-                continue;
-            }
-
-            // Front matter is YAML or TOML, not Markdown: the Markdown exemptions
-            // below don't apply. It is wrapped by its own rules, only with `reflow`.
-            if ctx.lines[line_idx].in_front_matter {
-                let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    message: format!("Line length {effective_length} exceeds {line_limit} characters"),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix: front_matter_fixes.remove(&line_idx),
-                });
                 continue;
             }
 
