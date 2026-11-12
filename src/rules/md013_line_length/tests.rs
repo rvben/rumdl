@@ -12342,7 +12342,13 @@ fn reflow_keeps_the_first_line_indent_of_a_paragraph_in_a_nested_bare_item() {
 
 #[test]
 fn front_matter_is_skipped_by_default_and_checked_when_enabled() {
-    let input = "---\ntitle: short\ndescription: this front matter line is much longer than the limit\n---\n\n# Title\n";
+    let input = indoc! { r#"---
+        title: short
+        description: this front matter line is much longer than the limit
+        ---
+
+        # Title
+    "# };
     let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
 
     let default_rule = MD013LineLength::from_config_struct(MD013Config {
@@ -12354,24 +12360,205 @@ fn front_matter_is_skipped_by_default_and_checked_when_enabled() {
     let rule = MD013LineLength::from_config_struct(MD013Config {
         line_length: crate::types::LineLength::new(30),
         front_matter: true,
-        reflow: true,
         ..Default::default()
     });
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].line, 3);
+    // Wrapping front matter needs `reflow`; without it the line is only reported.
     assert!(warnings[0].fix.is_none());
     assert_eq!(rule.fix(&ctx).unwrap(), input);
 }
 
+fn front_matter_rule(limit: usize) -> MD013LineLength {
+    MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(limit),
+        front_matter: true,
+        reflow: true,
+        ..Default::default()
+    })
+}
+
+fn fix_front_matter(rule: &MD013LineLength, input: &str) -> String {
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    rule.fix(&ctx).unwrap()
+}
+
+/// The text between the front matter delimiters.
+fn front_matter_body(doc: &str) -> String {
+    let mut lines = doc.lines();
+    let open = lines.next().unwrap();
+    let close = if open == "---" { "---" } else { "+++" };
+    lines.take_while(|l| *l != close).collect::<Vec<_>>().join("\n")
+}
+
+fn assert_front_matter_idempotent(rule: &MD013LineLength, fixed: &str) {
+    assert_eq!(fix_front_matter(rule, fixed), fixed, "second pass changed the output");
+}
+
 #[test]
-fn front_matter_option_checks_toml_front_matter_without_fix() {
+fn front_matter_yaml_scalars_are_wrapped_without_changing_values() {
+    let input = indoc! {r#"
+        ---
+        title: a plain scalar that is certainly longer than the limit of forty
+        quoted: "a double quoted \"scalar\" that is certainly longer than forty"
+        single: 'a single quoted it''s scalar that is certainly longer than forty'
+        tags:
+          - a list item that is certainly longer than the limit of forty chars
+          - name: a mapping inside an item that is longer than the limit of forty
+            other: kept
+        nested:
+          key: a nested value that is certainly longer than the limit of forty
+        ---
+
+        # Title
+    "#};
+    let rule = front_matter_rule(40);
+    let fixed = fix_front_matter(&rule, input);
+    assert_ne!(fixed, input);
+
+    let before: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(input)).unwrap();
+    let after: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(&fixed)).unwrap();
+    assert_eq!(before, after);
+    assert!(fixed.ends_with("---\n\n# Title\n"));
+    for line in fixed.lines().take_while(|l| *l != "# Title") {
+        assert!(line.chars().count() <= 40, "line too long: {line:?}");
+    }
+    assert_front_matter_idempotent(&rule, &fixed);
+}
+
+#[test]
+fn front_matter_yaml_leaves_unsafe_values_alone() {
+    let input = indoc! {r#"
+        ---
+        literal: |
+          a literal block scalar line that is certainly longer than the limit
+        note: |
+          key: a literal block line that is certainly longer than the limit of forty
+        flow: [a long flow sequence item, another long flow sequence item, third]
+        # a comment line that is certainly longer than the limit of forty chars
+        unbreakable: https://example.com/a/very/long/url/without/any/spaces/at/all
+        ---
+    "#};
+    let rule = front_matter_rule(40);
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(!warnings.is_empty());
+    assert!(warnings.iter().all(|w| w.fix.is_none()));
+    assert_eq!(rule.fix(&ctx).unwrap(), input);
+}
+
+#[test]
+fn front_matter_yaml_wraps_other_values_the_parser_confirms_are_unchanged() {
+    let input = indoc! {r#"
+        ---
+        folded: >
+          a folded block scalar line that is certainly longer than the limit
+        multi: a plain scalar that already
+          continues here and is certainly longer than the limit
+        commented: a plain value that is certainly longer than the limit # note
+        anchored: &anchor a value that is certainly longer than the limit
+        ---
+    "#};
+    let rule = front_matter_rule(40);
+    let fixed = fix_front_matter(&rule, input);
+    assert_ne!(fixed, input);
+    assert!(
+        fixed.contains("limit # note\n"),
+        "comment must stay at the end: {fixed}"
+    );
+
+    let before: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(input)).unwrap();
+    let after: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(&fixed)).unwrap();
+    assert_eq!(before, after);
+    assert_front_matter_idempotent(&rule, &fixed);
+}
+
+#[test]
+fn front_matter_yaml_never_breaks_inside_a_space_run_or_before_an_indicator() {
+    let input = "---\nkey: aaaa bbbb  cccc dddd #eeee ffff gggg - hhhh iiii jjjj kkkk llll mmmm\n---\n";
+    let rule = front_matter_rule(30);
+    let fixed = fix_front_matter(&rule, input);
+    // The double space and the comment-looking `#eeee` keep their neighbours.
+    let before: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(input)).unwrap();
+    let after: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(&fixed)).unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn front_matter_toml_strings_and_arrays_are_wrapped_without_changing_values() {
+    let input = indoc! {r#"
+        +++
+        title = "a basic string that is certainly longer than the limit of forty"
+        escaped = "tab\there \"quoted\" and a longer tail that goes past the limit"
+        tags = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
+        commented = "a basic string that is certainly longer than the limit" # note
+        nested = [[1, 2, 3], [4, 5, 6], ["seven", "eight"], ["nine", "ten", "eleven"]]
+
+        [extra]
+        note = "a basic string in a table that is certainly longer than forty chars"
+        +++
+
+        # Title
+    "#};
+    let rule = front_matter_rule(40);
+    let fixed = fix_front_matter(&rule, input);
+    assert_ne!(fixed, input);
+    assert!(
+        fixed.contains("\"\"\" # note\n"),
+        "comment must stay at the end: {fixed}"
+    );
+
+    let before: toml::Value = toml::from_str(&front_matter_body(input)).unwrap();
+    let after: toml::Value = toml::from_str(&front_matter_body(&fixed)).unwrap();
+    assert_eq!(before, after);
+    for line in fixed.lines().take_while(|l| *l != "# Title") {
+        assert!(line.chars().count() <= 40, "line too long: {line:?}");
+    }
+    assert_front_matter_idempotent(&rule, &fixed);
+}
+
+#[test]
+fn front_matter_toml_leaves_unsafe_values_alone() {
+    let input = indoc! {r#"
+        +++
+        literal = 'a literal string that is certainly longer than the limit of forty'
+        inline = { first = "a long inline table value", second = "another long value" }
+        multi = """
+        a multi-line string whose line is certainly longer than the limit of forty
+        """
+        open = [
+          "a multi-line array element that is certainly longer than the limit",
+        ]
+        unbreakable = "https://example.com/a/very/long/url/without/any/spaces/at/all"
+        +++
+    "#};
+    let rule = front_matter_rule(40);
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(!warnings.is_empty());
+    assert!(warnings.iter().all(|w| w.fix.is_none()));
+    assert_eq!(rule.fix(&ctx).unwrap(), input);
+}
+
+#[test]
+fn front_matter_wrapping_keeps_crlf_line_endings() {
+    let input =
+        "---\r\ntitle: a plain scalar that is certainly longer than the limit of forty\r\n---\r\n\r\n# Title\r\n";
+    let rule = front_matter_rule(40);
+    let fixed = fix_front_matter(&rule, input);
+    assert_ne!(fixed, input);
+    assert!(!fixed.replace("\r\n", "").contains('\n'), "bare LF in {fixed:?}");
+    assert!(fixed.ends_with("---\r\n\r\n# Title\r\n"));
+}
+
+#[test]
+fn front_matter_toml_is_checked_but_not_wrapped_without_reflow() {
     let input = "+++\ndescription = \"this front matter line is much longer than the limit\"\n+++\n\n# Title\n";
     let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
     let rule = MD013LineLength::from_config_struct(MD013Config {
         line_length: crate::types::LineLength::new(30),
         front_matter: true,
-        reflow: true,
         ..Default::default()
     });
     let warnings = rule.check(&ctx).unwrap();

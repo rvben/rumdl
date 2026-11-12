@@ -20,6 +20,7 @@ use pulldown_cmark::LinkType;
 use toml;
 
 mod block_builder;
+mod front_matter;
 mod helpers;
 pub mod md013_config;
 use crate::rules::md030_list_marker_space::MD030Config;
@@ -692,6 +693,12 @@ impl Rule for MD013LineLength {
                 crate::rules::front_matter_utils::FrontMatterType::Yaml
                     | crate::rules::front_matter_utils::FrontMatterType::Toml
             );
+        // Wrapping front matter needs `reflow`; without it the lines are only reported.
+        let mut front_matter_fixes = if check_front_matter && effective_config.reflow {
+            front_matter::wrap_fixes(self, ctx, effective_config.line_length.get())
+        } else {
+            std::collections::HashMap::new()
+        };
         if !skip_length_checks && !prefilter_skip {
             for (line_idx, line_info) in ctx.lines.iter().enumerate() {
                 // Front matter is only measured when opted in, and only YAML or TOML
@@ -814,8 +821,8 @@ impl Rule for MD013LineLength {
                 continue;
             }
 
-            // Front matter is YAML, not Markdown: the Markdown exemptions below
-            // don't apply, and reflow never rewrites it, so report without a fix.
+            // Front matter is YAML or TOML, not Markdown: the Markdown exemptions
+            // below don't apply. It is wrapped by its own rules, only with `reflow`.
             if ctx.lines[line_idx].in_front_matter {
                 let (start_line, start_col, end_line, end_col) = calculate_excess_range(line_number, line, line_limit);
                 warnings.push(LintWarning {
@@ -826,7 +833,7 @@ impl Rule for MD013LineLength {
                     end_line,
                     end_column: end_col,
                     severity: Severity::Warning,
-                    fix: None,
+                    fix: front_matter_fixes.remove(&line_idx),
                 });
                 continue;
             }

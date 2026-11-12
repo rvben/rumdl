@@ -102,8 +102,11 @@ pub struct MD013Config {
     ///
     /// Front matter is not Markdown, so it is skipped unless this is set. When
     /// `true`, lines in a `---` delimited YAML or `+++` delimited TOML block are
-    /// measured against `line-length` and reported without a fix: reflow never
-    /// rewrites front matter. JSON front matter is not checked.
+    /// measured against `line-length`. With `reflow`, long single-line YAML
+    /// scalars, TOML basic strings and TOML arrays are also wrapped where that
+    /// leaves the data unchanged; anything else is only reported. JSON front
+    /// matter is not checked. `reflow-mode` does not apply to front matter:
+    /// values are always wrapped greedily to `line-length`.
     #[serde(default, alias = "front_matter")]
     pub front_matter: bool,
 
