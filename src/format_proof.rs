@@ -1395,13 +1395,7 @@ mod tests {
 
         let rule = crate::rules::MD034NoBareUrls;
         let policy = NativeFormatPolicy::validated(&rule).unwrap();
-        for source in [
-            "[x]:\n  https://example.com\n",
-            "[x]: https://example.com\n  \"name@example.com\"\n",
-            "> [x]:\n>   https://example.com\n",
-            "![www.example.com][r]\n",
-            "[https://example.com][r]\n",
-        ] {
+        for source in ["![www.example.com][r]\n", "[https://example.com][r]\n"] {
             let context = LintContext::new(source, MarkdownFlavor::Standard, None);
             assert_ne!(rule.fix(&context).unwrap(), source);
             assert!(!policy.proven(&FormatProof::analyze(source, MarkdownFlavor::Standard)));
@@ -1418,6 +1412,18 @@ mod tests {
             let context = LintContext::new(source, MarkdownFlavor::Standard, None);
             assert_eq!(rule.fix(&context).unwrap(), source);
             assert!(policy.proven(&FormatProof::analyze(source, MarkdownFlavor::Standard)));
+            assert_proofs(source);
+        }
+        // A definition whose destination or title is on the line after the label
+        // (CommonMark example 193) is left as written, though the proof does not
+        // establish that ahead of the rule.
+        for source in [
+            "[x]:\n  https://example.com\n",
+            "> [x]:\n>   https://example.com\n",
+            "[x]: https://example.com\n  \"name@example.com\"\n",
+        ] {
+            let context = LintContext::new(source, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&context).unwrap(), source);
             assert_proofs(source);
         }
     }

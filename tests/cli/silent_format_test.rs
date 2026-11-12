@@ -48,12 +48,27 @@ fn silent_format_keeps_native_urls_in_reference_continuations_and_empty_labels()
         ("name@example.com", "<name@example.com>"),
         ("www.example.com", "<https://www.example.com>"),
     ] {
+        // A definition whose destination or title is on the line after the
+        // label is still a definition (CommonMark example 193), so nothing in it
+        // is a bare URL and every mode leaves it as written.
         for source in [
             format!("[x]:\n  {atom}\n"),
             format!("[x]: https://example.org\n  \"{atom}\"\n"),
-            format!("![{atom}][r]\n"),
-            format!("[{atom}][r]\n"),
         ] {
+            fs::write(&path, &source).unwrap();
+            let checked = run(dir.path(), &[&["fmt", "--check", "--silent"][..], &options].concat());
+            assert_eq!(checked.status.code(), Some(0), "{source:?}: {checked:?}");
+            for mode in [
+                &["fmt", "--silent"][..],
+                &["fmt"][..],
+                &["check", "--fix", "--silent"][..],
+            ] {
+                let output = run(dir.path(), &[mode, &options].concat());
+                assert_eq!(output.status.code(), Some(0), "{source:?}, {mode:?}: {output:?}");
+                assert_eq!(fs::read_to_string(&path).unwrap(), source, "{source:?}, {mode:?}");
+            }
+        }
+        for source in [format!("![{atom}][r]\n"), format!("[{atom}][r]\n")] {
             let expected = source.replace(atom, replacement);
             fs::write(&path, &source).unwrap();
             let checked = run(dir.path(), &[&["fmt", "--check", "--silent"][..], &options].concat());
