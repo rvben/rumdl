@@ -6,7 +6,7 @@
 //!
 //! Rule sections are invisible to `schemars`: they live in a
 //! `#[serde(flatten)]` map, which erases them from `properties`. Everything
-//! below puts them back, using the same [`RuleRegistry`] the config loader
+//! below puts them back, using the same [`RuleRegistry`](super::registry::RuleRegistry) the config loader
 //! validates a file with. That sharing is the invariant worth keeping: the
 //! schema must never reject a key rumdl accepts, so every "is this key valid?"
 //! answer comes from the registry rather than from a list maintained here.
@@ -37,20 +37,20 @@
 //!   rule in or out; this is the *shape* of a name it does model.
 //! * `global.enable`/`disable`/`fixable`/`unfixable` and `per-file-ignores` keep
 //!   `{"type": "string"}` for rule names. A case-insensitive `pattern` naming
-//!   the 90 IDs and their 95 name aliases is buildable — [`relax_severity`]
+//!   the 90 IDs and their 95 name aliases is buildable — `relax_severity`
 //!   shows how — so the reason is parity rather than expressiveness: rumdl only
 //!   warns about a rule name it does not know (`validation.rs`), and an editor
 //!   error would then be stricter than the loader. Same argument as the
 //!   misspelled key above.
 //! * The markdownlint-style wrapper the parser also accepts, `[rules.MD013]`,
-//!   gets the same properties as the root (see [`rules_wrapper_schema`]).
+//!   gets the same properties as the root (see `rules_wrapper_schema`).
 //!   Without it the wrapper would still validate — it lands on the root
 //!   `additionalProperties` — but nothing inside it would be typed or completed.
 //! * `$defs/GlobalConfig` stays open as well. Closing it would mean listing the
 //!   snake_case aliases there, and `test_schema_globalconfig_uses_kebab_case`
 //!   requires the definition to stay kebab-only. The `[global]` spellings rumdl
 //!   takes are accepted, untyped, inside the section and typed at the root
-//!   (see [`global_shorthand_properties`]).
+//!   (see `global_shorthand_properties`).
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -93,19 +93,18 @@ pub fn config_schema_json() -> Value {
         let sections = rule_section_properties();
         let mut merged = global_shorthand_properties(&global_properties);
 
-        for (key, section) in &sections {
-            // One name can be both: `line-length` is a global setting as a
-            // value and MD013's section as a table, which is how rumdl reads
-            // it (`shadows_rule_section` in the parser). Both forms belong.
-            match merged.get_mut(key) {
-                Some(existing) if existing != section => {
-                    *existing = json!({ "anyOf": [existing.clone(), section] });
-                }
-                Some(_) => {}
-                None => {
-                    merged.insert(key.clone(), section.clone());
-                }
+        // Global shorthand includes snake_case spellings too. Resolve each
+        // spelling through the registry so a name such as `line_length`
+        // retains its meaning as a rule section as well as a global value.
+        for (key, value) in &mut merged {
+            if let Some(canonical) = default_registry().resolve_rule_name(key) {
+                *value = json!({ "anyOf": [value.clone(), rule_ref(&canonical)] });
             }
+        }
+
+        for (key, section) in &sections {
+            // Preserve any global-or-rule union assembled above.
+            merged.entry(key.clone()).or_insert_with(|| section.clone());
         }
 
         properties.extend(merged);

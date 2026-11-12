@@ -169,9 +169,16 @@
       ]
     },
     "line_length": {
-      "description": "Global line length setting (used by MD013 and other rules if not overridden)",
-      "$ref": "#/$defs/LineLength",
-      "default": 80
+      "anyOf": [
+        {
+          "description": "Global line length setting (used by MD013 and other rules if not overridden)",
+          "$ref": "#/$defs/LineLength",
+          "default": 80
+        },
+        {
+          "$ref": "#/$defs/MD013"
+        }
+      ]
     },
     "output-format": {
       "description": "Output format for linting results (e.g., \"text\", \"json\", \"pylint\", etc.)",
@@ -3786,6 +3793,12 @@
           "type": "boolean"
         },
         "normalize_quotes": {
+          "type": "boolean"
+        },
+        "normalize-spaces": {
+          "type": "boolean"
+        },
+        "normalize_spaces": {
           "type": "boolean"
         },
         "severity": {

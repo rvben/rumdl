@@ -2159,6 +2159,8 @@ fn test_schema_accepts_every_spelling_rumdl_accepts() {
         json!({"MD013": {"line_length": 100}}),
         json!({"md013": {"LINE_LENGTH": 100}}),
         json!({"line-length": {"line_length": 100}}),
+        json!({"line_length": {"line-length": 100}}),
+        json!({"line_length": 100}),
         json!({"blanks_around_headings": {"lines_above": 1}}),
         // markdownlint-style wrapper and a rule option alias
         json!({"rules": {"MD033": {"allowed": ["br"]}}}),
@@ -2208,6 +2210,26 @@ fn test_schema_lists_each_rule_once() {
 }
 
 #[test]
+fn test_schema_line_length_alias_matches_loader() {
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let temp_dir = tempdir().unwrap();
+    let path = temp_dir.path().join("rumdl.toml");
+
+    for spelling in ["line-length", "line_length"] {
+        let content = format!("[{spelling}]\nline-length = 100\n");
+        fs::write(&path, &content).unwrap();
+        let sourced = SourcedConfig::load_with_discovery(Some(path.to_str().unwrap()), None, true).unwrap();
+        assert_eq!(
+            sourced.rules["MD013"].values["line-length"].value.as_integer(),
+            Some(100)
+        );
+        let value: toml::Value = toml::from_str(&content).unwrap();
+        assert!(validator.is_valid(&serde_json::to_value(value).unwrap()));
+    }
+}
+
+#[test]
 fn test_schema_types_the_options_it_can_derive() {
     use serde_json::json;
 
@@ -2220,6 +2242,7 @@ fn test_schema_types_the_options_it_can_derive() {
     // like the flat form rather than fall through to the open root schema.
     for wrong in [
         json!({"MD013": {"line-length": "eighty"}}),
+        json!({"line_length": {"line-length": "eighty"}}),
         json!({"MD013": {"code_blocks": "no"}}),
         json!({"global": {"line-length": "eighty"}}),
         json!({"rules": {"MD013": {"line-length": "eighty"}}}),
