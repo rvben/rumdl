@@ -1990,6 +1990,40 @@ fn test_lint_context_colon_definitions_linear_complexity() {
 }
 
 #[test]
+fn test_wrapped_reference_definitions_linear_complexity() {
+    for duplicate in [false, true] {
+        let durations: Vec<_> = [512, 1024, 2048]
+            .into_iter()
+            .map(|count| {
+                let content: String = (0..count)
+                    .map(|i| {
+                        let label = if duplicate { 0 } else { i };
+                        format!("[r{label}]:\n  <target {i}.md> \"title {i}\"\n")
+                    })
+                    .collect();
+                let measure = || {
+                    let start = MeasurementClock::now();
+                    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                    let definitions = ctx.reference_definitions();
+                    assert_eq!(definitions.len(), count);
+                    assert_eq!(definitions.last().unwrap().url, format!("target {}.md", count - 1));
+                    start.elapsed()
+                };
+                measure();
+                let mut samples: Vec<_> = (0..3).map(|_| measure()).collect();
+                samples.sort();
+                samples[1]
+            })
+            .collect();
+        assert_linear_complexity(
+            &format!("wrapped reference definitions, duplicate={duplicate}"),
+            &durations,
+            3.0,
+        );
+    }
+}
+
+#[test]
 fn test_lint_context_div_markers_linear_complexity() {
     let durations: Vec<_> = [8192, 16384, 32768]
         .into_iter()

@@ -2367,3 +2367,52 @@ mod template_reference_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod wrapped_reference_tests {
+    use super::*;
+
+    #[test]
+    fn wrapped_definitions_do_not_retarget_links_or_add_titles() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MDX,
+        ] {
+            for source in [
+                "[new](>)\n\n> [existing]:\n>   https://example.com\n",
+                "[new](https://example.com)\n\n[existing]:\n  https://example.com \"Existing title\"\n",
+                "[new](https://example.com)\n\n> [existing]:\n>   https://example.com\n>   \"Existing title\"\n",
+            ] {
+                let ctx = crate::lint_context::LintContext::new(source, flavor, None);
+                let before = ctx.links().iter().find(|link| link.text == "new").unwrap();
+                let fixed = rule.fix(&ctx).unwrap();
+                let after = crate::lint_context::LintContext::new(&fixed, flavor, None);
+                let link = after.links().iter().find(|link| link.text == "new").unwrap();
+                assert_eq!(link.url, before.url, "{flavor:?}: {fixed}");
+                assert_eq!(link.title, before.title, "{flavor:?}: {fixed}");
+                assert!(rule.check(&after).unwrap().is_empty(), "{fixed}");
+            }
+        }
+    }
+
+    #[test]
+    fn wrapped_definitions_can_be_reused_when_destination_and_title_match() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        for prefix in ["", "> "] {
+            for marker in ["", "!"] {
+                let source = format!(
+                    "{marker}[new](<a b.md> \"with title\")\n\n{prefix}[existing]:\n{prefix}  <a b.md>\n{prefix}  \"with title\"\n"
+                );
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                assert_eq!(
+                    rule.fix(&ctx).unwrap(),
+                    source.replace(
+                        &format!("{marker}[new](<a b.md> \"with title\")"),
+                        &format!("{marker}[new][existing]")
+                    )
+                );
+            }
+        }
+    }
+}

@@ -6990,6 +6990,171 @@ mod reference_definitions {
         assert_eq!(read, [("a&amp;b*c.md", "a&b*c.md"), ("x&#32;y.md", "x y.md")]);
     }
 
+    #[test]
+    fn wrapped_definitions_preserve_destinations_titles_and_source_ranges() {
+        for flavor in [Standard, MDX] {
+            for prefix in ["", "> ", "> > "] {
+                for ending in ["\n", "\r\n"] {
+                    for (written, url, destination) in [
+                        (
+                            "https://example.com/a",
+                            "https://example.com/a",
+                            "https://example.com/a",
+                        ),
+                        ("<a b.md>", "a b.md", "a b.md"),
+                        ("<a&amp;b\\*c.md>", "a&amp;b*c.md", "a&b*c.md"),
+                    ] {
+                        for title in [
+                            "\"with \\\"quotes\\\"\"",
+                            "'with title'",
+                            "(with title)",
+                            "\"with &amp; title\"",
+                            "\"\"",
+                        ] {
+                            for separate_title in [false, true] {
+                                let tail = if separate_title {
+                                    format!("{written}{ending}{prefix}  {title}")
+                                } else {
+                                    format!("{written} {title}")
+                                };
+                                let content = format!("{prefix}[x]:{ending}{prefix}  {tail}{ending}");
+                                let ctx = LintContext::new(&content, flavor, None);
+                                let defs = ctx.reference_definitions();
+                                assert_eq!(defs.len(), 1, "{flavor:?}: {content:?}");
+                                let def = &defs[0];
+                                assert_eq!(def.url, url, "{content:?}");
+                                assert_eq!(def.destination, destination, "{content:?}");
+                                let expected_title = if title == "\"\"" {
+                                    ""
+                                } else if title == "\"with &amp; title\"" {
+                                    "with & title"
+                                } else if title.starts_with('"') {
+                                    "with \"quotes\""
+                                } else {
+                                    "with title"
+                                };
+                                assert_eq!(def.title.as_deref(), Some(expected_title), "{content:?}");
+                                assert_eq!(
+                                    &content[def.title_byte_start.unwrap()..def.title_byte_end.unwrap()],
+                                    title,
+                                    "{content:?}"
+                                );
+                                assert_eq!(
+                                    def.byte_end,
+                                    content.trim_end_matches(['\r', '\n']).len(),
+                                    "{content:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_wrapped_definitions_keep_their_own_extents() {
+        for flavor in [Standard, MDX] {
+            for prefix in ["", "> "] {
+                let content = format!(
+                    "{prefix}[r]: first.md\n{prefix}[r]:\n{prefix}  <second path.md> \"second title\"\n{prefix}[other]: third.md\n{prefix}[R]:\n{prefix}  fourth.md\n{prefix}  'fourth title'\n"
+                );
+                let ctx = LintContext::new(&content, flavor, None);
+                let defs = ctx.reference_definitions();
+                let urls: Vec<_> = defs.iter().map(|d| d.url.as_str()).collect();
+                assert_eq!(
+                    urls,
+                    ["first.md", "second path.md", "third.md", "fourth.md"],
+                    "{content}"
+                );
+                assert_eq!(ctx.get_reference_url("R"), Some("first.md"));
+                for (def, title) in [(&defs[1], "\"second title\""), (&defs[3], "'fourth title'")] {
+                    assert_eq!(
+                        &content[def.title_byte_start.unwrap()..def.title_byte_end.unwrap()],
+                        title
+                    );
+                    assert_eq!(def.byte_end, def.title_byte_end.unwrap());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wrapped_definition_titles_do_not_introduce_definitions() {
+        let content = "[a]:\n  target.md \"title\n[b]:\n  hidden.md\n\"\n[b]:\n  real.md\n";
+        let ctx = LintContext::new(content, Standard, None);
+        let defs = ctx.reference_definitions();
+        assert_eq!(defs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(defs[0].title.as_deref(), Some("title\n[b]:\nhidden.md\n"));
+        assert_eq!(defs[1].url, "real.md");
+    }
+
+    #[test]
+    fn wrapped_title_with_a_backslash_before_a_line_ending_is_preserved() {
+        let content = "[x]:\n  target.md \"first\\\n  second\"\n";
+        let ctx = LintContext::new(content, Standard, None);
+        let defs = ctx.reference_definitions();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].title.as_deref(), Some("first\\\nsecond"));
+        assert_eq!(
+            &content[defs[0].title_byte_start.unwrap()..defs[0].title_byte_end.unwrap()],
+            "\"first\\\n  second\""
+        );
+    }
+
+    #[test]
+    fn duplicate_wrapped_title_offsets_ignore_relabeling_inside_the_title() {
+        for prefix in ["", "> "] {
+            for ending in ["\n", "\r\n"] {
+                let content = format!(
+                    "{prefix}[r]: first.md\n{prefix}[r]:\n{prefix}  second.md \"title\n{prefix}[hidden]:\n{prefix}  hidden.md\n{prefix}\"\n{prefix}[next]:\n{prefix}  next.md\n"
+                ).replace('\n', ending);
+                let ctx = LintContext::new(&content, Standard, None);
+                let defs = ctx.reference_definitions();
+                assert_eq!(
+                    defs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+                    ["r", "r", "next"]
+                );
+                assert_eq!(defs[1].url, "second.md");
+                assert_eq!(defs[1].title.as_deref(), Some("title\n[hidden]:\nhidden.md\n"));
+                let expected_title =
+                    format!("\"title{ending}{prefix}[hidden]:{ending}{prefix}  hidden.md{ending}{prefix}\"");
+                assert_eq!(
+                    &content[defs[1].title_byte_start.unwrap()..defs[1].title_byte_end.unwrap()],
+                    expected_title
+                );
+                assert_eq!(defs[1].byte_end, defs[1].title_byte_end.unwrap());
+                assert_eq!(defs[2].url, "next.md");
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_wrapped_labels_preserve_parser_length_validation() {
+        for character in ['a', 'é'] {
+            for count in [495, 499, 500, 995, 999, 1000] {
+                let label = character.to_string().repeat(count);
+                let validation = format!("[{label}]: first.md\n");
+                let parser = pulldown_cmark::Parser::new(&validation);
+                let valid = parser.reference_definitions().iter().next().is_some();
+                let content = format!("[{label}]: first.md\n[{label}]:\n  second.md \"title\"\n");
+                let ctx = LintContext::new(&content, Standard, None);
+                let defs = ctx.reference_definitions();
+                if valid {
+                    assert_eq!(defs.len(), 2, "label length {count}");
+                    assert_eq!(defs[1].url, "second.md");
+                    assert_eq!(defs[1].title.as_deref(), Some("title"));
+                    assert_eq!(
+                        &content[defs[1].title_byte_start.unwrap()..defs[1].title_byte_end.unwrap()],
+                        "\"title\""
+                    );
+                } else {
+                    assert!(defs.is_empty(), "parser-rejected label must remain text");
+                }
+            }
+        }
+    }
+
     /// Flavors end a block at a line the CommonMark parse reads as paragraph
     /// text, so a definition directly after it is one in that flavor only.
     #[test]

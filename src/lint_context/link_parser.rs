@@ -113,7 +113,7 @@ pub(super) fn extend_collapsed_byte_end(content: &str, link_type: LinkType, byte
 // out of `ctx.reference_defs` and breaking MD053/MD057 follow-ups.
 static REF_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?m)^[ ]{0,3}\[((?:[^\]\\]|\\.)+)\]:\s*(?:<((?:[^<>\n\\]|\\.)*)>|([^\s<][^\s]*))(?:\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\(((?:[^()\\]|\\.)*)\)))?$"#,
+        r#"(?ms)^[ ]{0,3}\[((?:[^\]\\]|\\.)+)\]:\s*(?:<((?:[^<>\n\\]|\\.)*)>|([^\s<][^\s]*))(?:\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\(((?:[^()\\]|\\.)*)\)))?$"#,
     )
     .unwrap()
 });
@@ -1275,41 +1275,49 @@ fn utf8_char_len(first_byte: u8) -> usize {
     }
 }
 
-/// The destination of each definition the parser reads at `starts`, the
+/// Each definition the parser reads at `starts`, the
 /// offsets of `[` opening labels, or `None` where it reads none.
 ///
 /// The parser lists only the first definition of a label, so each label at
 /// `starts` gets a prefix no other label in the document holds before the
-/// document is parsed again. A prefix of ASCII characters other than
-/// whitespace and brackets changes neither where a definition ends nor
-/// whether its label is valid, so the parser then reads exactly the
-/// definitions it read before and lists every one of them.
-fn parser_destinations_at(content: &str, starts: &[usize]) -> Vec<Option<String>> {
+/// document is parsed again. The prefixes do not change the destination or
+/// title grammar.
+fn parser_definitions_at(content: &str, starts: &[usize]) -> Vec<Option<ParserDefinition>> {
     let longest_run = content.split(|c| c != '\x7f').map(str::len).max().unwrap_or(0);
     let marker = "\x7f".repeat(longest_run + 1);
     let mut relabeled = String::with_capacity(content.len() + starts.len() * (2 * marker.len() + 8));
+    let mut edits = Vec::with_capacity(starts.len());
     let mut copied = 0;
     for (index, &start) in starts.iter().enumerate() {
         relabeled.push_str(&content[copied..=start]);
-        relabeled.push_str(&marker);
-        relabeled.push_str(&index.to_string());
-        relabeled.push_str(&marker);
         copied = start + 1;
+        let prefix = format!("{marker}{index}{marker}");
+        relabeled.push_str(&prefix);
+        edits.push((relabeled.len(), copied));
     }
     relabeled.push_str(&content[copied..]);
 
-    let mut destinations = vec![None; starts.len()];
+    let mut definitions = vec![None; starts.len()];
     let parser = pulldown_cmark::Parser::new_ext(&relabeled, rumdl_parser_options_for(content));
     for (label, definition) in parser.reference_definitions().iter() {
         let index = label
             .strip_prefix(marker.as_str())
             .and_then(|rest| rest.split_once(marker.as_str()))
             .and_then(|(index, _)| index.parse::<usize>().ok());
-        if let Some(slot) = index.and_then(|index| destinations.get_mut(index)) {
-            *slot = Some(definition.dest.to_string());
+        if let Some(index) = index.filter(|&index| index < definitions.len()) {
+            // Map past the latest label edit, including edits inside a title.
+            let count = edits.partition_point(|&(end, _)| end <= definition.span.end);
+            let end = count.checked_sub(1).map_or(definition.span.end, |i| {
+                let (relabeled_end, source_end) = edits[i];
+                source_end + definition.span.end - relabeled_end
+            });
+            definitions[index] = Some(ParserDefinition {
+                span: starts[index]..end,
+                dest: definition.dest.to_string(),
+            });
         }
     }
-    destinations
+    definitions
 }
 
 /// The destination of the definition `text` opens with, as the parser reads
@@ -1321,6 +1329,73 @@ fn definition_destination(text: &str) -> Option<String> {
         .iter()
         .next()
         .map(|(_, definition)| definition.dest.to_string())
+}
+
+/// Read a wrapped definition using the same grammar as a single-line one.
+/// Strip blockquote prefixes from continuation lines while retaining a map
+/// to source offsets for title edits. The parser supplies the full extent,
+/// so a title may span several lines without consuming following prose.
+fn wrapped_reference_definition(
+    content: &str,
+    lines: &[LineInfo],
+    line_idx: usize,
+    definition: &ParserDefinition,
+) -> Option<ReferenceDef> {
+    let mut text = String::new();
+    let mut offsets = Vec::new();
+    for line_info in &lines[line_idx..] {
+        if line_info.byte_offset >= definition.span.end {
+            break;
+        }
+        let (line, base) = match line_info.blockquote.as_deref() {
+            Some(bq) => (bq.content.as_str(), line_info.byte_offset + bq.prefix.len()),
+            None => (line_info.content(content), line_info.byte_offset),
+        };
+        let len = definition.span.end.saturating_sub(base).min(line.len());
+        offsets.push((text.len(), base, len));
+        text.push_str(&line[..len]);
+        text.push('\n');
+    }
+    let cap = REF_DEF_PATTERN.captures(&text)?;
+    if cap.get(0)?.start() != 0 {
+        return None;
+    }
+    let source_offset = |offset| {
+        let index = offsets
+            .partition_point(|&(start, _, _)| start <= offset)
+            .checked_sub(1)?;
+        let (start, base, len) = offsets[index];
+        (offset < start + len).then_some(base + offset - start)
+    };
+    let title_match = cap.get(4).or_else(|| cap.get(5)).or_else(|| cap.get(6));
+    let (title_byte_start, title_byte_end) = match title_match {
+        Some(m) => (Some(source_offset(m.start() - 1)?), Some(source_offset(m.end())? + 1)),
+        None => (None, None),
+    };
+    // Read semantic title text from this bounded definition, not the relabeled
+    // document used to discover duplicates. That pass may have inserted label
+    // markers inside a multiline title. The parser also removes continuation
+    // indentation and decodes character references for MD054's title identity.
+    let parser = pulldown_cmark::Parser::new_ext(&text, rumdl_parser_options_for(&text));
+    let title = parser
+        .reference_definitions()
+        .iter()
+        .next()?
+        .1
+        .title
+        .as_ref()
+        .map(ToString::to_string);
+    Some(ReferenceDef {
+        line: line_idx + 1,
+        id: cap[1].to_lowercase(),
+        url: unescape_commonmark_punctuation(cap.get(2).or_else(|| cap.get(3))?.as_str()),
+        destination: definition.dest.clone(),
+        title,
+        byte_offset: offsets.first()?.1,
+        byte_end: definition.span.end,
+        title_byte_start,
+        title_byte_end,
+    })
 }
 
 /// The link reference definitions of a document: the lines written as one
@@ -1349,7 +1424,8 @@ pub(super) fn parse_reference_defs(
     let mut refs = Vec::with_capacity(lines.len() / 20);
     // Definitions the parser does not list, with their label offsets, to be
     // checked against the parser once every line is read.
-    let mut unlisted: Vec<(usize, usize)> = Vec::new();
+    // Each entry is (reference index, label offset, whether it is wrapped).
+    let mut unlisted: Vec<(usize, usize, bool)> = Vec::new();
     // The last line of the latest definition the flavor alone reads.
     let mut flavor_definition_end: Option<usize> = None;
 
@@ -1469,7 +1545,7 @@ pub(super) fn parse_reference_defs(
                             definition_destination(&content[label_start..first_line_end]).unwrap_or_else(|| url.clone())
                         } else {
                             // Set once the parser has been asked about every such line.
-                            unlisted.push((refs.len(), label_start));
+                            unlisted.push((refs.len(), label_start, false));
                             String::new()
                         }
                     }
@@ -1494,35 +1570,49 @@ pub(super) fn parse_reference_defs(
             // wrap a long definition. The line-by-line pattern cannot see across
             // the line ending, so take the parser's reading of the definition.
             let label_start = base_offset + (line.len() - line.trim_start_matches(' ').len());
-            let Ok(index) = parser_definitions.binary_search_by_key(&label_start, |definition| definition.span.start)
-            else {
-                continue;
-            };
-            let definition = &parser_definitions[index];
-            let after_colon = base_offset + cap.get(0).unwrap().end();
-            let rest = content.get(after_colon..definition.span.end).unwrap_or_default();
-            let raw = rest.split_whitespace().next().unwrap_or_default();
-            let raw = raw.strip_prefix('<').and_then(|r| r.strip_suffix('>')).unwrap_or(raw);
-            refs.push(ReferenceDef {
-                line: line_num,
-                id: cap[1].to_lowercase(),
-                url: unescape_commonmark_punctuation(raw),
-                destination: definition.dest.clone(),
-                title: None,
-                byte_offset: base_offset,
-                byte_end: definition.span.end,
-                title_byte_start: None,
-                title_byte_end: None,
-            });
+            match parser_definitions.binary_search_by_key(&label_start, |definition| definition.span.start) {
+                Ok(index) => {
+                    if let Some(reference) =
+                        wrapped_reference_definition(content, lines, line_idx, &parser_definitions[index])
+                    {
+                        refs.push(reference);
+                    }
+                }
+                Err(_) => {
+                    // Repeated labels are consumed but not listed by the
+                    // parser. Validate them in the same batch as inline ones.
+                    unlisted.push((refs.len(), label_start, true));
+                    refs.push(ReferenceDef {
+                        line: line_num,
+                        id: cap[1].to_lowercase(),
+                        url: String::new(),
+                        destination: String::new(),
+                        title: None,
+                        byte_offset: base_offset,
+                        byte_end: base_offset + line.len(),
+                        title_byte_start: None,
+                        title_byte_end: None,
+                    });
+                }
+            }
         }
     }
 
     if !unlisted.is_empty() {
-        let starts: Vec<usize> = unlisted.iter().map(|&(_, start)| start).collect();
+        let starts: Vec<usize> = unlisted.iter().map(|&(_, start, _)| start).collect();
         let mut read = vec![true; refs.len()];
-        for (&(index, _), destination) in unlisted.iter().zip(parser_destinations_at(content, &starts)) {
-            match destination {
-                Some(destination) => refs[index].destination = destination,
+        for (&(index, _, wrapped), definition) in unlisted.iter().zip(parser_definitions_at(content, &starts)) {
+            match definition {
+                Some(definition) if wrapped => {
+                    if let Some(reference) =
+                        wrapped_reference_definition(content, lines, refs[index].line - 1, &definition)
+                    {
+                        refs[index] = reference;
+                    } else {
+                        read[index] = false;
+                    }
+                }
+                Some(definition) => refs[index].destination = definition.dest,
                 None => read[index] = false,
             }
         }

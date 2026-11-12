@@ -2615,3 +2615,37 @@ fn test_fix_keeps_wrapped_definition() {
         assert_eq!(rule.fix(&ctx).unwrap(), content, "{flavor:?}");
     }
 }
+
+#[test]
+fn test_duplicate_wrapped_definitions_are_not_bare_urls() {
+    for flavor in [
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        rumdl_lib::config::MarkdownFlavor::MDX,
+    ] {
+        for prefix in ["", "> "] {
+            let content = format!(
+                "{prefix}[x]: https://first.example\n{prefix}[x]:\n{prefix}  https://second.example\n{prefix}[X]:\n{prefix}  https://third.example\n{prefix}  \"https://title.example\"\n\nhttps://bare.example\n"
+            );
+            let ctx = LintContext::new(&content, flavor, None);
+            let rule = MD034NoBareUrls;
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(
+                warnings.iter().map(|w| w.line).collect::<Vec<_>>(),
+                [8],
+                "{flavor:?}: {content}"
+            );
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(
+                fixed,
+                content.replace(
+                    "https://bare.example",
+                    if flavor == rumdl_lib::config::MarkdownFlavor::MDX {
+                        "[https://bare.example](https://bare.example)"
+                    } else {
+                        "<https://bare.example>"
+                    }
+                )
+            );
+        }
+    }
+}
