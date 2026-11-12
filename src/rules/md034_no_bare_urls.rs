@@ -911,8 +911,13 @@ impl Rule for MD034NoBareUrls {
         // Reference-definition lines are detected by rumdl's shared parser (which
         // understands blockquote-prefixed definitions and the full CommonMark
         // grammar), so their destination URLs are not flagged as bare URLs.
-        let ref_def_lines: std::collections::HashSet<usize> =
-            ctx.reference_definitions().iter().map(|def| def.line).collect();
+        // A definition may put its destination and title on the following lines
+        // (`[id]:\n  https://…`), so every line it spans is skipped, not just the first.
+        let ref_def_lines: std::collections::HashSet<usize> = ctx
+            .reference_definitions()
+            .iter()
+            .flat_map(|def| def.line..=ctx.offset_to_line_col(def.byte_end.saturating_sub(1)).0)
+            .collect();
 
         // Allocate reusable buffers once instead of per-line to reduce allocations
         let mut buffers = LineCheckBuffers::default();
@@ -944,7 +949,8 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
 
-            // Skip reference-definition lines (`[id]: url`, including inside blockquotes).
+            // Skip reference-definition lines (`[id]: url`, including inside blockquotes
+            // and the continuation lines of a multi-line definition).
             if ref_def_lines.contains(&line.line_num) {
                 continue;
             }

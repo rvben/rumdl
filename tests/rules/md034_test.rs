@@ -1,3 +1,4 @@
+use indoc::indoc;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD034NoBareUrls;
@@ -2560,5 +2561,57 @@ fn test_custom_uri_components_do_not_hide_emails_outside_the_uri() {
             "the email is outside a URI: {content}"
         );
         assert_eq!(rule.fix(&ctx).unwrap(), format!("{prefix}<visible@example.com>\n"));
+    }
+}
+
+/// A long definition wrapped with its destination on the next line, as Prettier
+/// and markdownlint write it, is a definition, not prose with a bare URL. In MDX
+/// the fix would rewrite the destination as `[url](url)` and break the definition.
+///
+/// CommonMark allows a line ending between the label and the destination:
+/// <https://spec.commonmark.org/0.31.2/#link-reference-definitions> (example 193).
+#[test]
+fn test_definition_with_destination_on_next_line() {
+    let rule = MD034NoBareUrls;
+    let content = indoc! {r#"
+        See [a] and [b].
+
+        [a]:
+          https://example.com/a
+        [b]:
+        https://example.com/b "Title"
+
+        https://bare.example.com
+    "#};
+    for flavor in [
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        rumdl_lib::config::MarkdownFlavor::MDX,
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        let result = rule.check(&ctx).unwrap();
+        let lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+        assert_eq!(lines, vec![8], "{flavor:?}: {result:?}");
+    }
+}
+
+/// Prettier and markdownlint wrap a definition longer than the line length by
+/// moving the destination to an indented next line. That is already valid
+/// CommonMark, so the fix must leave it as written rather than wrapping the URL
+/// in `<…>` (or, in MDX, rewriting it as `[url](url)`, which breaks the link).
+#[test]
+fn test_fix_keeps_wrapped_definition() {
+    let rule = MD034NoBareUrls;
+    let content = indoc! {r#"
+        See the [feature definitions].
+
+        [feature definitions]:
+          https://github.com/ratatui/ratatui/blob/ratatui-v0.30.2/ratatui/Cargo.toml#L23-L115
+    "#};
+    for flavor in [
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        rumdl_lib::config::MarkdownFlavor::MDX,
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), content, "{flavor:?}");
     }
 }
