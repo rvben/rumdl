@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4](https://github.com/rvben/rumdl/compare/v0.3.3...v0.3.4) - 2026-11-12
+
+### Breaking Changes
+
+- **Rust library API:** Removed unused helpers and deprecated compatibility wrappers.
+  Use `warning_to_code_actions` instead of `warning_to_code_action`. See the
+  [cleanup commit](https://github.com/rvben/rumdl/commit/a58150c893dbf93f368abfd4a690433fdaf2f4f9)
+  for the complete list of removals.
+
+### Added
+
+- **MD013**: check and reflow frontmatter values (#998) ([c40744c](https://github.com/rvben/rumdl/commit/c40744c0d1ff37d3322a327ec50685a4c4eff7ae))
+- **schema**: describe rule sections and option types (#997) ([da0faf7](https://github.com/rvben/rumdl/commit/da0faf791b163ee97d302a9534fb113fa8f8bb83))
+
+### Fixed
+
+- **MD013**: measure frontmatter before Markdown exemptions ([45841ff](https://github.com/rvben/rumdl/commit/45841ff77f709f7f23c4b444e0b67c5b6f919314))
+- **schema**: preserve rule aliases and refresh generated options ([4a8e9ef](https://github.com/rvben/rumdl/commit/4a8e9ef4af9e2f0a4d311d78b6807af58389ea30))
+- **links**: preserve wrapped reference definition metadata ([45d2fd9](https://github.com/rvben/rumdl/commit/45d2fd962f9f468868e163539e70fc2e16a928b9))
+- **MD034**: recognize link definitions whose URL is on the next line (#995) ([2db197f](https://github.com/rvben/rumdl/commit/2db197f9641e9c2ed1ab8a018a7796b87e28695b))
+
 ## [0.3.3](https://github.com/rvben/rumdl/compare/v0.3.2...v0.3.3) - 2026-11-10
 
 ### Added
