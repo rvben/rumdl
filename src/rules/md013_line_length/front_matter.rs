@@ -55,7 +55,11 @@ pub(super) fn wrap_fixes(
             .map(|line| yaml_wrap_line(line.trim_end(), limit, &measure))
             .collect();
         keep_verified(&body, edits, |text| {
-            serde_saphyr::from_str::<serde_json::Value>(text).ok()
+            let mut options = crate::utils::yaml::options();
+            // Non-finite numbers are valid YAML. Compare their canonical spellings
+            // rather than rejecting all edits because an unrelated field uses one.
+            options.non_finite_float_policy = serde_saphyr::NonFiniteFloatPolicy::AsString;
+            serde_saphyr::from_str_with_options::<serde_json::Value>(text, options).ok()
         })
     } else {
         let edits = toml_wrap_lines(&body, limit, &measure);

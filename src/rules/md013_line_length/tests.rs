@@ -12661,3 +12661,17 @@ fn frontmatter_direct_inline_config_prefers_the_canonical_spelling() {
         assert_eq!(rule.check(&ctx).unwrap().len(), usize::from(enabled));
     }
 }
+
+#[test]
+fn front_matter_non_finite_numbers_do_not_disable_wrapping() {
+    let rule = front_matter_rule(30);
+    for number in [".inf", "-.inf", ".nan", ".Inf", ".NaN"] {
+        let input = format!("---\nscore: {number}\ntitle: alpha beta gamma delta epsilon zeta eta theta\n---\n");
+        let ctx = LintContext::new(&input, MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_ne!(fixed, input, "{number} must not disable wrapping unrelated titles");
+        assert!(fixed.contains(&format!("score: {number}\n")), "{fixed}");
+        assert!(fixed.contains("title: alpha beta gamma delta\n"), "{fixed}");
+        assert_front_matter_idempotent(&rule, &fixed);
+    }
+}

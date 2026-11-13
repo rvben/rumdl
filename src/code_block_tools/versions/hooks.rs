@@ -33,9 +33,10 @@ pub(super) fn parse(text: &str, source: ToolVersionDefinition) -> Result<Expecte
     // Parser errors can contain arbitrary values and must never be quoted.
     let config: Config = match source {
         ToolVersionDefinition::PreCommit | ToolVersionDefinition::PreCommitYml => {
+            let mut options = crate::utils::yaml::options();
+            options.reject_unsupported_tags = true;
             let mut value: serde_json::Value =
-                serde_saphyr::from_str_with_options(text, serde_saphyr::options! { reject_unsupported_tags: true })
-                    .map_err(|_| error())?;
+                serde_saphyr::from_str_with_options(text, options).map_err(|_| error())?;
             merge_yaml(&mut value, 0).map_err(|()| error())?;
             serde_json::from_value(value).map_err(|_| error())?
         }

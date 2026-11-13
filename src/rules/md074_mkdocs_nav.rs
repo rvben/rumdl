@@ -62,7 +62,8 @@ impl MD074MkDocsNav {
 
     /// Parse mkdocs.yml from already-read content
     fn parse_mkdocs_yml_from_str(content: &str, path: &Path) -> Result<MkDocsConfig, String> {
-        serde_saphyr::from_str(content).map_err(|e| format!("Failed to parse {}: {e}", path.display()))
+        serde_saphyr::from_str_with_options(content, crate::utils::yaml::options())
+            .map_err(|e| format!("Failed to parse {}: {e}", path.display()))
     }
 
     /// Recursively extract all file paths from nav structure

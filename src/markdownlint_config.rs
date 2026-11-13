@@ -90,10 +90,11 @@ fn read_markdownlint_options(path: &str) -> Result<IndexMap<String, serde_json::
     if path.ends_with(".json") || path.ends_with(".jsonc") {
         serde_json::from_str(&strip_jsonc_comments(&content)).map_err(|e| format!("Failed to parse JSON {path}: {e}"))
     } else if path.ends_with(".yaml") || path.ends_with(".yml") {
-        serde_saphyr::from_str(&content).map_err(|e| format!("Failed to parse YAML {path}: {e}"))
+        serde_saphyr::from_str_with_options(&content, crate::utils::yaml::options())
+            .map_err(|e| format!("Failed to parse YAML {path}: {e}"))
     } else {
         serde_json::from_str(&strip_jsonc_comments(&content))
-            .or_else(|_| serde_saphyr::from_str(&content))
+            .or_else(|_| serde_saphyr::from_str_with_options(&content, crate::utils::yaml::options()))
             .map_err(|e| format!("Failed to parse config {path}: {e}"))
     }
 }
@@ -732,6 +733,25 @@ mod tests {
         assert!(config.0.contains_key("MD025"));
         assert!(config.0.contains_key("MD026"));
         assert!(config.0.contains_key("heading-style"));
+    }
+
+    #[test]
+    fn yaml_preserves_numeric_looking_names() {
+        let dir = tempfile::tempdir().unwrap();
+        for filename in [".markdownlint.yaml", ".markdownlint.yml", ".markdownlint"] {
+            let path = dir.path().join(filename);
+            std::fs::write(&path, "MD044:\n  names: [007, 1_000]\n").unwrap();
+            let loaded = load_markdownlint_config(path.to_str().unwrap()).unwrap();
+            let config = loaded.map_to_sourced_rumdl_config_fragment(None);
+            assert_eq!(
+                config.rules["MD044"].values["names"].value,
+                toml::Value::Array(vec![
+                    toml::Value::String("007".into()),
+                    toml::Value::String("1_000".into())
+                ]),
+                "numeric-looking names must remain strings in {filename}"
+            );
+        }
     }
 
     #[test]

@@ -58,6 +58,7 @@ pub mod thematic_break;
 pub mod unicode;
 pub mod upward_walk;
 pub mod utf8_offsets;
+pub(crate) mod yaml;
 
 pub use code_block_utils::CodeBlockUtils;
 pub use line_ending::{
