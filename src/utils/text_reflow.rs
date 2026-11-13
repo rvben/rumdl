@@ -22,7 +22,7 @@ use std::sync::LazyLock;
 use unicode_width::UnicodeWidthStr;
 
 /// How reflow joins a soft line break between CJK characters.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CjkSoftBreak {
     /// Join with a space, as for every other soft break (default).
@@ -35,7 +35,7 @@ pub enum CjkSoftBreak {
 
 /// Whether punctuation at the end of a link label or image alt text may end
 /// the surrounding sentence. The entire Markdown construct remains atomic.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum LinkTextPunctuation {
     /// Only punctuation outside the link or image ends a sentence.

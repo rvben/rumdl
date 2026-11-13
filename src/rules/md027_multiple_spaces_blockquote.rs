@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 /// list items inside blockquotes inherently need extra indentation, so flagging
 /// them by default produces noise. Set `list-items = true` to opt into the
 /// strict markdownlint behavior.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD027Config {
     /// When `true`, also flag blockquoted lines that introduce or continue a

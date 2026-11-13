@@ -3,7 +3,7 @@ use crate::types::PositiveUsize;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD010 (No hard tabs)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD010Config {
     /// Number of spaces per tab (default: 4)

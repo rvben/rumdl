@@ -6,7 +6,7 @@ use std::fmt;
 /// Markdown supports exactly 6 levels of headings, from # (level 1) through ###### (level 6).
 /// This type enforces that constraint at both compile time (after construction) and runtime
 /// (during config deserialization).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, schemars::JsonSchema)]
 pub struct HeadingLevel(u8);
 
 impl HeadingLevel {

@@ -34,7 +34,7 @@ fn default_level() -> u8 {
 }
 
 /// Configuration for MD082 (No empty sections).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD082Config {
     /// Minimum heading level (1-6) that must be followed by content. A heading

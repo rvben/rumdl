@@ -23,7 +23,7 @@ static REFERENCE_DEFINITION_REGEX: LazyLock<Regex> =
 static CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s+(.+)$").unwrap());
 
 /// Configuration for MD053 rule
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD053Config {
     /// List of reference names to keep even if unused

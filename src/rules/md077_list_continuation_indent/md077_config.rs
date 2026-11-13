@@ -3,7 +3,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Configuration for MD077 (List continuation content indentation)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD077Config {
     /// How strictly continuation-line indentation is enforced.

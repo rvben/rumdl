@@ -13,7 +13,7 @@ static JSON_KEY_PATTERN: LazyLock<Regex> =
 ///
 /// This rule is disabled by default (opt-in) because key sorting
 /// is an opinionated style choice. Many projects prefer semantic ordering.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD072Config {
     /// Whether this rule is enabled (default: false - opt-in rule)
     #[serde(default)]

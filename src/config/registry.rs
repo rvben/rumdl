@@ -32,6 +32,10 @@ pub struct RuleRegistry {
     pub rule_aliases: std::collections::BTreeMap<String, std::collections::HashMap<String, String>>,
     /// Map of rule name to the one-line summary the rule reports about itself
     pub rule_descriptions: std::collections::BTreeMap<String, String>,
+    /// Map of rule name to a JSON Schema for its config section, for rules whose config
+    /// struct derives `schemars::JsonSchema`. Collected here, next to the other per-rule
+    /// metadata, so building the published schema never has to construct a rule.
+    pub rule_json_schemas: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl RuleRegistry {
@@ -40,6 +44,7 @@ impl RuleRegistry {
         let mut rule_schemas = std::collections::BTreeMap::new();
         let mut rule_aliases = std::collections::BTreeMap::new();
         let mut rule_descriptions = std::collections::BTreeMap::new();
+        let mut rule_json_schemas = std::collections::BTreeMap::new();
 
         for rule in rules {
             let norm_name = if let Some((name, toml::Value::Table(mut table))) = rule.config_schema() {
@@ -67,6 +72,13 @@ impl RuleRegistry {
             // rule again (see the note on `default_registry`).
             rule_descriptions.insert(norm_name.clone(), rule.description().to_string());
 
+            // The same instance also carries a JSON Schema for its section when its config
+            // struct derives `schemars::JsonSchema`; rules that do not derive it fall back
+            // to the types inferred from `config_schema()`.
+            if let Some((name, json_schema)) = rule.config_json_schema() {
+                rule_json_schemas.insert(normalize_key(&name), json_schema);
+            }
+
             // Store aliases if the rule provides them
             if let Some(aliases) = rule.config_aliases() {
                 rule_aliases.insert(norm_name, aliases);
@@ -77,6 +89,7 @@ impl RuleRegistry {
             rule_schemas,
             rule_aliases,
             rule_descriptions,
+            rule_json_schemas,
         }
     }
 

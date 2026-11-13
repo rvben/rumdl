@@ -15,7 +15,7 @@ fn default_symbols_before_cjk() -> String {
 
 /// Configuration for MD089. Each set is written as one string of characters;
 /// whitespace in the string is ignored.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub(super) struct MD089Config {
     /// Symbols that lead a Latin run and take a space after a CJK letter.

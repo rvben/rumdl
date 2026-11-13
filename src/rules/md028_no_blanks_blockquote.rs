@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 const GFM_ALERT_TYPES: &[&str] = &["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
 
 /// Configuration for MD028 (Blank line inside blockquote)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD028Config {
     /// Enable auto-fix to merge blockquotes separated by a blank line.

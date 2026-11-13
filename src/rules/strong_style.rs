@@ -1,14 +1,17 @@
 use std::fmt;
 
 /// The style for strong emphasis (MD050)
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash, schemars::JsonSchema)]
 pub enum StrongStyle {
     /// Consistent with the first strong style found
     #[default]
+    #[schemars(rename = "consistent")]
     Consistent,
     /// Asterisk style (**)
+    #[schemars(rename = "asterisk")]
     Asterisk,
     /// Underscore style (__)
+    #[schemars(rename = "underscore")]
     Underscore,
 }
 

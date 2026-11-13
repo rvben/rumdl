@@ -11,7 +11,7 @@ use std::fmt;
 ///
 /// Validated at construction and during config deserialization, so an out-of-range
 /// value is rejected with a clear error rather than silently degrading.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, schemars::JsonSchema)]
 pub struct OlAlignColumn(usize);
 
 impl OlAlignColumn {

@@ -326,6 +326,21 @@ pub trait Rule: DynClone + Send + Sync {
         self.default_config_section()
     }
 
+    /// Returns the rule name and a JSON Schema for its config section.
+    ///
+    /// This is what `rumdl.schema.json` publishes for `[MD###]`, so an editor can
+    /// complete the section's keys and explain each one. It comes from the same struct
+    /// [`Rule::config_schema`] reads, so the keys an editor offers and the keys the loader
+    /// accepts are one list.
+    ///
+    /// Rules whose config struct does not derive `schemars::JsonSchema` return `None` and
+    /// keep the schema inferred from their defaults, which still types options but cannot
+    /// describe them. Use [`impl_rule_config_schema`](crate::impl_rule_config_schema!) and
+    /// derive `schemars::JsonSchema` on the struct to opt in.
+    fn config_json_schema(&self) -> Option<(String, serde_json::Value)> {
+        None
+    }
+
     /// Returns config key aliases for this rule
     /// This allows rules to accept alternative config key names for backwards compatibility
     fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
