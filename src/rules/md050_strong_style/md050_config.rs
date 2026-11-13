@@ -69,28 +69,19 @@ mod schema_spelling_tests {
 
     /// Every spelling the schema prints after "One of" has to deserialize.
     ///
-    /// The style enum is parsed by this module, not by a serde derive, so the schema
-    /// spells it from the #[schemars(rename)] attributes and can drift from what
-    /// deserialize_style accepts. Parsing the config struct is the check that can
-    /// fail: loading a rumdl.toml cannot, because the loader only warns about a value
-    /// it cannot parse and keeps the rule's default.
+    /// The style enum is parsed by this module rather than by a `serde` derive, so the
+    /// schema spells it from the `#[schemars(rename)]` attributes and can drift from
+    /// what `deserialize_style` accepts. Parsing the config struct is the check that
+    /// can fail: loading a `rumdl.toml` cannot, because the loader only warns about a
+    /// value it cannot parse and keeps the rule's default.
     #[test]
     fn schema_publishes_spellings_that_deserialize() {
-        let schema = crate::config::schema_gen::config_schema_json();
-        let description = schema["$defs"]["MD050"]["properties"]["style"]["description"]
-            .as_str()
-            .expect("MD050.style describes its spellings");
-        let (_, spellings) = description
-            .rsplit_once("One of ")
-            .expect("MD050.style names its spellings after \"One of\"");
-
-        for spelling in spellings.trim_end_matches('.').split(", ") {
-            let spelling = spelling.trim().trim_matches('\u{60}');
+        for spelling in crate::config::schema_gen::published_spellings("MD050", "style") {
             let section = format!("style = \"{spelling}\"\n");
             let parsed = toml::from_str::<MD050Config>(&section);
             assert!(
                 parsed.is_ok(),
-                "the schema offers style = \"{spelling}\" and MD050Config rejects it: {:?}",
+                "the schema offers MD050.style = \"{spelling}\" and `MD050Config` rejects it: {:?}",
                 parsed.err()
             );
         }

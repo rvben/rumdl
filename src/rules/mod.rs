@@ -1073,30 +1073,14 @@ mod rule_option_spelling_tests {
     /// so a load-based check would pass no matter what the schema said.
     #[test]
     fn schema_publishes_spellings_that_parse() {
-        let schema = crate::config::schema_gen::config_schema_json();
-        let published = |rule: &str, key: &str| -> Vec<String> {
-            let description = schema["$defs"][rule]["properties"][key]["description"]
-                .as_str()
-                .unwrap_or_else(|| panic!("{rule}.{key} wants a description naming its spellings"));
-            let (_, spellings) = description
-                .rsplit_once("One of ")
-                .unwrap_or_else(|| panic!("{rule}.{key} wants spellings after \"One of\""));
-
-            spellings
-                .trim_end_matches('.')
-                .split(", ")
-                .map(|spelling| spelling.trim().trim_matches('`').to_string())
-                .collect()
-        };
-
-        for spelling in published("MD003", "style") {
+        for spelling in crate::config::schema_gen::published_spellings("MD003", "style") {
             assert!(
                 spelling.parse::<heading_utils::HeadingStyle>().is_ok(),
                 "the schema offers MD003/style = \"{spelling}\", which does not parse"
             );
         }
 
-        for spelling in published("MD060", "column-align") {
+        for spelling in crate::config::schema_gen::published_spellings("MD060", "column-align") {
             let parsed = <ColumnAlign as serde::Deserialize>::deserialize(toml::Value::String(spelling.clone()));
             assert!(
                 parsed.is_ok(),
@@ -1104,7 +1088,7 @@ mod rule_option_spelling_tests {
             );
         }
 
-        for spelling in published("MD063", "style") {
+        for spelling in crate::config::schema_gen::published_spellings("MD063", "style") {
             let parsed = <md063_heading_capitalization::HeadingCapStyle as serde::Deserialize>::deserialize(
                 toml::Value::String(spelling.clone()),
             );

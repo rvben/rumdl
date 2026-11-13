@@ -2412,6 +2412,7 @@ fn test_schema_accepts_the_spellings_it_publishes() {
     let schema = super::schema_gen::config_schema_json();
     let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
     let mut checked = 0;
+    let mut enumerated = 0;
 
     for (rule, definition) in schema["$defs"].as_object().into_iter().flatten() {
         if !rule.starts_with("MD") {
@@ -2424,11 +2425,11 @@ fn test_schema_accepts_the_spellings_it_publishes() {
             let Some(description) = option["description"].as_str() else {
                 continue;
             };
-            let Some((_, spellings)) = description.rsplit_once("One of ") else {
+            if !description.contains("One of ") {
                 continue;
-            };
-            for spelling in spellings.trim_end_matches('.').split(", ") {
-                let spelling = spelling.trim().trim_matches('`');
+            }
+            enumerated += 1;
+            for spelling in super::schema_gen::published_spellings(rule, key) {
                 let instance: toml::Value = toml::from_str(&format!("[{rule}]\n{key} = \"{spelling}\"\n"))
                     .expect("the generated spelling is valid TOML");
 
@@ -2441,6 +2442,10 @@ fn test_schema_accepts_the_spellings_it_publishes() {
         }
     }
 
+    assert!(
+        enumerated >= 40,
+        "expected to find the enumerated options, found {enumerated}"
+    );
     assert!(
         checked > 100,
         "expected to check the spellings of every enumerated option, checked {checked}"

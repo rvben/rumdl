@@ -502,3 +502,27 @@ fn array_schema(items: &[toml::Value]) -> Value {
         json!({ "type": "array" })
     }
 }
+
+/// The spellings a generated description offers for `rule.key`: the words after
+/// "One of " in, for example, `MD046.style`.
+///
+/// Test-only, and deliberately read back out of the generated schema: the guard tests
+/// assert that every spelling parses, and they have to check the list an editor shows
+/// rather than a list assembled next to it. A description that stops enumerating its
+/// spellings therefore fails here instead of quietly shrinking what is covered.
+#[cfg(test)]
+pub(crate) fn published_spellings(rule: &str, key: &str) -> Vec<String> {
+    let schema = config_schema_json();
+    let description = schema["$defs"][rule]["properties"][key]["description"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{rule}.{key} wants a description naming its spellings"));
+    let (_, spellings) = description
+        .rsplit_once("One of ")
+        .unwrap_or_else(|| panic!("{rule}.{key} wants its spellings after \"One of\""));
+
+    spellings
+        .trim_end_matches('.')
+        .split(", ")
+        .map(|spelling| spelling.trim().trim_matches('\u{60}').to_string())
+        .collect()
+}

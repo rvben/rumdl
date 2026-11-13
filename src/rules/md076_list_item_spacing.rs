@@ -17,6 +17,18 @@ pub enum ListItemSpacingStyle {
     Tight,
 }
 
+impl ListItemSpacingStyle {
+    /// Reads the spelling a config uses. A value the rule does not recognise keeps the
+    /// default, which is what `[MD076] style` has always done.
+    pub(super) fn from_spelling(spelling: &str) -> Self {
+        match spelling {
+            "loose" => Self::Loose,
+            "tight" => Self::Tight,
+            _ => Self::Consistent,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, schemars::JsonSchema)]
 pub(super) struct MD076Config {
     /// Style the gaps between consecutive list items must follow: `consistent` keeps
@@ -723,11 +735,7 @@ impl Rule for MD076ListItemSpacing {
     {
         let style = crate::config::get_rule_config_value::<String>(config, "MD076", "style")
             .unwrap_or_else(|| "consistent".to_string());
-        let style = match style.as_str() {
-            "loose" => ListItemSpacingStyle::Loose,
-            "tight" => ListItemSpacingStyle::Tight,
-            _ => ListItemSpacingStyle::Consistent,
-        };
+        let style = ListItemSpacingStyle::from_spelling(&style);
         let allow_loose_continuation =
             crate::config::get_rule_config_value::<bool>(config, "MD076", "allow-loose-continuation")
                 .or_else(|| crate::config::get_rule_config_value::<bool>(config, "MD076", "allow_loose_continuation"))
@@ -2726,5 +2734,40 @@ mod tests {
                 "{source:?} -> {fixed:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod schema_spelling_tests {
+    use super::*;
+
+    /// Every spelling the schema prints after "One of" has to reach a variant.
+    ///
+    /// `style` is matched in `from_spelling`, not by a `serde` derive, so this is the
+    /// only thing tying the text an editor shows to the strings the rule accepts.
+    #[test]
+    fn schema_publishes_spellings_that_parse() {
+        let published = crate::config::schema_gen::published_spellings("MD076", "style");
+        let expected = [
+            ("consistent", ListItemSpacingStyle::Consistent),
+            ("loose", ListItemSpacingStyle::Loose),
+            ("tight", ListItemSpacingStyle::Tight),
+        ];
+
+        assert_eq!(published.len(), expected.len(), "the schema publishes {published:?}");
+        for (spelling, variant) in expected {
+            assert!(
+                published.iter().any(|offered| offered == spelling),
+                "the schema does not offer {spelling}, only {published:?}"
+            );
+            assert_eq!(ListItemSpacingStyle::from_spelling(spelling), variant);
+        }
+
+        // An unknown value keeps the default rather than failing, so the check above
+        // cannot fail on a typo in the test itself.
+        assert_eq!(
+            ListItemSpacingStyle::from_spelling("loose "),
+            ListItemSpacingStyle::Consistent
+        );
     }
 }
