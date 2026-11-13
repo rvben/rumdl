@@ -2630,12 +2630,12 @@
           "default": false
         },
         "front-matter-title": {
-          "description": "Front matter key whose value is treated as the document title, so the body\ndoes not need a level-1 heading.",
+          "description": "Regex matching front matter title lines, or an exact field-name shorthand\nsuch as `title`. An empty string disables front matter title detection.",
           "type": "string",
           "default": "title"
         },
         "front_matter_title": {
-          "description": "Front matter key whose value is treated as the document title, so the body\ndoes not need a level-1 heading.",
+          "description": "Regex matching front matter title lines, or an exact field-name shorthand\nsuch as `title`. An empty string disables front matter title detection.",
           "type": "string",
           "default": "title"
         },

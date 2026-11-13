@@ -5,67 +5,102 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::types::HeadingLevel;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::thematic_break;
+use regex::Regex;
+use std::sync::LazyLock;
 use toml;
+
+static DEFAULT_FRONT_MATTER_TITLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*title:").unwrap());
 
 mod md025_config;
 use md025_config::MD025Config;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MD025SingleTitle {
     config: MD025Config,
+    front_matter_title_pattern: Option<Regex>,
+}
+
+impl Default for MD025SingleTitle {
+    fn default() -> Self {
+        Self::from_config_struct(MD025Config::default())
+    }
 }
 
 impl MD025SingleTitle {
     pub fn new(level: usize, front_matter_title: &str) -> Self {
-        Self {
-            config: MD025Config {
-                level: HeadingLevel::new(level as u8).expect("Level must be 1-6"),
-                front_matter_title: front_matter_title.to_string(),
-                allow_document_sections: true,
-                allow_with_separators: true,
-            },
-        }
+        Self::from_config_struct(MD025Config {
+            level: HeadingLevel::new(level as u8).expect("Level must be 1-6"),
+            front_matter_title: front_matter_title.to_string(),
+            allow_document_sections: true,
+            allow_with_separators: true,
+        })
     }
 
     pub fn strict() -> Self {
-        Self {
-            config: MD025Config {
-                level: HeadingLevel::new(1).unwrap(),
-                front_matter_title: "title".to_string(),
-                allow_document_sections: false,
-                allow_with_separators: false,
-            },
-        }
+        Self::from_config_struct(MD025Config {
+            level: HeadingLevel::new(1).unwrap(),
+            front_matter_title: "title".to_string(),
+            allow_document_sections: false,
+            allow_with_separators: false,
+        })
     }
 
     pub fn from_config_struct(config: MD025Config) -> Self {
-        Self { config }
+        Self::from_config_struct_with_privacy(config, false)
     }
 
-    /// Check if the document's frontmatter contains a title field matching the configured key
+    fn from_config_struct_with_privacy(config: MD025Config, values_withheld: bool) -> Self {
+        let pattern = &config.front_matter_title;
+        let front_matter_title_pattern = if pattern.is_empty() {
+            None
+        } else if pattern == "title" {
+            Some(DEFAULT_FRONT_MATTER_TITLE.clone())
+        } else {
+            // Retain field-name shorthand, without matching unrelated keys or values.
+            let pattern = if pattern.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+                format!(r"^\s*{}:", regex::escape(pattern))
+            } else {
+                pattern.clone()
+            };
+            Some(
+                crate::rule_config_serde::compile_config_regex(
+                    &pattern,
+                    "MD025",
+                    "front-matter-title",
+                    values_withheld,
+                )
+                .unwrap_or_else(|| DEFAULT_FRONT_MATTER_TITLE.clone()),
+            )
+        };
+        Self {
+            config,
+            front_matter_title_pattern,
+        }
+    }
+
+    /// Check if the document's frontmatter contains a title matching the configured pattern
     fn has_front_matter_title(&self, ctx: &crate::lint_context::LintContext) -> bool {
         self.front_matter_lines_have_title(ctx.raw_lines())
     }
 
     pub(crate) fn default_front_matter_lines_have_title(lines: &[&str]) -> bool {
-        Self::default().front_matter_lines_have_title(lines)
+        Self::lines_match_front_matter_title(lines, &DEFAULT_FRONT_MATTER_TITLE)
     }
 
     fn front_matter_lines_have_title(&self, content_lines: &[&str]) -> bool {
-        if self.config.front_matter_title.is_empty() {
-            return false;
-        }
+        self.front_matter_title_pattern
+            .as_ref()
+            .is_some_and(|pattern| Self::lines_match_front_matter_title(content_lines, pattern))
+    }
 
+    fn lines_match_front_matter_title(content_lines: &[&str], pattern: &Regex) -> bool {
         if content_lines.first().map(|l| l.trim()) != Some("---") {
             return false;
         }
 
         for (idx, line) in content_lines.iter().enumerate().skip(1) {
             if line.trim() == "---" {
-                let front_matter_content = content_lines[1..idx].join("\n");
-                return front_matter_content
-                    .lines()
-                    .any(|l| l.trim().starts_with(&format!("{}:", self.config.front_matter_title)));
+                return content_lines[1..idx].iter().any(|line| pattern.is_match(line));
             }
         }
 
@@ -635,7 +670,17 @@ impl Rule for MD025SingleTitle {
         self
     }
 
-    crate::impl_rule_config_methods!(MD025Config);
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        Box::new(Self::from_config_struct_with_privacy(
+            crate::rule_config_serde::load_rule_config::<MD025Config>(config),
+            config.withheld_rule_values.contains("MD025"),
+        ))
+    }
+
+    crate::impl_rule_config_sections!(MD025Config);
 }
 
 #[cfg(test)]

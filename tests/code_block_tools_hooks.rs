@@ -294,6 +294,10 @@ fn malformed_hook_metadata_and_non_string_revisions_are_unresolved() {
         ".pre-commit-config.yaml",
         format!("{valid}x-deep: {}0{}\n", "[".repeat(140), "]".repeat(140)),
     ));
+    let block_nested = (0..32)
+        .map(|depth| format!("{}nested:\n", "  ".repeat(depth)))
+        .collect::<String>();
+    cases.push((".pre-commit-config.yaml", format!("{valid}{block_nested}")));
     let mut aliases = "x-0: &a0 [x,x,x,x,x,x,x,x,x]\n".to_owned();
     for index in 1..10 {
         aliases.push_str(&format!(
@@ -310,7 +314,7 @@ fn malformed_hook_metadata_and_non_string_revisions_are_unresolved() {
         assert!(!output.status.success(), "{source}: {metadata}: {text}");
         assert!(
             text.contains("Cannot parse") || text.contains("Cannot resolve"),
-            "{text}"
+            "{source}: {metadata}: {text}"
         );
         assert!(
             !dir.path().join("calls").exists(),
@@ -318,6 +322,20 @@ fn malformed_hook_metadata_and_non_string_revisions_are_unresolved() {
         );
         assert!(!text.contains("PRIVATE_SENTINEL"), "{text}");
     }
+}
+
+#[test]
+fn moderately_nested_yaml_metadata_is_accepted() {
+    let metadata = format!(
+        "repos:\n- repo: https://github.com/astral-sh/ruff-pre-commit\n  rev: v0.11.2\n  hooks: [{{id: ruff-format}}]\nx-extra: {}0{}\n",
+        "[".repeat(10),
+        "]".repeat(10)
+    );
+    let dir = project(".pre-commit-config.yaml", &metadata);
+    install(dir.path(), "ruff", "ruff 0.11.2\n");
+    let output = run(dir.path(), "fmt");
+    assert!(output.status.success(), "{}", output_text(&output));
+    assert!(dir.path().join("calls").exists());
 }
 
 #[test]

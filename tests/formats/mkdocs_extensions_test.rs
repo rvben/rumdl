@@ -3748,7 +3748,7 @@ The quadratic formula: $x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}$
 
 ## See Also
 
-- [OtherClass][] for related functionality.
+- [mypackage.core.OtherClass][] for related functionality.
 
 *[API]: Application Programming Interface
 

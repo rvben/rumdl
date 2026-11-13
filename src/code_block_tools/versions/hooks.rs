@@ -35,6 +35,9 @@ pub(super) fn parse(text: &str, source: ToolVersionDefinition) -> Result<Expecte
         ToolVersionDefinition::PreCommit | ToolVersionDefinition::PreCommitYml => {
             let mut options = crate::utils::yaml::options();
             options.reject_unsupported_tags = true;
+            // Hook metadata is shallow. Reject excessive nesting before recursive
+            // Value deserialization can exhaust Windows' smaller main-thread stack.
+            options.budget.get_or_insert_with(Default::default).max_depth = 16;
             let mut value: serde_json::Value =
                 serde_saphyr::from_str_with_options(text, options).map_err(|_| error())?;
             merge_yaml(&mut value, 0).map_err(|()| error())?;
@@ -191,4 +194,24 @@ fn djlint_hook(id: &str) -> bool {
         suffix,
         "" | "-django" | "-jinja" | "-nunjucks" | "-handlebars" | "-liquid" | "-golang" | "-tera" | "-askama"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deeply_nested_yaml_is_rejected_on_a_small_stack() {
+        // Approximate the default Windows main-thread stack on every platform.
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                let text = format!("repos: []\nx-deep: {}0{}\n", "[".repeat(140), "]".repeat(140));
+                let error = parse(&text, ToolVersionDefinition::PreCommit).unwrap_err();
+                assert!(error.starts_with("Cannot parse"), "{error}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 }

@@ -605,3 +605,98 @@ fn test_md025_cascade_demotes_a_multi_line_setext_subheading_whole() {
     let ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix is not idempotent");
 }
+
+#[test]
+fn test_md025_front_matter_regex_patterns() {
+    for (pattern, field) in [
+        (r"^\s*(title|heading)\s*[:=]", "title: Example"),
+        (r"^\s*(title|heading)\s*[:=]", "  heading = Example"),
+        ("(title|heading)", "heading: Example"),
+        ("[Tt]itle", "Title: Example"),
+        ("(?i)title", "TITLE: Example"),
+    ] {
+        let rule = MD025SingleTitle::new(1, pattern);
+        let content = format!("---\n{field}\n---\n\n# Introduction\n");
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(!rule.should_skip(&ctx), "pattern: {pattern}");
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "pattern: {pattern}");
+        assert_eq!(warnings[0].line, 5);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content.replace("# Introduction", "## Introduction"));
+        let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+    }
+}
+
+#[test]
+fn test_md025_front_matter_regex_scope() {
+    let rule = MD025SingleTitle::new(1, r"^heading:");
+    for content in [
+        "---\nauthor: heading: Example\n---\n\n# Introduction\n",
+        "---\nauthor: Example\n---\n\n# Introduction\n\nheading: Example\n",
+        "# Introduction\n\nheading: Example\n",
+        "---\nheading: Example\n\n# Introduction\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "content: {content}");
+    }
+}
+
+#[test]
+fn test_md025_front_matter_regex_line_endings() {
+    let rule = MD025SingleTitle::new(1, r"^heading: Example$");
+    for ending in ["\n", "\r\n"] {
+        let content = ["---", "heading: Example", "---", "", "# Introduction", ""].join(ending);
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "ending: {ending:?}");
+    }
+}
+
+#[test]
+fn test_md025_front_matter_field_shorthand_stays_anchored() {
+    for pattern in ["title", "heading"] {
+        for field in [format!("sub{pattern}: Example"), format!("author: {pattern}")] {
+            let rule = MD025SingleTitle::new(1, pattern);
+            let content = format!("---\n{field}\n---\n\n# Introduction\n");
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "field: {field}");
+        }
+    }
+}
+
+#[test]
+fn test_md025_invalid_front_matter_regex_uses_default() {
+    let rule = MD025SingleTitle::new(1, "[");
+    let content = "---\ntitle: Example\n---\n\n# Introduction\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+}
+
+#[test]
+fn test_md025_front_matter_regex_from_config() {
+    let table: toml::Table = toml::from_str(
+        r#"
+[MD025]
+front-matter-title = "^\\s*(title|heading)\\s*[:=]"
+"#,
+    )
+    .unwrap();
+    let mut config = rumdl_lib::config::Config::default();
+    config.rules.insert(
+        "MD025".to_string(),
+        rumdl_lib::config::RuleConfig {
+            values: table["MD025"].as_table().unwrap().clone().into_iter().collect(),
+            ..Default::default()
+        },
+    );
+    let rules = rumdl_lib::rules::all_rules(&config);
+    let rule = rules.iter().find(|rule| rule.name() == "MD025").unwrap();
+    for field in ["title: Example", "heading: Example"] {
+        let content = format!("---\n{field}\n---\n\n# Introduction\n");
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "field: {field}");
+        assert_eq!(warnings[0].line, 5);
+    }
+}

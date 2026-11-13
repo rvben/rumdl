@@ -368,11 +368,23 @@ fn create_reflow_action(
     let normalized = crate::utils::normalize_line_ending(document_text, crate::utils::LineEnding::Lf);
     // The paragraph is found in the text after the byte order mark, where the
     // warning's line numbers count; its byte offsets then address that text.
-    let reflow_result = crate::utils::text_reflow::reflow_paragraph_at_line_with_options(
-        crate::utils::bom::strip_bom(&normalized),
-        warning.line,
-        &options,
-    )?;
+    let content = crate::utils::bom::strip_bom(&normalized);
+    // Front matter is data. Markdown paragraph reflow can join separate fields
+    // or change their values; only MD013's syntax-aware fixes may rewrite it.
+    if warning_is_in_frontmatter(warning, content) {
+        return None;
+    }
+    let reflow_result =
+        crate::utils::text_reflow::reflow_paragraph_at_line_with_options(content, warning.line, &options)?;
+    // With no blank line after TOML/JSON front matter, paragraph discovery may
+    // scan backward into the data even when the warning itself is in prose.
+    // Both offsets address the normalized text after its byte order mark.
+    if crate::rules::front_matter_utils::FrontMatterUtils::front_matter_boundary(content).is_some_and(|(_, end)| {
+        let front_matter_end_byte: usize = content.split_inclusive('\n').take(end).map(str::len).sum();
+        reflow_result.start_byte < front_matter_end_byte
+    }) {
+        return None;
+    }
 
     // Convert byte offsets to LSP range
     let range = analysis_range_to_lsp_range(&normalized, reflow_result.start_byte..reflow_result.end_byte)?;
@@ -523,8 +535,21 @@ fn extract_domain_for_placeholder(url: &str) -> &str {
     url.split("://").nth(1).and_then(|s| s.split('/').next()).unwrap_or(url)
 }
 
+/// Whether the warning belongs to front matter rather than Markdown prose.
+fn warning_is_in_frontmatter(warning: &crate::rule::LintWarning, document_text: &str) -> bool {
+    crate::rules::front_matter_utils::FrontMatterUtils::front_matter_boundary(crate::utils::bom::strip_bom(
+        document_text,
+    ))
+    .is_some_and(|(_, end)| warning.line > 0 && warning.line <= end)
+}
+
 /// Create an ignore-line code action that adds a rumdl-disable-line comment
 fn create_ignore_line_action(warning: &crate::rule::LintWarning, uri: &Url, document_text: &str) -> Option<CodeAction> {
+    // An HTML comment is Markdown syntax: inside front matter it can change a
+    // scalar value or invalidate the data instead of suppressing the warning.
+    if warning_is_in_frontmatter(warning, document_text) {
+        return None;
+    }
     let rule_id = warning.rule_name.as_ref()?;
     let warning_line = warning.line.saturating_sub(1);
 
@@ -906,6 +931,95 @@ mod tests {
             assert!(marked_edit.new_text.contains(ending));
             if ending == "\r\n" {
                 assert!(!marked_edit.new_text.replace("\r\n", "").contains('\n'));
+            }
+        }
+    }
+
+    #[test]
+    fn frontmatter_never_offers_markdown_reflow_or_ignore_comments() {
+        let uri = Url::parse("file:///test.md").unwrap();
+        let paragraph = "This paragraph is deliberately much longer than forty characters.";
+        for (delimiter, field) in [
+            (
+                "---",
+                "description: This description is deliberately much longer than forty characters.",
+            ),
+            (
+                "+++",
+                "description = \"This description is deliberately much longer than forty characters.\"",
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                for bom in ["", "\u{feff}"] {
+                    let content = format!(
+                        "{bom}{delimiter}{ending}{field}{ending}{delimiter}{ending}{ending}{paragraph}{ending}"
+                    );
+                    let warning = LintWarning {
+                        line: 2,
+                        column: 41,
+                        end_line: 2,
+                        end_column: field.len() + 1,
+                        rule_name: Some("MD013".into()),
+                        message: "Line length 80 exceeds 40 characters".into(),
+                        severity: Severity::Warning,
+                        fix: None,
+                    };
+                    let actions = warning_to_code_actions(&warning, &uri, &content);
+                    assert!(actions.is_empty(), "front matter offered unsafe actions: {actions:?}");
+                    let prose_warning = LintWarning {
+                        line: 5,
+                        end_line: 5,
+                        ..warning
+                    };
+                    assert!(create_reflow_action(&prose_warning, &uri, &content, None).is_some());
+                    assert!(create_ignore_line_action(&prose_warning, &uri, &content).is_some());
+                    let fix_warning = LintWarning {
+                        fix: Some(crate::rule::Fix {
+                            range: content.find(field).unwrap()..content.find(field).unwrap() + field.len(),
+                            replacement: field.into(),
+                            additional_edits: Vec::new(),
+                        }),
+                        ..prose_warning
+                    };
+                    let fix_warning = LintWarning {
+                        line: 2,
+                        end_line: 2,
+                        ..fix_warning
+                    };
+                    let actions = warning_to_code_actions(&fix_warning, &uri, &content);
+                    assert_eq!(actions.len(), 1);
+                    assert!(actions[0].title.starts_with("Fix:"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn prose_reflow_never_reaches_back_into_frontmatter() {
+        let uri = Url::parse("file:///test.md").unwrap();
+        let paragraph = "This paragraph is deliberately much longer than forty characters.";
+        for (opening, field, closing) in [
+            ("+++", "description = \"This is a description.\"", "+++"),
+            ("{", "\"description\": \"This is a description.\"", "}"),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                for bom in ["", "\u{feff}"] {
+                    let content = format!("{bom}{opening}{ending}{field}{ending}{closing}{ending}{paragraph}{ending}");
+                    let warning = LintWarning {
+                        line: 4,
+                        column: 41,
+                        end_line: 4,
+                        end_column: paragraph.len() + 1,
+                        rule_name: Some("MD013".into()),
+                        message: "Line length 80 exceeds 40 characters".into(),
+                        severity: Severity::Warning,
+                        fix: None,
+                    };
+                    assert!(create_reflow_action(&warning, &uri, &content, None).is_none());
+                    let actions = warning_to_code_actions(&warning, &uri, &content);
+                    assert_eq!(actions.len(), 1, "unexpected actions: {actions:?}");
+                    assert!(actions[0].title.starts_with("Ignore "));
+                }
             }
         }
     }

@@ -10,8 +10,8 @@ pub struct MD025Config {
     #[schemars(description = "Heading level that counts as the document title: `1` (default) through `6`.")]
     pub level: HeadingLevel,
 
-    /// Front matter key whose value is treated as the document title, so the body
-    /// does not need a level-1 heading.
+    /// Regex matching front matter title lines, or an exact field-name shorthand
+    /// such as `title`. An empty string disables front matter title detection.
     #[serde(default = "default_front_matter_title", alias = "front_matter_title")]
     pub front_matter_title: String,
 
