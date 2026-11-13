@@ -277,11 +277,11 @@ mod tests {
         let mut config_map = HashMap::new();
         config_map.insert(
             "line-length".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_json::Value::Object({
+                let mut map = serde_json::Map::new();
                 map.insert(
-                    serde_yaml::Value::String("line_length".to_string()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(120)),
+                    "line_length".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(120)),
                 );
                 map
             }),
@@ -306,11 +306,11 @@ mod tests {
         let mut config_map = HashMap::new();
         config_map.insert(
             "MD013".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_json::Value::Object({
+                let mut map = serde_json::Map::new();
                 map.insert(
-                    serde_yaml::Value::String("line_length".to_string()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(120)),
+                    "line_length".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(120)),
                 );
                 map
             }),
@@ -331,11 +331,11 @@ mod tests {
         let mut config_map = HashMap::new();
         config_map.insert(
             "line-length".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_json::Value::Object({
+                let mut map = serde_json::Map::new();
                 map.insert(
-                    serde_yaml::Value::String("line_length".to_string()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(120)),
+                    "line_length".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(120)),
                 );
                 map
             }),
@@ -356,11 +356,11 @@ mod tests {
         let mut config_map = HashMap::new();
         config_map.insert(
             "line-length".to_string(),
-            serde_yaml::Value::Mapping({
-                let mut map = serde_yaml::Mapping::new();
+            serde_json::Value::Object({
+                let mut map = serde_json::Map::new();
                 map.insert(
-                    serde_yaml::Value::String("line_length".to_string()),
-                    serde_yaml::Value::Number(serde_yaml::Number::from(120)),
+                    "line_length".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(120)),
                 );
                 map
             }),
@@ -383,8 +383,8 @@ mod tests {
     #[test]
     fn test_generate_toml_output_disable_list_with_aliases() {
         let mut config_map = HashMap::new();
-        config_map.insert("line-length".to_string(), serde_yaml::Value::Bool(false));
-        config_map.insert("no-bare-urls".to_string(), serde_yaml::Value::Bool(false));
+        config_map.insert("line-length".to_string(), serde_json::Value::Bool(false));
+        config_map.insert("no-bare-urls".to_string(), serde_json::Value::Bool(false));
 
         let mdl_config = MarkdownlintConfig(config_map);
         let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.json"));
@@ -403,8 +403,8 @@ mod tests {
     #[test]
     fn test_generate_json_output_disable_list_with_aliases() {
         let mut config_map = HashMap::new();
-        config_map.insert("line-length".to_string(), serde_yaml::Value::Bool(false));
-        config_map.insert("no-bare-urls".to_string(), serde_yaml::Value::Bool(false));
+        config_map.insert("line-length".to_string(), serde_json::Value::Bool(false));
+        config_map.insert("no-bare-urls".to_string(), serde_json::Value::Bool(false));
 
         let mdl_config = MarkdownlintConfig(config_map);
         let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.json"));

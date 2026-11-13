@@ -12397,8 +12397,8 @@ fn front_matter_checks_and_wraps_the_last_word_without_markdown_forgiveness() {
         let fixed = rule.fix(&ctx).unwrap();
         assert_ne!(fixed, input);
         if input.starts_with("---") {
-            let before: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(input)).unwrap();
-            let after: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(&fixed)).unwrap();
+            let before: serde_json::Value = serde_saphyr::from_str(&front_matter_body(input)).unwrap();
+            let after: serde_json::Value = serde_saphyr::from_str(&front_matter_body(&fixed)).unwrap();
             assert_eq!(before, after);
         } else {
             let before: toml::Value = toml::from_str(&front_matter_body(input)).unwrap();
@@ -12466,8 +12466,8 @@ fn front_matter_yaml_scalars_are_wrapped_without_changing_values() {
     let fixed = fix_front_matter(&rule, input);
     assert_ne!(fixed, input);
 
-    let before: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(input)).unwrap();
-    let after: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(&fixed)).unwrap();
+    let before: serde_json::Value = serde_saphyr::from_str(&front_matter_body(input)).unwrap();
+    let after: serde_json::Value = serde_saphyr::from_str(&front_matter_body(&fixed)).unwrap();
     assert_eq!(before, after);
     assert!(fixed.ends_with("---\n\n# Title\n"));
     for line in fixed.lines().take_while(|l| *l != "# Title") {
@@ -12517,8 +12517,8 @@ fn front_matter_yaml_wraps_other_values_the_parser_confirms_are_unchanged() {
         "comment must stay at the end: {fixed}"
     );
 
-    let before: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(input)).unwrap();
-    let after: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(&fixed)).unwrap();
+    let before: serde_json::Value = serde_saphyr::from_str(&front_matter_body(input)).unwrap();
+    let after: serde_json::Value = serde_saphyr::from_str(&front_matter_body(&fixed)).unwrap();
     assert_eq!(before, after);
     assert_front_matter_idempotent(&rule, &fixed);
 }
@@ -12529,8 +12529,8 @@ fn front_matter_yaml_never_breaks_inside_a_space_run_or_before_an_indicator() {
     let rule = front_matter_rule(30);
     let fixed = fix_front_matter(&rule, input);
     // The double space and the comment-looking `#eeee` keep their neighbours.
-    let before: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(input)).unwrap();
-    let after: serde_yaml::Value = serde_yaml::from_str(&front_matter_body(&fixed)).unwrap();
+    let before: serde_json::Value = serde_saphyr::from_str(&front_matter_body(input)).unwrap();
+    let after: serde_json::Value = serde_saphyr::from_str(&front_matter_body(&fixed)).unwrap();
     assert_eq!(before, after);
 }
 
