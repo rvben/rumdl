@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::utils::text_reflow::{CjkSoftBreak, LinkTextPunctuation};
 
 /// Reflow mode for MD013
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReflowMode {
     /// Only reflow lines that exceed the line length limit (default behavior)
@@ -29,7 +29,7 @@ pub enum ReflowMode {
 }
 
 /// Length calculation mode for MD013
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum LengthMode {
     /// Count Unicode characters (grapheme clusters)
@@ -46,7 +46,7 @@ pub enum LengthMode {
 }
 
 /// Configuration for MD013 (Line length)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD013Config {
     /// Maximum line length (default: 80, 0 means no limit)

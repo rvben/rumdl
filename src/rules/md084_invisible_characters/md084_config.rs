@@ -2,7 +2,7 @@ use crate::{rule_config_serde::RuleConfig, utils::unicode};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub(super) struct MD084Config {
     /// When enabled, report any invisible character anywhere in the document.

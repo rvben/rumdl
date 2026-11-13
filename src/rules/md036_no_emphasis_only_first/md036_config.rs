@@ -3,7 +3,7 @@ use crate::types::HeadingLevel;
 use serde::{Deserialize, Serialize};
 
 /// Heading style for auto-fix conversion
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HeadingStyle {
     /// ATX style headings (## Heading)
@@ -12,7 +12,7 @@ pub enum HeadingStyle {
 }
 
 /// Configuration for MD036 (Emphasis used instead of a heading)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD036Config {
     /// Punctuation characters that indicate emphasis is not being used as a heading.

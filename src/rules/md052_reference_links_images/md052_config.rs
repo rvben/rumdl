@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Configuration for MD052 (reference-links-images)
 ///
 /// This rule checks that reference links and images use references that are defined.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD052Config {
     /// Whether to check shortcut reference syntax `[text]`.
     ///

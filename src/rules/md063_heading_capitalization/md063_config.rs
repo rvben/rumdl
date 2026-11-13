@@ -2,7 +2,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 /// Capitalization style for headings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, schemars::JsonSchema)]
 pub enum HeadingCapStyle {
     /// Title Case - capitalize major words (default)
     #[default]
@@ -48,7 +48,7 @@ impl<'de> Deserialize<'de> for HeadingCapStyle {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD063Config {
     /// Whether this rule is enabled (default: false - opt-in rule)
     #[serde(default)]

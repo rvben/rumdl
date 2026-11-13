@@ -3,7 +3,7 @@ use crate::types::NonNegativeUsize;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Represents the blank-line requirement for a heading level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, schemars::JsonSchema)]
 pub enum HeadingBlankRequirement {
     /// Require an exact minimum count of blank lines (0 or greater).
     /// Stored as `NonNegativeUsize` to forbid negative values while allowing `0`.
@@ -40,7 +40,7 @@ impl Default for HeadingBlankRequirement {
 }
 
 /// Configuration for blank lines that can be specified per heading level or globally
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, schemars::JsonSchema)]
 pub enum HeadingLevelConfig {
     /// Same value for all heading levels
     Scalar(HeadingBlankRequirement),
@@ -129,7 +129,7 @@ impl<'de> Deserialize<'de> for HeadingLevelConfig {
     {
         use serde::de::Error;
 
-        #[derive(Deserialize)]
+        #[derive(Deserialize, schemars::JsonSchema)]
         #[serde(untagged)]
         enum Helper {
             Scalar(HeadingBlankRequirement),
@@ -166,7 +166,7 @@ impl Serialize for HeadingLevelConfig {
 }
 
 /// How the blank-line requirement above a heading is enforced.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum HeadingBlankMode {
     #[default]
@@ -175,7 +175,7 @@ pub enum HeadingBlankMode {
 }
 
 /// Configuration for MD022 (Headings should be surrounded by blank lines)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD022Config {
     /// Number of blank lines required above headings (default: 1 for all levels)

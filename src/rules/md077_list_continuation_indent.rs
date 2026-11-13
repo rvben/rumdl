@@ -15,7 +15,7 @@ mod md077_config;
 use md077_config::MD077Config;
 
 /// How strictly MD077 enforces continuation-line indentation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ContinuationStyle {
     /// Permit any continuation indent in `[0, content_column]` (CommonMark lazy

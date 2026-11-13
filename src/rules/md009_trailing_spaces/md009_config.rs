@@ -3,7 +3,7 @@ use crate::types::BrSpaces;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD009 (Trailing spaces)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD009Config {
     /// Number of trailing spaces kept as a hard line break (default: 2).

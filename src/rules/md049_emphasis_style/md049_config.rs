@@ -3,7 +3,7 @@ use crate::rules::emphasis_style::EmphasisStyle;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD049Config {
     #[serde(
         default = "default_style",

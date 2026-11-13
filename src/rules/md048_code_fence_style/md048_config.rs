@@ -3,7 +3,7 @@ use crate::rules::code_fence_utils::CodeFenceStyle;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD048Config {
     #[serde(
         default = "default_style",

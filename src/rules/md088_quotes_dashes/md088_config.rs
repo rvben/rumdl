@@ -4,7 +4,7 @@ use crate::rule_config_serde::RuleConfig;
 use crate::utils::unicode;
 use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub(super) struct MD088Config {
     /// Enables linting and autofix for look-alike quotes.

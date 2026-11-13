@@ -33,7 +33,7 @@ struct CountedSpan {
 }
 
 /// Which inline emphasis spans the rule counts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EmphasisTarget {
     /// Only strong emphasis (`**bold**`, `__bold__`).
@@ -46,7 +46,7 @@ pub enum EmphasisTarget {
 }
 
 /// Configuration for MD081 (Excessive emphasis).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD081Config {
     /// Which emphasis spans to count. Defaults to `strong` (bold only), the

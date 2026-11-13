@@ -2,7 +2,7 @@ use crate::rule_config_serde::RuleConfig;
 use crate::types::HeadingLevel;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD025Config {
     #[serde(default)]

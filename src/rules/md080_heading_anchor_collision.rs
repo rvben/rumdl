@@ -29,7 +29,7 @@ fn default_levels() -> Vec<u8> {
 }
 
 /// Configuration for MD080 (Heading anchor collision)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD080Config {
     /// Anchor generation style to match the target platform.

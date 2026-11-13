@@ -2230,6 +2230,126 @@ fn test_schema_line_length_alias_matches_loader() {
 }
 
 #[test]
+fn test_schema_accepts_every_rule_default() {
+    use serde_json::json;
+
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+    let registry = super::registry::default_registry();
+
+    // Every default a rule publishes is something a user can write back into a
+    // config file, so every one of them has to validate. This is the widest net
+    // the schema can be checked against without inventing files: 90 sections, and
+    // the derived types are what makes a failure possible in the first place.
+    let mut checked = 0;
+    for (name, options) in &registry.rule_schemas {
+        let mut section = toml::map::Map::new();
+        for (key, value) in options {
+            if crate::rule_config_serde::is_nullable_sentinel(value)
+                || crate::rule_config_serde::is_polymorphic_sentinel(value)
+            {
+                continue;
+            }
+            section.insert(key.clone(), value.clone());
+            checked += 1;
+        }
+
+        let document = json!({ name.as_str(): section });
+        assert!(
+            validator.is_valid(&document),
+            "the schema rejects the defaults of {name}: {document}"
+        );
+    }
+
+    assert!(
+        checked > 150,
+        "expected the rule defaults to be exercised, got {checked}"
+    );
+}
+
+#[test]
+fn test_schema_describes_the_options_it_derives() {
+    let schema = super::schema_gen::config_schema_json();
+    let options = &schema["$defs"]["MD013"]["properties"];
+
+    // Taken from the doc comment on `MD013Config::line_length`, which is the point
+    // of Stage 2: the struct that deserializes a section also explains it.
+    let line_length = &options["line-length"];
+    let description = line_length["description"]
+        .as_str()
+        .expect("a derived option carries its field's doc comment");
+    assert!(
+        description.contains("Maximum line length"),
+        "unexpected description: {description}"
+    );
+    // The real default travels with the schema, so an editor can show what the
+    // option does when it is left out.
+    assert_eq!(line_length["default"].as_i64(), Some(80));
+
+    // A key the loader deliberately leaves untyped keeps an empty schema: the
+    // derived one would describe whichever variant its `Deserialize` names first.
+    assert_eq!(options["code-block-line-length"], serde_json::json!({}));
+
+    // Coverage guard: the descriptions come from `schemars` derives on the rule
+    // config structs. If one is dropped the schema silently degrades to types, so
+    // require most options to be described.
+    let mut described = 0;
+    let mut total = 0;
+    for definition in schema["$defs"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, definition)| name.starts_with("MD").then_some(definition))
+    {
+        for option in definition["properties"].as_object().into_iter().flatten() {
+            total += 1;
+            if option.1.get("description").is_some() {
+                described += 1;
+            }
+        }
+    }
+    assert!(
+        described * 2 > total,
+        "only {described} of {total} rule options are described"
+    );
+}
+
+#[test]
+fn test_schema_accepts_enum_aliases_rumdl_accepts() {
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+    let temp_dir = tempdir().unwrap();
+    let path = temp_dir.path().join("rumdl.toml");
+
+    // `#[serde(alias)]` on an enum variant widens what the loader takes and
+    // `schemars` does not report aliases, which is why option values are
+    // described rather than enumerated. Each pair below is a spelling the loader
+    // accepts and the schema therefore has to accept too.
+    for (key, value) in [
+        ("reflow-mode", "sentence_per_line"),
+        ("reflow-mode", "semantic_line_breaks"),
+        ("length-mode", "characters"),
+        ("length-mode", "display"),
+    ] {
+        let content = format!("[MD013]\n{key} = \"{value}\"\n");
+        fs::write(&path, &content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(path.to_str().unwrap()), None, true)
+            .expect("the loader takes the alias");
+        assert!(
+            sourced.rules["MD013"].values.contains_key(key),
+            "the loader kept {key} = {value}"
+        );
+
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert!(
+            validator.is_valid(&serde_json::to_value(parsed).unwrap()),
+            "the schema has to accept {key} = {value} as well"
+        );
+    }
+}
+
+#[test]
 fn test_schema_types_the_options_it_can_derive() {
     use serde_json::json;
 

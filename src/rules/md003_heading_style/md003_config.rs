@@ -3,7 +3,7 @@ use crate::rules::heading_utils::HeadingStyle;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD003 (Heading style)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD003Config {
     /// The heading style to enforce (default: "consistent")

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `rumdl.schema.json` describes rule sections instead of just accepting them:
+  every rule ID and its aliases is typed, `[rules.MD013]` completes like
+  `[MD013]`, and each option carries the description and default of the field
+  behind it, so an editor explains an option instead of only checking its type
+  (#988).
+
 ### Fixed
 
 - MD076 preserves loose-list spacing when blank-separated blocks inside an item

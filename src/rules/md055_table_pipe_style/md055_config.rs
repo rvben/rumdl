@@ -2,7 +2,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD055Config {
     #[serde(
         default = "default_style",

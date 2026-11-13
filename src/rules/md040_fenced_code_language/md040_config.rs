@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Style for language label normalization
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum LanguageStyle {
     /// No normalization, only check for missing language (default)
@@ -15,7 +15,7 @@ pub enum LanguageStyle {
 }
 
 /// Action to take for unknown language labels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum UnknownLanguageAction {
     /// Silently ignore unknown languages (default)
@@ -28,7 +28,7 @@ pub enum UnknownLanguageAction {
 }
 
 /// Configuration for MD040 (Fenced code language)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD040Config {
     /// Language normalization style

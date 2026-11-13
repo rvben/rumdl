@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Public so other rules (notably MD013's reflow) can load it through the shared
 /// [`crate::rule_config_serde::load_rule_config`] path and reuse
 /// [`MD030Config::expected_spaces`], rather than re-deriving the spacing rules.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD030Config {
     /// Spaces for single-line unordered list items (default: 1)

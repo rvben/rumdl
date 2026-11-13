@@ -3,7 +3,7 @@ use crate::types::LineLength;
 use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
 /// Controls how cell text is aligned within padded columns.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, schemars::JsonSchema)]
 pub enum ColumnAlign {
     /// Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)
     #[default]
@@ -48,7 +48,7 @@ impl<'de> Deserialize<'de> for ColumnAlign {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD060Config {
     #[serde(default = "default_enabled")]
     pub enabled: bool,

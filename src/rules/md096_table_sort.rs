@@ -15,7 +15,7 @@ use crate::utils::parser_options::rumdl_parser_options;
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::normalize_reference_label;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 enum SortOrder {
     #[default]
     #[serde(rename = "asc", alias = "ASC")]
@@ -24,7 +24,7 @@ enum SortOrder {
     Desc,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 struct MD096Config {
     // Config::apply_per_rule_enabled folds this into the global rule lists.
     #[serde(default)]

@@ -125,7 +125,7 @@ pub(super) const SAFE_URL_SCHEMES: &[&str] = &["http://", "https://", "mailto:",
 pub(super) const DANGEROUS_URL_SCHEMES: &[&str] = &["javascript:", "vbscript:", "data:", "about:", "blob:", "file:"];
 
 /// Style for converting `<br>` tags to Markdown line breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum BrStyle {
     /// Use two trailing spaces followed by newline (CommonMark standard)
@@ -136,7 +136,7 @@ pub enum BrStyle {
 }
 
 /// Auto-fix conversion strictness for MD033.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MD033FixMode {
     /// Preserve existing behavior: skip conversions when significant extra
@@ -147,7 +147,7 @@ pub enum MD033FixMode {
     Relaxed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD033Config {
     #[serde(default, rename = "allowed-elements", alias = "allowed_elements", alias = "allowed")]
     pub allowed: Vec<String>,

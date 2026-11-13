@@ -10,7 +10,7 @@ static SETEXT_HEADING_2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(
 static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
 
 /// Represents different styles of Markdown headings
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, schemars::JsonSchema)]
 pub enum HeadingStyle {
     Atx,       // # Heading
     AtxClosed, // # Heading #

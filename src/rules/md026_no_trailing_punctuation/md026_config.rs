@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// We only include ASCII punctuation for now
 pub(super) const DEFAULT_PUNCTUATION: &str = ".,;:!";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD026Config {
     #[serde(default = "default_punctuation")]
     pub punctuation: String,

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// The style for code blocks (MD046)
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default, schemars::JsonSchema)]
 pub enum CodeBlockStyle {
     /// Consistent with the first code block style found
     #[default]
@@ -25,7 +25,7 @@ impl fmt::Display for CodeBlockStyle {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD046Config {
     #[serde(
         default = "default_style",

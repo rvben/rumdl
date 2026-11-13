@@ -2,7 +2,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 /// Validation behavior for MkDocs nav entries
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NavValidation {
     /// Report issues as warnings
@@ -15,7 +15,7 @@ pub enum NavValidation {
 /// Configuration for MD074 (MkDocs nav validation)
 ///
 /// This rule validates that MkDocs nav entries point to existing files.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct MD074Config {
     /// How to handle nav entries pointing to non-existent files

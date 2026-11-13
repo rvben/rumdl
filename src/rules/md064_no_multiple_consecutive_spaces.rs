@@ -44,7 +44,7 @@ static MULTIPLE_SPACES_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Configuration for MD064 (No multiple consecutive spaces)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD064Config {
     /// Allow exactly two spaces after sentence-ending punctuation (default: false)

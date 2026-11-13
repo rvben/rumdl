@@ -3,7 +3,7 @@ use crate::types::HeadingLevel;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD041 (First line heading)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct MD041Config {
     /// The required heading level (default: 1)

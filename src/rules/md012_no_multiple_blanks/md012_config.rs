@@ -3,7 +3,7 @@ use crate::types::PositiveUsize;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD012 (No multiple consecutive blank lines)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD012Config {
     /// Maximum number of consecutive blank lines allowed within the document (default: 1)

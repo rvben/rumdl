@@ -234,6 +234,35 @@ pub fn config_schema_for<T: RuleConfig>() -> Option<(String, toml::Value)> {
     Some((T::RULE_NAME.to_string(), toml::Value::Table(table)))
 }
 
+/// JSON Schema for a rule config struct, derived from the struct's own serde shape.
+///
+/// Where [`config_schema_for`] reports one sample value per key, this reports the type,
+/// the doc comment and the enum variants the struct actually declares, which is what an
+/// editor needs to complete and explain an option. The struct that deserializes a rule
+/// section is therefore also the one that describes it: there is no second list of option
+/// metadata to keep in sync.
+///
+/// The returned object carries `properties` only. `required` is dropped because rumdl
+/// accepts a section with any subset of its keys; a schema that demanded them would be
+/// stricter than the loader. Nested types are inlined so every `$ref` that reaches the
+/// published schema points into the document's own `$defs`, which this module owns.
+pub fn config_json_schema_for<T: RuleConfig + schemars::JsonSchema>() -> Option<(String, serde_json::Value)> {
+    let settings = schemars::generate::SchemaSettings::draft2020_12().with(|settings| {
+        settings.inline_subschemas = true;
+        // The document declares its meta-schema once, at the root.
+        settings.meta_schema = None;
+    });
+
+    let schema = settings.into_generator().into_root_schema_for::<T>();
+    let mut value = serde_json::to_value(schema).ok()?;
+    let object = value.as_object_mut()?;
+    object.remove("required");
+    object.remove("title");
+    object.get("properties")?;
+
+    Some((T::RULE_NAME.to_string(), value))
+}
+
 /// Implements `config_schema` for a rule backed by a serde `RuleConfig` struct, so the
 /// set of keys config validation accepts is derived from the same struct `from_config`
 /// deserializes and cannot drift from it. Use inside the rule's `impl Rule` block.
@@ -247,6 +276,10 @@ macro_rules! impl_rule_config_schema {
     ($config_ty:ty) => {
         fn config_schema(&self) -> Option<(String, toml::Value)> {
             $crate::rule_config_serde::config_schema_for::<$config_ty>()
+        }
+
+        fn config_json_schema(&self) -> Option<(String, serde_json::Value)> {
+            $crate::rule_config_serde::config_json_schema_for::<$config_ty>()
         }
     };
 }
