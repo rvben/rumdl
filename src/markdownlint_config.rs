@@ -1553,9 +1553,12 @@ MD013:
 
     #[test]
     fn frontmatter_import_spellings_use_the_canonical_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".markdownlint.yaml");
         for key in ["frontmatter", "front-matter", "front_matter", "Front-Matter"] {
             let input = format!("MD013:\n  {key}: true\n");
-            let config: MarkdownlintConfig = serde_yaml::from_str(&input).unwrap();
+            std::fs::write(&path, input).unwrap();
+            let config = load_markdownlint_config(path.to_str().unwrap()).unwrap();
             let sourced = config.map_to_sourced_rumdl_config(None);
             let fragment = config.map_to_sourced_rumdl_config_fragment(None);
             for values in [&sourced.rules["MD013"].values, &fragment.rules["MD013"].values] {
