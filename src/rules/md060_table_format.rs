@@ -1777,7 +1777,7 @@ mod tests {
 
         // Verify it's compact (lines have different lengths)
         let lines: Vec<&str> = fixed.lines().collect();
-        assert!(lines[0].len() != lines[2].len());
+        assert_ne!(lines[0].len(), lines[2].len());
     }
 
     #[test]

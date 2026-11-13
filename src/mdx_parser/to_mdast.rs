@@ -1854,9 +1854,9 @@ fn on_mismatch_error(
                 reason: format!(
                     "Expected the closing tag `{}` either before the start of `{:?}` ({}:{}), or another opening tag after that start",
                     serialize_abbreviated_tag(tag),
-                    &right.name,
-                    &right.point.line,
-                    &right.point.column,
+                    right.name,
+                    right.point.line,
+                    right.point.column,
                 ),
                 rule_id: Box::new("end-tag-mismatch".into()),
                 source: Box::new("markdown-rs".into()),

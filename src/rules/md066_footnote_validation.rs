@@ -3,13 +3,13 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
-/// Pattern to match footnote definitions: [^id]: content
+/// Pattern to match footnote definitions: `[^id]: content`
 /// Matches at start of line, with 0-3 leading spaces, caret in brackets
 /// Also handles definitions inside blockquotes (after stripping > prefixes)
 pub(super) static FOOTNOTE_DEF_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[\^([^\]]+)\]:").unwrap());
 
-/// Pattern to match footnote references in text: [^id]
+/// Pattern to match footnote references in text: `[^id]`
 /// Callers must manually check that the match is NOT followed by `:` (which would make it a definition)
 pub(super) static FOOTNOTE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\^([^\]]+)\]").unwrap());
 

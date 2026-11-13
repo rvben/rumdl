@@ -1,7 +1,7 @@
 //! Warning labels printed to stderr must follow the same color switches as
 //! the rest of the output: `--color`, `NO_COLOR` and `CLICOLOR_FORCE`.
 
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -47,7 +47,7 @@ fn stderr_for(args: &[&str], content: &str, color: &[&str], env: &[(&str, &str)]
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("rumdl").unwrap();
+    let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.current_dir(dir.path())
         .env_remove("NO_COLOR")
         .env_remove("CLICOLOR_FORCE")

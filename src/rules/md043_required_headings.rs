@@ -303,8 +303,8 @@ impl MD043RequiredHeadings {
             let anchor_index = (index < self.config.headings.len()).then_some(index);
             let mut has_repeating_slot = false;
 
-            for source_index in run_start..index {
-                match self.config.headings[source_index].as_str() {
+            for (source_index, heading) in self.config.headings.iter().enumerate().take(index).skip(run_start) {
+                match heading.as_str() {
                     "?" => tokens.push(PatternToken::RequiredWildcard {
                         source_index,
                         kind: WildcardKind::One,

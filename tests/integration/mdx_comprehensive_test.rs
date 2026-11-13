@@ -314,8 +314,8 @@ fn test_mdx_jsx_expression_nested_braces() {
 "#;
     let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
 
-    for i in 0..4 {
-        assert!(ctx.lines[i].in_jsx_expression, "Nested braces line {i}");
+    for (i, line) in ctx.lines[..4].iter().enumerate() {
+        assert!(line.in_jsx_expression, "Nested braces line {i}");
     }
 }
 
@@ -346,8 +346,8 @@ fn test_mdx_esm_multiline_import() {
 "#;
     let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
 
-    for i in 0..5 {
-        assert!(ctx.lines[i].in_esm_block, "Multi-line import line {i}");
+    for (i, line) in ctx.lines[..5].iter().enumerate() {
+        assert!(line.in_esm_block, "Multi-line import line {i}");
     }
     assert!(!ctx.lines[6].in_esm_block, "Heading not in ESM");
 }
@@ -419,8 +419,8 @@ fn test_mdx_comment_with_jsx_inside() {
     let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
 
     // All lines should be in the comment context
-    for i in 0..4 {
-        assert!(ctx.lines[i].in_mdx_comment, "Comment with JSX line {i}");
+    for (i, line) in ctx.lines[..4].iter().enumerate() {
+        assert!(line.in_mdx_comment, "Comment with JSX line {i}");
     }
 }
 
@@ -539,8 +539,8 @@ fn test_mdx_many_expressions() {
 
     let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
 
-    for i in 0..50 {
-        assert!(ctx.lines[i].in_jsx_expression, "Expression on line {i}");
+    for (i, line) in ctx.lines[..50].iter().enumerate() {
+        assert!(line.in_jsx_expression, "Expression on line {i}");
     }
 }
 
@@ -553,8 +553,8 @@ fn test_mdx_many_comments() {
 
     let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
 
-    for i in 0..50 {
-        assert!(ctx.lines[i].in_mdx_comment, "Comment on line {i}");
+    for (i, line) in ctx.lines[..50].iter().enumerate() {
+        assert!(line.in_mdx_comment, "Comment on line {i}");
     }
 }
 

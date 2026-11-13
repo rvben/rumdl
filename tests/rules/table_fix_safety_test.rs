@@ -1810,7 +1810,7 @@ fn row_shapes(cells: &[&str]) -> Vec<String> {
     let inner = cells.join(" | ");
     vec![
         format!("| {inner} |"),
-        format!("{inner}"),
+        inner.clone(),
         format!("| {inner}"),
         format!("{inner} |"),
     ]

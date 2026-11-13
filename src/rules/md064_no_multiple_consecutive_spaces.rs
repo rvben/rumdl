@@ -224,7 +224,7 @@ impl MD064NoMultipleConsecutiveSpaces {
     }
 
     /// Check if the match is after a footnote marker
-    /// Pattern: [^label]:  text
+    /// Pattern: `[^label]:  text`
     fn is_after_footnote_marker(&self, line: &str, match_start: usize) -> bool {
         let trimmed = line.trim_start();
 
@@ -1865,7 +1865,7 @@ That's right, no `width`, no `height`, no `viewBox`.  There is no easy
             "Indented reference link definitions should not be flagged, got: {:?}",
             result
                 .iter()
-                .map(|w| format!("col={}: {}", w.column, &w.message))
+                .map(|w| format!("col={}: {}", w.column, w.message))
                 .collect::<Vec<_>>()
         );
 

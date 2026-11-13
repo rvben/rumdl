@@ -700,7 +700,7 @@ This has * real spaced emphasis * that should be flagged."#;
         );
         assert!(result[0].message.contains("Spaces inside emphasis markers"));
         // Should flag "* real spaced emphasis *" but not emphasis patterns inside links
-        assert!(result[0].line == 3); // Line with "* real spaced emphasis *"
+        assert_eq!(result[0].line, 3); // Line with "* real spaced emphasis *"
     }
 
     #[test]
@@ -716,7 +716,7 @@ This has * real spaced emphasis * that should be flagged."#;
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Spaces inside emphasis markers"));
         // Should be the "* real spaced *" text on line 1
-        assert!(result[0].line == 1);
+        assert_eq!(result[0].line, 1);
     }
 
     #[test]

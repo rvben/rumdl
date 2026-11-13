@@ -228,7 +228,7 @@ mod tests {
     }
 
     fn assert_mojibake_at(warning: &LintWarning, line: usize, column: usize, end_line: usize, end_column: usize) {
-        assert!(warning.rule_name.as_deref() == Some("MD083"));
+        assert_eq!(warning.rule_name.as_deref(), Some("MD083"));
         assert!(warning.message.contains("Mojibake detected"));
         assert_eq!(warning.line, line);
         assert_eq!(warning.column, column);
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn test_full_text_with_boundaries() {
         let results = check("¦¤");
-        assert!(results.len() == 1);
+        assert_eq!(results.len(), 1);
         assert_mojibake_at(&results[0], 1, 1, 1, 3);
     }
 
