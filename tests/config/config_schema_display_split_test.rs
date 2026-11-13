@@ -201,3 +201,36 @@ fn the_published_defaults_load_back_without_warnings() {
         );
     }
 }
+
+#[test]
+fn md013_frontmatter_defaults_and_schema_use_the_canonical_name() {
+    let rules = all_rules();
+    let registry = RuleRegistry::from_rules(&rules);
+    for key in ["frontmatter", "front-matter", "front_matter"] {
+        assert_eq!(registry.canonical_config_key("MD013", key), Some("frontmatter"));
+    }
+    let rule = rules.iter().find(|rule| rule.name() == "MD013").unwrap();
+    let (_, defaults) = rule.default_config_section().unwrap();
+    assert_eq!(defaults.get("frontmatter").and_then(toml::Value::as_bool), Some(false));
+    assert!(defaults.get("front-matter").is_none());
+    assert!(defaults.get("front_matter").is_none());
+
+    let schema = rumdl_lib::config::config_schema_json();
+    for key in ["frontmatter", "front-matter", "front_matter"] {
+        assert_eq!(schema["$defs"]["MD013"]["properties"][key]["type"], "boolean");
+    }
+}
+
+#[test]
+fn frontmatter_config_value_accessor_accepts_alias_queries() {
+    let mut config = rumdl_lib::config::Config::default();
+    let rule = config.rules.entry("MD013".into()).or_default();
+    rule.values.insert("frontmatter".into(), toml::Value::Boolean(true));
+    for key in ["frontmatter", "front-matter", "front_matter", "Front-Matter"] {
+        assert_eq!(
+            rumdl_lib::config::get_rule_config_value::<bool>(&config, "MD013", key),
+            Some(true),
+            "{key}"
+        );
+    }
+}

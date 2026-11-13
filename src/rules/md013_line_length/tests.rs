@@ -12622,3 +12622,42 @@ fn front_matter_toml_is_checked_but_not_wrapped_without_reflow() {
     });
     assert!(default_rule.check(&ctx).unwrap().is_empty());
 }
+
+#[test]
+fn frontmatter_direct_inline_config_accepts_all_spellings() {
+    for key in ["frontmatter", "front-matter", "front_matter"] {
+        for enabled in [false, true] {
+            let rule = MD013LineLength::from_config_struct(MD013Config {
+                line_length: crate::types::LineLength::new(40),
+                front_matter: !enabled,
+                ..Default::default()
+            });
+            let input = format!(
+                "---\ndescription: This description is deliberately longer than forty characters.\n---\n\n<!-- rumdl-configure-file {{\"MD013\": {{\"{key}\": {enabled}}}}} -->\n"
+            );
+            let ctx = LintContext::new(&input, MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), usize::from(enabled), "{key}={enabled}: {warnings:?}");
+            if enabled {
+                assert_eq!(warnings[0].line, 2);
+            }
+        }
+    }
+}
+
+#[test]
+fn frontmatter_direct_inline_config_prefers_the_canonical_spelling() {
+    for enabled in [false, true] {
+        let rule = MD013LineLength::from_config_struct(MD013Config {
+            line_length: crate::types::LineLength::new(40),
+            front_matter: !enabled,
+            ..Default::default()
+        });
+        let input = format!(
+            "---\ndescription: This description is deliberately longer than forty characters.\n---\n\n<!-- rumdl-configure-file {{\"MD013\": {{\"frontmatter\": {enabled}, \"front-matter\": {}, \"front_matter\": {}}}}} -->\n",
+            !enabled, !enabled
+        );
+        let ctx = LintContext::new(&input, MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), usize::from(enabled));
+    }
+}

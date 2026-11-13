@@ -3750,3 +3750,32 @@ fn cli_discovery_fails_on_a_broken_user_config_under_a_markdownlint_config() {
         "a broken user config under a discovered markdownlint config is fatal for the CLI"
     );
 }
+
+#[test]
+fn discovered_markdownlint_frontmatter_aliases_override_user_config() {
+    use rumdl_lib::rules::md013_line_length::MD013Config;
+    for user_key in ["frontmatter", "front-matter", "front_matter", "Front-Matter"] {
+        for project_key in ["frontmatter", "front-matter", "front_matter", "Front_Matter"] {
+            for enabled in [false, true] {
+                let (temp_dir, user_dir, project_dir) = discovered_config_fixture();
+                fs::write(
+                    user_dir.join("rumdl/rumdl.toml"),
+                    format!("[MD013]\nline-length = 40\n{user_key} = {}\n", !enabled),
+                )
+                .unwrap();
+                let project = project_dir.join(".markdownlint.json");
+                fs::write(
+                    &project,
+                    serde_json::json!({"MD013": {project_key: enabled}}).to_string(),
+                )
+                .unwrap();
+                let sourced = SourcedConfig::load_discovered(&project, Some(&user_dir), Some(temp_dir.path())).unwrap();
+                let config: Config = sourced.into_validated_unchecked().into();
+                let actual: MD013Config = rumdl_lib::rule_config_serde::load_rule_config(&config);
+                assert_eq!(actual.front_matter, enabled, "{user_key} -> {project_key}");
+                assert_eq!(actual.line_length.get(), 40);
+                assert_eq!(config.rules["MD013"].values.len(), 2);
+            }
+        }
+    }
+}

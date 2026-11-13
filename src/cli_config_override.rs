@@ -144,35 +144,10 @@ pub fn split_config_args(items: &[SingleConfigArgument]) -> Result<(Option<PathB
 /// Falls back to the input as-is if nothing matches (so unknown keys still
 /// flow through to the existing config validator and surface as warnings).
 fn canonical_option_key(rule: &str, key: &str) -> String {
-    let registry = default_registry();
-
-    // Named aliases from the rule itself: alias -> canonical.
-    if let Some(aliases) = registry.rule_aliases.get(rule)
-        && let Some(canonical) = aliases.get(key)
-    {
-        return canonical.clone();
-    }
-
-    // Look in the rule's schema for the canonical form.
-    if let Some(schema) = registry.rule_schemas.get(rule) {
-        if schema.contains_key(key) {
-            return key.to_string();
-        }
-        let kebab = key.replace('_', "-");
-        if schema.contains_key(&kebab) {
-            return kebab;
-        }
-        let snake = key.replace('-', "_");
-        if schema.contains_key(&snake) {
-            return snake;
-        }
-        let normalized = normalize_key(key);
-        if schema.contains_key(&normalized) {
-            return normalized;
-        }
-    }
-
-    key.to_string()
+    default_registry()
+        .canonical_config_key(rule, key)
+        .unwrap_or(key)
+        .to_string()
 }
 
 /// Variants of an option key that could collide on the same field after

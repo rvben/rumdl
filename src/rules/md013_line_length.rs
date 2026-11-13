@@ -617,8 +617,9 @@ impl Rule for MD013LineLength {
                     config.bracket_display_math = enabled;
                 }
                 if let Some(front_matter) = obj
-                    .get("front_matter")
+                    .get("frontmatter")
                     .or_else(|| obj.get("front-matter"))
+                    .or_else(|| obj.get("front_matter"))
                     .and_then(serde_json::Value::as_bool)
                 {
                     config.front_matter = front_matter;
@@ -1173,6 +1174,8 @@ impl Rule for MD013LineLength {
             "semantic_link_understanding".to_string(),
             "ignore-link-urls".to_string(),
         );
+        aliases.insert("front-matter".to_string(), "frontmatter".to_string());
+        aliases.insert("front_matter".to_string(), "frontmatter".to_string());
         Some(aliases)
     }
 

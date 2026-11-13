@@ -154,6 +154,11 @@ impl RuleRegistry {
         ];
 
         for variant in &key_variants {
+            if let Some(canonical) = self.rule_aliases.get(rule).and_then(|aliases| aliases.get(variant))
+                && let Some((schema_key, _)) = schema.get_key_value(canonical)
+            {
+                return Some(schema_key);
+            }
             if let Some((schema_key, _)) = schema.get_key_value(variant) {
                 return Some(schema_key);
             }

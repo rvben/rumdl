@@ -2106,10 +2106,7 @@
         "code_spans": {
           "type": "boolean"
         },
-        "front-matter": {
-          "type": "boolean"
-        },
-        "front_matter": {
+        "frontmatter": {
           "type": "boolean"
         },
         "heading-line-length": {},
@@ -2199,6 +2196,12 @@
           "type": "boolean"
         },
         "enable_reflow": {
+          "type": "boolean"
+        },
+        "front-matter": {
+          "type": "boolean"
+        },
+        "front_matter": {
           "type": "boolean"
         },
         "semantic-link-understanding": {
