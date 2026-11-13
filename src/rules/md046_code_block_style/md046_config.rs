@@ -8,10 +8,13 @@ use std::fmt;
 pub enum CodeBlockStyle {
     /// Consistent with the first code block style found
     #[default]
+    #[schemars(rename = "consistent")]
     Consistent,
     /// Indented code blocks (4 spaces)
+    #[schemars(rename = "indented")]
     Indented,
     /// Fenced code blocks (``` or ~~~)
+    #[schemars(rename = "fenced")]
     Fenced,
 }
 

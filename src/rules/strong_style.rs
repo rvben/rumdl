@@ -5,10 +5,13 @@ use std::fmt;
 pub enum StrongStyle {
     /// Consistent with the first strong style found
     #[default]
+    #[schemars(rename = "consistent")]
     Consistent,
     /// Asterisk style (**)
+    #[schemars(rename = "asterisk")]
     Asterisk,
     /// Underscore style (__)
+    #[schemars(rename = "underscore")]
     Underscore,
 }
 

@@ -5,10 +5,13 @@ use std::fmt;
 pub enum EmphasisStyle {
     /// Consistent with the most prevalent emphasis style found (or first found if tied)
     #[default]
+    #[schemars(rename = "consistent")]
     Consistent,
     /// Asterisk style (*)
+    #[schemars(rename = "asterisk")]
     Asterisk,
     /// Underscore style (_)
+    #[schemars(rename = "underscore")]
     Underscore,
 }
 

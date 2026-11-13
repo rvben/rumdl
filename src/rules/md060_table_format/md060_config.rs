@@ -7,12 +7,16 @@ use serde::{Deserialize, Deserializer, Serialize};
 pub enum ColumnAlign {
     /// Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)
     #[default]
+    #[schemars(rename = "auto")]
     Auto,
     /// Force all columns to left-align text
+    #[schemars(rename = "left")]
     Left,
     /// Force all columns to center text
+    #[schemars(rename = "center")]
     Center,
     /// Force all columns to right-align text
+    #[schemars(rename = "right")]
     Right,
 }
 

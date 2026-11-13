@@ -10,16 +10,26 @@ static SETEXT_HEADING_2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(
 static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
 
 /// Represents different styles of Markdown headings
+///
+/// `FromStr` accepts these spellings with `-` or `_`, in any case, so the schema
+/// publishes the spelling `Display` writes and `deserialize_style` reads back.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, schemars::JsonSchema)]
 pub enum HeadingStyle {
-    Atx,       // # Heading
+    #[schemars(rename = "atx")]
+    Atx, // # Heading
+    #[schemars(rename = "atx-closed")]
     AtxClosed, // # Heading #
-    Setext1,   // Heading
+    #[schemars(rename = "setext1")]
+    Setext1, // Heading
     // =======
+    #[schemars(rename = "setext2")]
     Setext2, // Heading
     // -------
-    Consistent,          // For maintaining consistency with the first found header style
-    SetextWithAtx,       // Setext for h1/h2, ATX for h3-h6
+    #[schemars(rename = "consistent")]
+    Consistent, // For maintaining consistency with the first found header style
+    #[schemars(rename = "setext-with-atx")]
+    SetextWithAtx, // Setext for h1/h2, ATX for h3-h6
+    #[schemars(rename = "setext-with-atx-closed")]
     SetextWithAtxClosed, // Setext for h1/h2, ATX closed for h3-h6
 }
 

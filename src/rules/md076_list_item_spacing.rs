@@ -9,8 +9,11 @@ use crate::utils::skip_context::is_table_line;
 #[derive(Debug, Clone, PartialEq, Eq, Default, schemars::JsonSchema)]
 pub enum ListItemSpacingStyle {
     #[default]
+    #[schemars(rename = "consistent")]
     Consistent,
+    #[schemars(rename = "loose")]
     Loose,
+    #[schemars(rename = "tight")]
     Tight,
 }
 

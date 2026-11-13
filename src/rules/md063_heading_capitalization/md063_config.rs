@@ -6,12 +6,16 @@ use serde::{Deserialize, Serialize};
 pub enum HeadingCapStyle {
     /// Title Case - capitalize major words (default)
     #[default]
+    #[schemars(rename = "title-case")]
     TitleCase,
     /// Sentence case - only first word capitalized
+    #[schemars(rename = "sentence-case")]
     SentenceCase,
     /// ALL CAPS - all letters uppercase
+    #[schemars(rename = "all-caps")]
     AllCaps,
     /// Infer a supported style independently for each document.
+    #[schemars(rename = "consistent")]
     Consistent,
 }
 

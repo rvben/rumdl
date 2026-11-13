@@ -1907,7 +1907,7 @@
       "type": "object",
       "properties": {
         "style": {
-          "description": "The heading style to enforce (default: \"consistent\") One of `Atx`, `AtxClosed`, `Setext1`, `Setext2`, `Consistent`, `SetextWithAtx`, `SetextWithAtxClosed`.",
+          "description": "The heading style to enforce (default: \"consistent\") One of `atx`, `atx-closed`, `setext1`, `setext2`, `consistent`, `setext-with-atx`, `setext-with-atx-closed`.",
           "type": "string",
           "default": "consistent"
         },
@@ -3408,7 +3408,7 @@
       "type": "object",
       "properties": {
         "style": {
-          "description": "The style for code blocks (MD046) One of `Consistent`, `Indented`, `Fenced`.",
+          "description": "The style for code blocks (MD046) One of `consistent`, `indented`, `fenced`.",
           "default": "consistent",
           "type": "string"
         },
@@ -3439,7 +3439,7 @@
       "type": "object",
       "properties": {
         "style": {
-          "description": "The style for code fence markers (MD048) One of `Consistent`, `Backtick`, `Tilde`.",
+          "description": "The style for code fence markers (MD048) One of `consistent`, `backtick`, `tilde`.",
           "default": "consistent",
           "type": "string"
         },
@@ -3457,7 +3457,7 @@
       "type": "object",
       "properties": {
         "style": {
-          "description": "The style for emphasis (MD049) One of `Consistent`, `Asterisk`, `Underscore`.",
+          "description": "The style for emphasis (MD049) One of `consistent`, `asterisk`, `underscore`.",
           "default": "consistent",
           "type": "string"
         },
@@ -3475,7 +3475,7 @@
       "type": "object",
       "properties": {
         "style": {
-          "description": "The style for strong emphasis (MD050) One of `Consistent`, `Asterisk`, `Underscore`.",
+          "description": "The style for strong emphasis (MD050) One of `consistent`, `asterisk`, `underscore`.",
           "default": "consistent",
           "type": "string"
         },
@@ -3882,12 +3882,12 @@
           "default": false
         },
         "column-align": {
-          "description": "Controls how cell text is aligned within the padded column width.\n\n- `auto` (default): Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)\n- `left`: Force all columns to left-align text\n- `center`: Force all columns to center text\n- `right`: Force all columns to right-align text\n\nOnly applies when `style = \"aligned\"` or `style = \"aligned-no-space\"`.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\ncolumn-align = \"center\"  # Center all cell text\n``` One of `Auto`, `Left`, `Center`, `Right`.",
+          "description": "Controls how cell text is aligned within the padded column width.\n\n- `auto` (default): Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)\n- `left`: Force all columns to left-align text\n- `center`: Force all columns to center text\n- `right`: Force all columns to right-align text\n\nOnly applies when `style = \"aligned\"` or `style = \"aligned-no-space\"`.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\ncolumn-align = \"center\"  # Center all cell text\n``` One of `auto`, `left`, `center`, `right`.",
           "default": "auto",
           "type": "string"
         },
         "column_align": {
-          "description": "Controls how cell text is aligned within the padded column width.\n\n- `auto` (default): Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)\n- `left`: Force all columns to left-align text\n- `center`: Force all columns to center text\n- `right`: Force all columns to right-align text\n\nOnly applies when `style = \"aligned\"` or `style = \"aligned-no-space\"`.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\ncolumn-align = \"center\"  # Center all cell text\n``` One of `Auto`, `Left`, `Center`, `Right`.",
+          "description": "Controls how cell text is aligned within the padded column width.\n\n- `auto` (default): Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)\n- `left`: Force all columns to left-align text\n- `center`: Force all columns to center text\n- `right`: Force all columns to right-align text\n\nOnly applies when `style = \"aligned\"` or `style = \"aligned-no-space\"`.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\ncolumn-align = \"center\"  # Center all cell text\n``` One of `auto`, `left`, `center`, `right`.",
           "default": "auto",
           "type": "string"
         },
@@ -4140,7 +4140,7 @@
           "default": []
         },
         "style": {
-          "description": "Capitalization style to enforce One of `TitleCase`, `SentenceCase`, `AllCaps`, `Consistent`.",
+          "description": "Capitalization style to enforce One of `title-case`, `sentence-case`, `all-caps`, `consistent`.",
           "default": "title-case",
           "type": "string"
         },
@@ -4390,7 +4390,7 @@
           "type": "boolean"
         },
         "style": {
-          "description": "Style the gaps between consecutive list items must follow: `consistent` keeps\neach list on whichever style it already uses, `loose` requires a blank line\nbetween items and `tight` forbids one. One of `Consistent`, `Loose`, `Tight`.",
+          "description": "Style the gaps between consecutive list items must follow: `consistent` keeps\neach list on whichever style it already uses, `loose` requires a blank line\nbetween items and `tight` forbids one. One of `consistent`, `loose`, `tight`.",
           "type": "string"
         },
         "severity": {

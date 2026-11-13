@@ -2402,6 +2402,58 @@ fn test_schema_never_enumerates_option_values() {
 }
 
 #[test]
+fn test_schema_publishes_spellings_the_loader_accepts() {
+    // The description of an enumerated option is what an editor shows next to the
+    // key, so every spelling after "One of" is a promise. Enums that deserialize
+    // by hand carry no `rename`, and `schemars` then publishes the Rust variant
+    // name — `MD003 style = "AtxClosed"` reads fine in a hover and fails to load.
+    // This walks the promise and feeds each spelling to the real loader.
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+    let temp_dir = tempdir().unwrap();
+    let path = temp_dir.path().join("rumdl.toml");
+    let mut checked = 0;
+
+    for (rule, definition) in schema["$defs"].as_object().into_iter().flatten() {
+        if !rule.starts_with("MD") {
+            continue;
+        }
+        let Some(properties) = definition["properties"].as_object() else {
+            continue;
+        };
+        for (key, option) in properties {
+            let Some(description) = option["description"].as_str() else {
+                continue;
+            };
+            let Some((_, spellings)) = description.rsplit_once("One of ") else {
+                continue;
+            };
+            for spelling in spellings.trim_end_matches('.').split(", ") {
+                let spelling = spelling.trim().trim_matches('`');
+                let content = format!("[{rule}]\n{key} = \"{spelling}\"\n");
+                fs::write(&path, &content).unwrap();
+
+                SourcedConfig::load_with_discovery(Some(path.to_str().unwrap()), None, true).unwrap_or_else(|error| {
+                    panic!("the schema offers {rule}.{key} = \"{spelling}\", the loader rejects it: {error}")
+                });
+
+                let parsed: toml::Value = toml::from_str(&content).unwrap();
+                assert!(
+                    validator.is_valid(&serde_json::to_value(parsed).unwrap()),
+                    "the schema offers {rule}.{key} = \"{spelling}\" and then rejects it"
+                );
+                checked += 1;
+            }
+        }
+    }
+
+    assert!(
+        checked > 40,
+        "expected to check the spellings of every enumerated option, checked {checked}"
+    );
+}
+
+#[test]
 fn test_schema_accepts_enum_aliases_rumdl_accepts() {
     let schema = super::schema_gen::config_schema_json();
     let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");

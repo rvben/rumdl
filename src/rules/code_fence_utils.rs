@@ -50,10 +50,13 @@ pub(crate) fn fence_ambiguity_limit(ctx: &crate::lint_context::LintContext) -> O
 pub enum CodeFenceStyle {
     /// Consistent with the first code fence style found
     #[default]
+    #[schemars(rename = "consistent")]
     Consistent,
     /// Backtick style (```)
+    #[schemars(rename = "backtick")]
     Backtick,
     /// Tilde style (~~~)
+    #[schemars(rename = "tilde")]
     Tilde,
 }
 
