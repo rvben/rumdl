@@ -33,9 +33,11 @@ pub(super) fn parse(text: &str, source: ToolVersionDefinition) -> Result<Expecte
     // Parser errors can contain arbitrary values and must never be quoted.
     let config: Config = match source {
         ToolVersionDefinition::PreCommit | ToolVersionDefinition::PreCommitYml => {
-            let mut value: serde_yaml::Value = serde_yaml::from_str(text).map_err(|_| error())?;
+            let mut value: serde_json::Value =
+                serde_saphyr::from_str_with_options(text, serde_saphyr::options! { reject_unsupported_tags: true })
+                    .map_err(|_| error())?;
             merge_yaml(&mut value, 0).map_err(|()| error())?;
-            serde_yaml::from_value(value).map_err(|_| error())?
+            serde_json::from_value(value).map_err(|_| error())?
         }
         ToolVersionDefinition::Prek => toml::from_str(text).map_err(|_| error())?,
         _ => return Err(error()),
@@ -91,23 +93,23 @@ pub(super) fn parse(text: &str, source: ToolVersionDefinition) -> Result<Expecte
 /// Resolve merge sources before their consumers. A single `apply_merge` pass
 /// leaves nested `<<` keys behind; repeating it also loses precedence when an
 /// earlier merge-list member inherits a key supplied directly by a later one.
-fn merge_yaml(value: &mut serde_yaml::Value, depth: usize) -> Result<(), ()> {
+fn merge_yaml(value: &mut serde_json::Value, depth: usize) -> Result<(), ()> {
     if depth >= 128 {
         return Err(());
     }
     match value {
-        serde_yaml::Value::Mapping(mapping) => {
+        serde_json::Value::Object(mapping) => {
             for child in mapping.values_mut() {
                 merge_yaml(child, depth + 1)?;
             }
             let merge = match mapping.remove("<<") {
                 None => return Ok(()),
-                Some(serde_yaml::Value::Mapping(merge)) => vec![serde_yaml::Value::Mapping(merge)],
-                Some(serde_yaml::Value::Sequence(merges)) => merges,
+                Some(source @ serde_json::Value::Object(_)) => vec![source],
+                Some(serde_json::Value::Array(merges)) => merges,
                 Some(_) => return Err(()),
             };
             for source in merge {
-                let serde_yaml::Value::Mapping(source) = source else {
+                let serde_json::Value::Object(source) = source else {
                     return Err(());
                 };
                 for (key, value) in source {
@@ -115,12 +117,11 @@ fn merge_yaml(value: &mut serde_yaml::Value, depth: usize) -> Result<(), ()> {
                 }
             }
         }
-        serde_yaml::Value::Sequence(sequence) => {
+        serde_json::Value::Array(sequence) => {
             for child in sequence {
                 merge_yaml(child, depth + 1)?;
             }
         }
-        serde_yaml::Value::Tagged(_) => return Err(()),
         _ => {}
     }
     Ok(())

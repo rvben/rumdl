@@ -14,7 +14,7 @@
 //! Where a value sits comes from the shared front matter helpers (YAML, whose
 //! parser reports no positions) or from `toml_edit`'s spans (TOML). Whether an
 //! edit is safe is never guessed: the front matter is parsed before and after
-//! with `serde_yaml` / `toml`, and an edit that changes the parsed value is
+//! with `serde_saphyr` / `toml`, and an edit that changes the parsed value is
 //! dropped.
 
 use super::MD013LineLength;
@@ -55,7 +55,7 @@ pub(super) fn wrap_fixes(
             .map(|line| yaml_wrap_line(line.trim_end(), limit, &measure))
             .collect();
         keep_verified(&body, edits, |text| {
-            serde_yaml::from_str::<serde_yaml::Value>(text).ok()
+            serde_saphyr::from_str::<serde_json::Value>(text).ok()
         })
     } else {
         let edits = toml_wrap_lines(&body, limit, &measure);
