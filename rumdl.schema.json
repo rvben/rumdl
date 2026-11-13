@@ -1887,8 +1887,12 @@
           "type": "boolean",
           "default": true
         },
-        "front-matter-title-pattern": {},
-        "front_matter_title_pattern": {},
+        "front-matter-title-pattern": {
+          "description": "Regex matching the front matter line that holds the title. When set, it replaces\nthe default `title:` lookup, so a document keying its title differently still\ngets the implicit level-1 heading."
+        },
+        "front_matter_title_pattern": {
+          "description": "Regex matching the front matter line that holds the title. When set, it replaces\nthe default `title:` lookup, so a document keying its title differently still\ngets the implicit level-1 heading."
+        },
         "severity": {
           "$ref": "#/$defs/Severity"
         },
@@ -1952,28 +1956,25 @@
       "type": "object",
       "properties": {
         "indent": {
-          "description": "Indentation size for nested unordered lists (default: 2)",
+          "description": "Spaces of indentation per nesting level for nested unordered lists (default: 2).",
           "type": "integer",
-          "format": "uint8",
+          "default": 2,
           "minimum": 0,
-          "maximum": 255,
-          "default": 2
+          "maximum": 255
         },
         "start-indent": {
           "description": "Number of spaces for first level indent when start_indented is true (default: 2)",
           "type": "integer",
-          "format": "uint8",
+          "default": 2,
           "minimum": 0,
-          "maximum": 255,
-          "default": 2
+          "maximum": 255
         },
         "start_indent": {
           "description": "Number of spaces for first level indent when start_indented is true (default: 2)",
           "type": "integer",
-          "format": "uint8",
+          "default": 2,
           "minimum": 0,
-          "maximum": 255,
-          "default": 2
+          "maximum": 255
         },
         "start-indented": {
           "description": "Allow first level lists to start indented (default: false)",
@@ -2006,16 +2007,14 @@
         "br-spaces": {
           "description": "Number of trailing spaces kept as a hard line break (default: 2).\nA value below 2 turns the exception off and flags every trailing space.",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 2
+          "default": 2,
+          "minimum": 0
         },
         "br_spaces": {
           "description": "Number of trailing spaces kept as a hard line break (default: 2).\nA value below 2 turns the exception off and flags every trailing space.",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 2
+          "default": 2,
+          "minimum": 0
         },
         "list-item-empty-lines": {
           "description": "Allow trailing spaces in empty list item lines (default: false)",
@@ -2074,16 +2073,14 @@
         "spaces-per-tab": {
           "description": "Number of spaces per tab (default: 4)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 4
+          "default": 4,
+          "minimum": 0
         },
         "spaces_per_tab": {
           "description": "Number of spaces per tab (default: 4)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 4
+          "default": 4,
+          "minimum": 0
         },
         "severity": {
           "$ref": "#/$defs/Severity"
@@ -2114,9 +2111,8 @@
         "maximum": {
           "description": "Maximum number of consecutive blank lines allowed within the document (default: 1)\n\nThis setting controls blank lines within the document content.\nBlank lines at EOF are always enforced to be 0 (following POSIX/Prettier standards).",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "severity": {
           "$ref": "#/$defs/Severity"
@@ -2190,8 +2186,12 @@
           "default": "space",
           "type": "string"
         },
-        "code-block-line-length": {},
-        "code_block_line_length": {},
+        "code-block-line-length": {
+          "description": "Per-context maximum line length for code blocks (fenced or indented).\n\n`None` (unset) falls back to `line_length`. `Some(0)` means \"no limit\nfor code blocks\". Mirrors markdownlint's `code_block_line_length`."
+        },
+        "code_block_line_length": {
+          "description": "Per-context maximum line length for code blocks (fenced or indented).\n\n`None` (unset) falls back to `line_length`. `Some(0)` means \"no limit\nfor code blocks\". Mirrors markdownlint's `code_block_line_length`."
+        },
         "code-blocks": {
           "description": "Check code blocks for line length (default: true)",
           "type": "boolean",
@@ -2217,8 +2217,12 @@
           "type": "boolean",
           "default": false
         },
-        "heading-line-length": {},
-        "heading_line_length": {},
+        "heading-line-length": {
+          "description": "Per-context maximum line length for headings.\n\n`None` (unset) falls back to `line_length`. `Some(0)` means \"no limit\nfor headings\". Mirrors markdownlint's `heading_line_length`."
+        },
+        "heading_line_length": {
+          "description": "Per-context maximum line length for headings.\n\n`None` (unset) falls back to `line_length`. `Some(0)` means \"no limit\nfor headings\". Mirrors markdownlint's `heading_line_length`."
+        },
         "headings": {
           "description": "Check headings for line length (default: true)",
           "type": "boolean",
@@ -2250,9 +2254,8 @@
             "integer",
             "null"
           ],
-          "format": "uint",
-          "minimum": 0,
-          "default": 80
+          "default": 80,
+          "minimum": 0
         },
         "line_length": {
           "description": "Maximum line length (default: 80, 0 means no limit)",
@@ -2260,9 +2263,8 @@
             "integer",
             "null"
           ],
-          "format": "uint",
-          "minimum": 0,
-          "default": 80
+          "default": 80,
+          "minimum": 0
         },
         "link-text-punctuation": {
           "description": "Consider terminal link-label/image-alt punctuation as a sentence end. One of `ignore`, `trailing`.",
@@ -2445,7 +2447,9 @@
           "type": "boolean",
           "default": false
         },
-        "tags": {},
+        "tags": {
+          "description": "Recognize `#word` patterns as tags instead of malformed headings.\nWhen true, single-hash patterns like `#tag`, `#project/active` and\n`#3d_printing` are skipped. Following Obsidian, a tag must contain at\nleast one non-numerical character, so `#1984` is still flagged.\nWhen null/unset, defaults to true for Obsidian flavor and false\notherwise."
+        },
         "severity": {
           "$ref": "#/$defs/Severity"
         },
@@ -2508,8 +2512,12 @@
           "type": "boolean",
           "default": true
         },
-        "lines-above": {},
-        "lines_above": {},
+        "lines-above": {
+          "description": "Number of blank lines required above headings (default: 1 for all levels)\nCan be a single integer (applies to all levels) or an array of 6 integers (one per level 1-6)"
+        },
+        "lines_above": {
+          "description": "Number of blank lines required above headings (default: 1 for all levels)\nCan be a single integer (applies to all levels) or an array of 6 integers (one per level 1-6)"
+        },
         "lines-above-mode": {
           "description": "Keep at least the configured spacing, or remove surplus blank lines above headings. One of `minimum`, `exact`.",
           "type": "string",
@@ -2520,10 +2528,18 @@
           "type": "string",
           "default": "minimum"
         },
-        "lines-below": {},
-        "lines_below": {},
-        "nested-heading-lines-above": {},
-        "nested_heading_lines_above": {},
+        "lines-below": {
+          "description": "Number of blank lines required below headings (default: 1 for all levels)\nCan be a single integer (applies to all levels) or an array of 6 integers (one per level 1-6)"
+        },
+        "lines_below": {
+          "description": "Number of blank lines required below headings (default: 1 for all levels)\nCan be a single integer (applies to all levels) or an array of 6 integers (one per level 1-6)"
+        },
+        "nested-heading-lines-above": {
+          "description": "Blank lines between a heading and a deeper heading that directly follows it\nwith no body in between (default: unset, which uses `lines_above` and\n`lines_below`). Replaces both for that gap. A single integer or an array of 6\nintegers indexed by the deeper heading's level."
+        },
+        "nested_heading_lines_above": {
+          "description": "Blank lines between a heading and a deeper heading that directly follows it\nwith no body in between (default: unset, which uses `lines_above` and\n`lines_below`). Replaces both for that gap. A single integer or an array of 6\nintegers indexed by the deeper heading's level."
+        },
         "severity": {
           "$ref": "#/$defs/Severity"
         },
@@ -2594,36 +2610,41 @@
       "type": "object",
       "properties": {
         "allow-document-sections": {
+          "description": "Allows several sections of the document to each start a new level-1 heading.",
           "type": "boolean",
           "default": false
         },
         "allow_document_sections": {
+          "description": "Allows several sections of the document to each start a new level-1 heading.",
           "type": "boolean",
           "default": false
         },
         "allow-with-separators": {
+          "description": "Allows a second level-1 heading when the first is followed by a separator.",
           "type": "boolean",
           "default": false
         },
         "allow_with_separators": {
+          "description": "Allows a second level-1 heading when the first is followed by a separator.",
           "type": "boolean",
           "default": false
         },
         "front-matter-title": {
+          "description": "Front matter key whose value is treated as the document title, so the body\ndoes not need a level-1 heading.",
           "type": "string",
           "default": "title"
         },
         "front_matter_title": {
+          "description": "Front matter key whose value is treated as the document title, so the body\ndoes not need a level-1 heading.",
           "type": "string",
           "default": "title"
         },
         "level": {
-          "description": "Markdown heading level (1-6)\n\nMarkdown supports exactly 6 levels of headings, from # (level 1) through ###### (level 6).\nThis type enforces that constraint at both compile time (after construction) and runtime\n(during config deserialization).",
+          "description": "Heading level that counts as the document title: `1` (default) through `6`.",
           "type": "integer",
-          "format": "uint8",
+          "default": 1,
           "minimum": 0,
-          "maximum": 255,
-          "default": 1
+          "maximum": 255
         },
         "severity": {
           "$ref": "#/$defs/Severity"
@@ -2639,6 +2660,7 @@
       "type": "object",
       "properties": {
         "punctuation": {
+          "description": "Characters a heading may not end with, one string of punctuation.",
           "type": "string",
           "default": ".,;:!"
         },
@@ -2717,72 +2739,62 @@
         "ol-align-column": {
           "description": "Align ordered list text to this column, measured from the start of the\nmarker (default: 0 = off; valid values are 3-6, with 4 the usual choice).\nNarrower markers are padded up to the column; markers too wide for it\noverflow with one space rather than pushing the rest of the list over.\nSee docs/md030.md.",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 0
+          "default": 0,
+          "minimum": 0
         },
         "ol_align_column": {
           "description": "Align ordered list text to this column, measured from the start of the\nmarker (default: 0 = off; valid values are 3-6, with 4 the usual choice).\nNarrower markers are padded up to the column; markers too wide for it\noverflow with one space rather than pushing the rest of the list over.\nSee docs/md030.md.",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 0
+          "default": 0,
+          "minimum": 0
         },
         "ol-multi": {
           "description": "Spaces for multi-line ordered list items (default: 1)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "ol_multi": {
           "description": "Spaces for multi-line ordered list items (default: 1)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "ol-single": {
           "description": "Spaces for single-line ordered list items (default: 1)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "ol_single": {
           "description": "Spaces for single-line ordered list items (default: 1)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "ul-multi": {
           "description": "Spaces for multi-line unordered list items (default: 1)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "ul_multi": {
           "description": "Spaces for multi-line unordered list items (default: 1)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "ul-single": {
           "description": "Spaces for single-line unordered list items (default: 1)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "ul_single": {
           "description": "Spaces for single-line unordered list items (default: 1)",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "severity": {
           "$ref": "#/$defs/Severity"
@@ -2844,6 +2856,7 @@
       "type": "object",
       "properties": {
         "allowed-elements": {
+          "description": "HTML elements allowed to stay in the document, e.g. `[\"details\", \"summary\"]`.\n\nAnything not listed here is reported, unless it is named in `allowed-inside`\nor filtered out by `disallowed`. Use `\"no-markdown-equivalent\"` to allow every\nelement Markdown has no syntax for. Also accepted as `allowed-elements`.",
           "type": "array",
           "items": {
             "type": "string"
@@ -2851,6 +2864,7 @@
           "default": []
         },
         "allowed_elements": {
+          "description": "HTML elements allowed to stay in the document, e.g. `[\"details\", \"summary\"]`.\n\nAnything not listed here is reported, unless it is named in `allowed-inside`\nor filtered out by `disallowed`. Use `\"no-markdown-equivalent\"` to allow every\nelement Markdown has no syntax for. Also accepted as `allowed-elements`.",
           "type": "array",
           "items": {
             "type": "string"
@@ -2968,9 +2982,14 @@
             "p"
           ]
         },
-        "table-allowed-elements": {},
-        "table_allowed_elements": {},
+        "table-allowed-elements": {
+          "description": "HTML elements explicitly permitted inside GFM table cells.\n\nMirrors markdownlint's `table_allowed_elements`. The semantics\ndistinguish three states:\n- `None` (unset): in-table tags fall back to the `allowed` list.\n- `Some(vec![])`: no tags are permitted inside table cells, even\n  ones present in `allowed`.\n- `Some([...])`: only the listed tags are permitted inside table\n  cells; `allowed` is ignored for in-table contexts.\n\nTags outside GFM tables are never affected by this option."
+        },
+        "table_allowed_elements": {
+          "description": "HTML elements explicitly permitted inside GFM table cells.\n\nMirrors markdownlint's `table_allowed_elements`. The semantics\ndistinguish three states:\n- `None` (unset): in-table tags fall back to the `allowed` list.\n- `Some(vec![])`: no tags are permitted inside table cells, even\n  ones present in `allowed`.\n- `Some([...])`: only the listed tags are permitted inside table\n  cells; `allowed` is ignored for in-table contexts.\n\nTags outside GFM tables are never affected by this option."
+        },
         "allowed": {
+          "description": "HTML elements allowed to stay in the document, e.g. `[\"details\", \"summary\"]`.\n\nAnything not listed here is reported, unless it is named in `allowed-inside`\nor filtered out by `disallowed`. Use `\"no-markdown-equivalent\"` to allow every\nelement Markdown has no syntax for. Also accepted as `allowed-elements`.",
           "type": "array",
           "items": {
             "type": "string"
@@ -2985,8 +3004,12 @@
           },
           "default": []
         },
-        "table-allowed": {},
-        "table_allowed": {},
+        "table-allowed": {
+          "description": "HTML elements explicitly permitted inside GFM table cells.\n\nMirrors markdownlint's `table_allowed_elements`. The semantics\ndistinguish three states:\n- `None` (unset): in-table tags fall back to the `allowed` list.\n- `Some(vec![])`: no tags are permitted inside table cells, even\n  ones present in `allowed`.\n- `Some([...])`: only the listed tags are permitted inside table\n  cells; `allowed` is ignored for in-table contexts.\n\nTags outside GFM tables are never affected by this option."
+        },
+        "table_allowed": {
+          "description": "HTML elements explicitly permitted inside GFM table cells.\n\nMirrors markdownlint's `table_allowed_elements`. The semantics\ndistinguish three states:\n- `None` (unset): in-table tags fall back to the `allowed` list.\n- `Some(vec![])`: no tags are permitted inside table cells, even\n  ones present in `allowed`.\n- `Some([...])`: only the listed tags are permitted inside table\n  cells; `allowed` is ignored for in-table contexts.\n\nTags outside GFM tables are never affected by this option."
+        },
         "severity": {
           "$ref": "#/$defs/Severity"
         },
@@ -3039,18 +3062,16 @@
         "heading-level": {
           "description": "Heading level (1-6) to use when auto-fixing.\nDefault: 2 (## Heading)\nInvalid values (0 or >6) produce a config validation error.",
           "type": "integer",
-          "format": "uint8",
+          "default": 2,
           "minimum": 0,
-          "maximum": 255,
-          "default": 2
+          "maximum": 255
         },
         "heading_level": {
           "description": "Heading level (1-6) to use when auto-fixing.\nDefault: 2 (## Heading)\nInvalid values (0 or >6) produce a config validation error.",
           "type": "integer",
-          "format": "uint8",
+          "default": 2,
           "minimum": 0,
-          "maximum": 255,
-          "default": 2
+          "maximum": 255
         },
         "heading-style": {
           "description": "Heading style to use when auto-fixing.\nDefault: \"atx\" (## Heading) One of `atx`.",
@@ -3236,15 +3257,18 @@
           "type": "string",
           "default": "title"
         },
-        "front-matter-title-pattern": {},
-        "front_matter_title_pattern": {},
+        "front-matter-title-pattern": {
+          "description": "Optional regex pattern for front matter title field (default: None)\nIf provided, checks for this pattern in front matter instead of \"title:\""
+        },
+        "front_matter_title_pattern": {
+          "description": "Optional regex pattern for front matter title field (default: None)\nIf provided, checks for this pattern in front matter instead of \"title:\""
+        },
         "level": {
           "description": "The required heading level (default: 1)",
           "type": "integer",
-          "format": "uint8",
+          "default": 1,
           "minimum": 0,
-          "maximum": 255,
-          "default": 1
+          "maximum": 255
         },
         "severity": {
           "$ref": "#/$defs/Severity"
@@ -3304,32 +3328,43 @@
       "type": "object",
       "properties": {
         "code-blocks": {
+          "description": "Check fenced and indented code blocks too. Off by default, because code\noften contains identifiers that intentionally differ from the prose spelling.",
           "type": "boolean",
           "default": false
         },
         "code_blocks": {
+          "description": "Check fenced and indented code blocks too. Off by default, because code\noften contains identifiers that intentionally differ from the prose spelling.",
           "type": "boolean",
           "default": false
         },
         "html-comments": {
+          "description": "Check the text inside HTML comments.",
           "type": "boolean",
           "default": true
         },
         "html_comments": {
+          "description": "Check the text inside HTML comments.",
           "type": "boolean",
           "default": true
         },
         "html-elements": {
+          "description": "Check the text inside HTML elements.",
           "type": "boolean",
           "default": true
         },
         "html_elements": {
+          "description": "Check the text inside HTML elements.",
           "type": "boolean",
           "default": true
         },
-        "ignore-frontmatter-fields": {},
-        "ignore_frontmatter_fields": {},
+        "ignore-frontmatter-fields": {
+          "description": "Top-level frontmatter keys whose values are not checked. Matched\ncase-insensitively. `None` checks every field. A parent key excludes\nits whole subtree."
+        },
+        "ignore_frontmatter_fields": {
+          "description": "Top-level frontmatter keys whose values are not checked. Matched\ncase-insensitively. `None` checks every field. A parent key excludes\nits whole subtree."
+        },
         "names": {
+          "description": "Names with the capitalization they should always have, e.g.\n`[\"JavaScript\", \"GitHub\", \"Node.js\"]`. Every other spelling of the same name\nin the document is reported.",
           "type": "array",
           "items": {
             "type": "string"
@@ -3503,8 +3538,12 @@
           },
           "default": []
         },
-        "ignored-pattern": {},
-        "ignored_pattern": {},
+        "ignored-pattern": {
+          "description": "Optional regex applied to the fragment text (without the leading `#`).\nFragments that match are skipped — useful for runtime-generated anchors\n(e.g., footnote IDs) that aren't visible to the linter."
+        },
+        "ignored_pattern": {
+          "description": "Optional regex applied to the fragment text (without the leading `#`).\nFragments that match are skipped — useful for runtime-generated anchors\n(e.g., footnote IDs) that aren't visible to the linter."
+        },
         "severity": {
           "$ref": "#/$defs/Severity"
         },
@@ -3579,32 +3618,43 @@
       "type": "object",
       "properties": {
         "autolink": {
+          "description": "Allows bare URLs in angle brackets: `<https://example.com>`.",
           "type": "boolean",
           "default": true
         },
         "collapsed": {
+          "description": "Allows collapsed references whose label matches the link text: `[text][]`.",
           "type": "boolean",
           "default": true
         },
         "full": {
+          "description": "Allows full references with a separate definition: `[text][label]`.",
           "type": "boolean",
           "default": true
         },
         "inline": {
+          "description": "Allows direct links and images: `[text](url)` and `![alt](url)`.",
           "type": "boolean",
           "default": true
         },
-        "preferred-style": {},
-        "preferred_style": {},
+        "preferred-style": {
+          "description": "Ordered preference for the auto-fix target style. Accepts a scalar (one\nstyle) or a list (priority order). The default `auto` selects the\nbest-fitting style for the source. See `PreferredStyles` docs for the\nlist semantics, including `auto` as a wildcard fallback entry."
+        },
+        "preferred_style": {
+          "description": "Ordered preference for the auto-fix target style. Accepts a scalar (one\nstyle) or a list (priority order). The default `auto` selects the\nbest-fitting style for the source. See `PreferredStyles` docs for the\nlist semantics, including `auto` as a wildcard fallback entry."
+        },
         "shortcut": {
+          "description": "Allows shortcut references, where the text is the label: `[text]`.",
           "type": "boolean",
           "default": true
         },
         "url-inline": {
+          "description": "Allows the URL as both text and destination: `[https://example.com](https://example.com)`.",
           "type": "boolean",
           "default": true
         },
         "url_inline": {
+          "description": "Allows the URL as both text and destination: `[https://example.com](https://example.com)`.",
           "type": "boolean",
           "default": true
         },
@@ -3622,6 +3672,7 @@
       "type": "object",
       "properties": {
         "style": {
+          "description": "Pipe style every row must use: `consistent` (the most common style in each\ntable), `leading-and-trailing`, `no-leading-or-trailing`, `trailing-only` or\n`leading-only`. Kebab-case and snake_case are both read.",
           "type": "string",
           "default": "consistent"
         },
@@ -3747,30 +3798,26 @@
         "minimum-after": {
           "description": "Minimum number of blank lines after tables",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "minimum_after": {
           "description": "Minimum number of blank lines after tables",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "minimum-before": {
           "description": "Minimum number of blank lines before tables",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "minimum_before": {
           "description": "Minimum number of blank lines before tables",
           "type": "integer",
-          "format": "uint",
-          "minimum": 0,
-          "default": 1
+          "default": 1,
+          "minimum": 0
         },
         "severity": {
           "$ref": "#/$defs/Severity"
@@ -3844,10 +3891,18 @@
           "default": "auto",
           "type": "string"
         },
-        "column-align-body": {},
-        "column_align_body": {},
-        "column-align-header": {},
-        "column_align_header": {},
+        "column-align-body": {
+          "description": "Controls alignment specifically for body rows (non-header, non-delimiter).\n\nWhen set, overrides `column-align` for body rows only.\nIf not set, falls back to `column-align`.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\ncolumn-align-header = \"center\"  # Center header text\ncolumn-align-body = \"left\"      # Left-align body text\n```"
+        },
+        "column_align_body": {
+          "description": "Controls alignment specifically for body rows (non-header, non-delimiter).\n\nWhen set, overrides `column-align` for body rows only.\nIf not set, falls back to `column-align`.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\ncolumn-align-header = \"center\"  # Center header text\ncolumn-align-body = \"left\"      # Left-align body text\n```"
+        },
+        "column-align-header": {
+          "description": "Controls alignment specifically for the header row.\n\nWhen set, overrides `column-align` for the header row only.\nIf not set, falls back to `column-align`.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\ncolumn-align-header = \"center\"  # Center header text\ncolumn-align-body = \"left\"      # Left-align body text\n```"
+        },
+        "column_align_header": {
+          "description": "Controls alignment specifically for the header row.\n\nWhen set, overrides `column-align` for the header row only.\nIf not set, falls back to `column-align`.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\ncolumn-align-header = \"center\"  # Center header text\ncolumn-align-body = \"left\"      # Left-align body text\n```"
+        },
         "enabled": {
           "type": "boolean",
           "description": "Enables or disables this rule."
@@ -3863,28 +3918,31 @@
           "default": false
         },
         "max-width": {
-          "description": "Maximum table width before auto-switching to compact mode.\n\n- `0` (default): Inherit from MD013's `line-length` setting\n- Non-zero: Explicit max width threshold\n\nWhen a table's aligned width would exceed this limit, MD060 automatically\nuses compact formatting instead (minimal padding) to prevent excessively\nlong lines. This matches the behavior of Prettier's table formatting.\n\n# Examples\n\n```toml\n[MD013]\nline-length = 100\n\n[MD060]\nstyle = \"aligned\"\nmax-width = 0  # Uses MD013's line-length (100)\n```\n\n```toml\n[MD060]\nstyle = \"aligned\"\nmax-width = 120  # Explicit threshold, independent of MD013\n```",
+          "description": "Maximum table width before switching to compact mode.\n\n`0` (default) inherits MD013's `line-length`; any other value is an explicit\nthreshold. Tables wider than this are formatted with minimal padding, which\nmatches Prettier's table formatting.",
           "type": [
             "integer",
             "null"
           ],
-          "format": "uint",
-          "minimum": 0,
-          "default": 0
+          "default": 0,
+          "minimum": 0
         },
         "max_width": {
-          "description": "Maximum table width before auto-switching to compact mode.\n\n- `0` (default): Inherit from MD013's `line-length` setting\n- Non-zero: Explicit max width threshold\n\nWhen a table's aligned width would exceed this limit, MD060 automatically\nuses compact formatting instead (minimal padding) to prevent excessively\nlong lines. This matches the behavior of Prettier's table formatting.\n\n# Examples\n\n```toml\n[MD013]\nline-length = 100\n\n[MD060]\nstyle = \"aligned\"\nmax-width = 0  # Uses MD013's line-length (100)\n```\n\n```toml\n[MD060]\nstyle = \"aligned\"\nmax-width = 120  # Explicit threshold, independent of MD013\n```",
+          "description": "Maximum table width before switching to compact mode.\n\n`0` (default) inherits MD013's `line-length`; any other value is an explicit\nthreshold. Tables wider than this are formatted with minimal padding, which\nmatches Prettier's table formatting.",
           "type": [
             "integer",
             "null"
           ],
-          "format": "uint",
-          "minimum": 0,
-          "default": 0
+          "default": 0,
+          "minimum": 0
         },
-        "pad-width": {},
-        "pad_width": {},
+        "pad-width": {
+          "description": "Spaces placed on each side of a cell's content, between the cell and the\ndividing pipe. Configured values must be between 0 and 255.\n\n- Unset (default): each style keeps its own padding — one space for\n  `aligned`, `aligned-no-space` and `compact`, none for `tight`.\n- Set: the value applies to every style, so `pad-width = 0` gives aligned\n  columns with pipes flush against the content, and `pad-width = 2`\n  gives every style two spaces of padding.\n\n`aligned-no-space` keeps its defining trait regardless: its delimiter row\nis never surrounded by padding, and instead carries the padding width in\nextra dashes so the column stays the same width as the content rows.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\npad-width = 0  # |Name |Age|\n```\n\n```toml\n[MD060]\nstyle = \"aligned\"\npad-width = 2  # |  Name  |  Age  |\n```"
+        },
+        "pad_width": {
+          "description": "Spaces placed on each side of a cell's content, between the cell and the\ndividing pipe. Configured values must be between 0 and 255.\n\n- Unset (default): each style keeps its own padding — one space for\n  `aligned`, `aligned-no-space` and `compact`, none for `tight`.\n- Set: the value applies to every style, so `pad-width = 0` gives aligned\n  columns with pipes flush against the content, and `pad-width = 2`\n  gives every style two spaces of padding.\n\n`aligned-no-space` keeps its defining trait regardless: its delimiter row\nis never surrounded by padding, and instead carries the padding width in\nextra dashes so the column stays the same width as the content rows.\n\n# Examples\n\n```toml\n[MD060]\nstyle = \"aligned\"\npad-width = 0  # |Name |Age|\n```\n\n```toml\n[MD060]\nstyle = \"aligned\"\npad-width = 2  # |  Name  |  Age  |\n```"
+        },
         "style": {
+          "description": "Table formatting style to enforce: `aligned` (padded for visual alignment),\n`aligned-no-space` (aligned, delimiter row without spaces around the dashes),\n`compact`, `tight`, or `any` (keep whatever style the table already has).",
           "type": "string",
           "default": "any"
         },
@@ -3898,14 +3956,17 @@
       "type": "object",
       "properties": {
         "case-sensitive": {
+          "description": "Matches terms case-sensitively. Off means `Whitelist` also flags `whitelist`.",
           "type": "boolean",
           "default": true
         },
         "case_sensitive": {
+          "description": "Matches terms case-sensitively. Off means `Whitelist` also flags `whitelist`.",
           "type": "boolean",
           "default": true
         },
         "terms": {
+          "description": "Comma-separated terms or phrases that must not appear in the document.",
           "type": "array",
           "items": {
             "type": "string"
@@ -4027,34 +4088,30 @@
         "max-level": {
           "description": "Maximum heading level to check (1-6)",
           "type": "integer",
-          "format": "uint8",
+          "default": 6,
           "minimum": 0,
-          "maximum": 255,
-          "default": 6
+          "maximum": 255
         },
         "max_level": {
           "description": "Maximum heading level to check (1-6)",
           "type": "integer",
-          "format": "uint8",
+          "default": 6,
           "minimum": 0,
-          "maximum": 255,
-          "default": 6
+          "maximum": 255
         },
         "min-level": {
           "description": "Minimum heading level to check (1-6)",
           "type": "integer",
-          "format": "uint8",
+          "default": 1,
           "minimum": 0,
-          "maximum": 255,
-          "default": 1
+          "maximum": 255
         },
         "min_level": {
           "description": "Minimum heading level to check (1-6)",
           "type": "integer",
-          "format": "uint8",
+          "default": 1,
           "minimum": 0,
-          "maximum": 255,
-          "default": 1
+          "maximum": 255
         },
         "preserve-cased-words": {
           "description": "Preserve existing mixed-case words even if not in ignore_words",
@@ -4214,7 +4271,9 @@
           "type": "boolean",
           "description": "Enables or disables this rule."
         },
-        "key_order": {},
+        "key_order": {
+          "description": "Custom key order. Keys listed here will be sorted in this order.\nKeys not in this list will be sorted alphabetically after the specified keys.\nIf not set, all keys are sorted alphabetically (case-insensitive).\n\nExample: `key_order = [\"title\", \"date\", \"author\", \"tags\"]`"
+        },
         "required_keys": {
           "description": "Keys that must be present in the frontmatter. Each missing key is\nreported, matched case-insensitively against top-level keys (like\n`key_order`). Independent of `key_order`: you can order many keys while\nrequiring only a few. These warnings carry no fix because rumdl cannot\ninvent meaningful values for missing keys.\n\nOnly applies to files that have frontmatter; requiring frontmatter to\nexist at all is out of scope for this rule.\n\nExample: `required_keys = [\"title\", \"date\"]`",
           "type": "array",
@@ -4323,12 +4382,15 @@
       "type": "object",
       "properties": {
         "allow-loose-continuation": {
+          "description": "When true, blank lines around continuation paragraphs within a list item\nare permitted even in tight mode. This allows tight inter-item spacing\nwhile using blank lines to visually separate continuation content.",
           "type": "boolean"
         },
         "allow_loose_continuation": {
+          "description": "When true, blank lines around continuation paragraphs within a list item\nare permitted even in tight mode. This allows tight inter-item spacing\nwhile using blank lines to visually separate continuation content.",
           "type": "boolean"
         },
         "style": {
+          "description": "Style the gaps between consecutive list items must follow: `consistent` keeps\neach list on whichever style it already uses, `loose` requires a blank line\nbetween items and `tight` forbids one. One of `Consistent`, `Loose`, `Tight`.",
           "type": "string"
         },
         "severity": {
@@ -4344,7 +4406,9 @@
       "description": "List continuation content indentation",
       "type": "object",
       "properties": {
-        "indent": {},
+        "indent": {
+          "description": "Fixed continuation indent relative to the list marker, e.g. `4` for\nMkDocs-style documents. When set, it replaces the content-column-derived\nrequirement, except that under a flavor requiring strict list indentation\nit may only raise the 4-space minimum, never lower it. `None` keeps the\ndefault content-column behavior."
+        },
         "style": {
           "description": "How strictly continuation-line indentation is enforced. One of `any`, `aligned`.",
           "default": "any",
@@ -4404,9 +4468,8 @@
           "type": "array",
           "items": {
             "type": "integer",
-            "format": "uint8",
-            "minimum": 0,
-            "maximum": 255
+            "maximum": 255,
+            "minimum": 0
           },
           "default": [
             1,
@@ -4430,10 +4493,18 @@
       "description": "Inline emphasis should not be excessive",
       "type": "object",
       "properties": {
-        "max-consecutive": {},
-        "max_consecutive": {},
-        "max-per-paragraph": {},
-        "max_per_paragraph": {},
+        "max-consecutive": {
+          "description": "Maximum length of a run of adjacent emphasis spans separated only by\nwhitespace and punctuation. A longer run is flagged. Unset disables the\ncheck; `Some(0)` forbids any emphasis (every span is at least a run of one)."
+        },
+        "max_consecutive": {
+          "description": "Maximum length of a run of adjacent emphasis spans separated only by\nwhitespace and punctuation. A longer run is flagged. Unset disables the\ncheck; `Some(0)` forbids any emphasis (every span is at least a run of one)."
+        },
+        "max-per-paragraph": {
+          "description": "Maximum emphasis spans allowed in a single paragraph. A paragraph with\nmore than this many spans is flagged. Unset disables the check; `Some(0)`\nforbids all emphasis in a paragraph."
+        },
+        "max_per_paragraph": {
+          "description": "Maximum emphasis spans allowed in a single paragraph. A paragraph with\nmore than this many spans is flagged. Unset disables the check; `Some(0)`\nforbids all emphasis in a paragraph."
+        },
         "targets": {
           "description": "Which emphasis spans to count. Defaults to `strong` (bold only), the\npattern reported as the primary readability problem. One of `strong`, `emphasis`, `all`.",
           "default": "strong",
@@ -4465,10 +4536,9 @@
         "level": {
           "description": "Minimum heading level (1-6) that must be followed by content. A heading\nwhose level is at least this value is flagged when it is immediately\nfollowed by another heading with no body in between. Default 1 checks\nevery heading; set to 2 to exempt H1 (so `# Title` straight into\n`## Section` is allowed) while still requiring content under H2 and below.",
           "type": "integer",
-          "format": "uint8",
+          "default": 1,
           "minimum": 0,
-          "maximum": 255,
-          "default": 1
+          "maximum": 255
         },
         "severity": {
           "$ref": "#/$defs/Severity"
@@ -4517,11 +4587,8 @@
         "allow": {
           "description": "Codepoint allow-list in `U+XXXX` / `U+XXXXX` / `U+XXXXXX` format.\n\nAny matched invisible character with a codepoint present in this list\nis ignored.",
           "type": "array",
-          "uniqueItems": true,
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1
+            "type": "string"
           },
           "default": []
         },
@@ -4585,11 +4652,8 @@
         "allow": {
           "description": "Unicode characters to allow as-is.\n\nAny look-alike character with a codepoint present in this list\nis ignored by MD088 and not auto-replaced.",
           "type": "array",
-          "uniqueItems": true,
           "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1
+            "type": "string"
           },
           "default": []
         },
@@ -4762,7 +4826,9 @@
       "description": "Table rows should be sorted by a named column",
       "type": "object",
       "properties": {
-        "column": {},
+        "column": {
+          "description": "No implicit first column: enabling the rule alone must not reorder tables."
+        },
         "enabled": {
           "type": "boolean",
           "description": "Enables or disables this rule."

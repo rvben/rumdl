@@ -7,7 +7,6 @@ use std::fmt;
 /// lines required) while still requiring validation for negative inputs during deserialization.
 /// `NonNegativeUsize` captures that intent and guarantees the stored value is never negative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, schemars::JsonSchema)]
-#[schemars(transparent)]
 pub struct NonNegativeUsize(usize);
 
 impl NonNegativeUsize {

@@ -25,6 +25,9 @@ pub(super) struct MD088Config {
     /// Any look-alike character with a codepoint present in this list
     /// is ignored by MD088 and not auto-replaced.
     #[serde(default, deserialize_with = "deserialize_allow")]
+    // Same as MD084: the loader reads strings (`U+2019` or the character itself) into a
+    // set, so the element type must not advertise a single-character string.
+    #[schemars(with = "Vec<String>")]
     pub(super) allow: HashSet<char>,
 }
 

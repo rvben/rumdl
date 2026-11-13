@@ -28,6 +28,14 @@
 //!   the loader accepts and `schemars` does not report aliases, so a published
 //!   list would reject input rumdl takes. The spellings move into the
 //!   description, where an editor still shows them.
+//! * Options the registry deliberately leaves untyped (its nullable and
+//!   polymorphic sentinels) keep an empty schema but keep their description: a
+//!   description constrains nothing, and these are the options — `preferred-style`,
+//!   `lines-above` — that need explaining most.
+//! * MD073 is the one rule without a config struct: it builds its section by
+//!   hand, so its options stay typed from the rule's defaults and stay
+//!   undescribed. `test_schema_describes_the_options_it_derives` names it as the
+//!   only allowed gap, so a newly added rule cannot join it silently.
 //! * Not covered: a misspelled *key*. rumdl matches option keys case- and
 //!   separator-insensitively (`RuleRegistry::canonical_config_key`,
 //!   [`super::flavor::normalize_key`]), so the spellings it takes for one key
@@ -70,7 +78,7 @@ use serde_json::{Map, Value, json};
 
 use super::registry::{RULE_ALIAS_MAP, default_registry};
 use super::types::Config;
-use crate::rule_config_serde::{is_nullable_sentinel, is_polymorphic_sentinel};
+use crate::rule_config_serde::is_sentinel;
 
 /// Build the JSON Schema document for `rumdl.toml` / `.rumdl.toml`.
 pub fn config_schema_json() -> Value {
@@ -194,36 +202,33 @@ fn rule_section_definition(
 
     // One schema per option key, reused for the key itself, its other separator and
     // every alias that names it.
-    let schema_for_option = |key: &str| -> Option<Value> {
-        let value = options.get(key)?;
-        if crate::rule_config_serde::is_nullable_sentinel(value)
-            || crate::rule_config_serde::is_polymorphic_sentinel(value)
-        {
+    let typed_option = |key: &str, value: &toml::Value| -> Value {
+        let derived = derived_properties.and_then(|properties| properties.get(key));
+
+        if is_sentinel(value) {
             // The registry skips its own type check for this key because no single
             // TOML type describes it. A derived schema would describe the one variant
             // the field's `Deserialize` happens to name first and then reject the
-            // other, so the key keeps an empty schema.
-            return Some(json!({}));
+            // other, so the key keeps an empty schema — but a description constrains
+            // nothing, and these are the options that most need explaining.
+            return match derived.and_then(|derived| derived.get("description")) {
+                Some(description) => json!({ "description": description.clone() }),
+                None => json!({}),
+            };
         }
 
-        Some(
-            derived_properties
-                .and_then(|properties| properties.get(key))
-                .map_or_else(
-                    || option_schema(value),
-                    |derived| {
-                        let mut schema = derived.clone();
-                        relax_value_enums(&mut schema);
-                        schema
-                    },
-                ),
-        )
+        match derived {
+            Some(derived) => {
+                let mut schema = derived.clone();
+                relax_value_enums(&mut schema);
+                schema
+            }
+            None => option_schema(value),
+        }
     };
 
-    for key in options.keys() {
-        let Some(schema) = schema_for_option(key) else {
-            continue;
-        };
+    for (key, value) in options {
+        let schema = typed_option(key, value);
         properties.insert(key.clone(), schema.clone());
         // The loader accepts either separator for every option key
         // ([`super::registry::RuleRegistry::canonical_config_key`]), so both
@@ -244,8 +249,8 @@ fn rule_section_definition(
     let mut alias_pairs: Vec<(&String, &String)> = aliases.into_iter().flatten().collect();
     alias_pairs.sort();
     for (alias, canonical) in alias_pairs {
-        if let Some(schema) = schema_for_option(canonical) {
-            properties.insert(alias.clone(), schema);
+        if let Some(value) = options.get(canonical) {
+            properties.insert(alias.clone(), typed_option(canonical, value));
         }
     }
 
@@ -333,16 +338,30 @@ fn relax_value_enums(value: &mut Value) {
         return;
     }
 
-    for key in ["properties"] {
-        if let Some(Value::Object(properties)) = map.get_mut(key) {
-            for property in properties.values_mut() {
-                relax_value_enums(property);
+    for key in [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+    ] {
+        if let Some(Value::Object(map)) = map.get_mut(key) {
+            for nested in map.values_mut() {
+                relax_value_enums(nested);
             }
         }
     }
-    for key in ["items", "additionalProperties"] {
+    for key in ["items", "additionalProperties", "propertyNames", "contains"] {
         if let Some(nested) = map.get_mut(key) {
             relax_value_enums(nested);
+        }
+    }
+    // A list of subschemas, whether alternatives or tuples.
+    for key in ["anyOf", "oneOf", "allOf", "prefixItems"] {
+        if let Some(Value::Array(subschemas)) = map.get_mut(key) {
+            for subschema in subschemas {
+                relax_value_enums(subschema);
+            }
         }
     }
 }
@@ -450,7 +469,7 @@ fn relax_severity(defs: &mut Map<String, Value>) {
 /// default can express, which is exactly when the loader skips the type check
 /// too.
 fn option_schema(value: &toml::Value) -> Value {
-    if is_nullable_sentinel(value) || is_polymorphic_sentinel(value) {
+    if is_sentinel(value) {
         return json!({});
     }
 

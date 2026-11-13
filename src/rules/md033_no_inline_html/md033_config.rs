@@ -149,6 +149,11 @@ pub enum MD033FixMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD033Config {
+    /// HTML elements allowed to stay in the document, e.g. `["details", "summary"]`.
+    ///
+    /// Anything not listed here is reported, unless it is named in `allowed-inside`
+    /// or filtered out by `disallowed`. Use `"no-markdown-equivalent"` to allow every
+    /// element Markdown has no syntax for. Also accepted as `allowed-elements`.
     #[serde(default, rename = "allowed-elements", alias = "allowed_elements", alias = "allowed")]
     pub allowed: Vec<String>,
 

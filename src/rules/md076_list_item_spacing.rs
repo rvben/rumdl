@@ -6,7 +6,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::skip_context::is_table_line;
 
 /// The blank-line style required between consecutive list items.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, schemars::JsonSchema)]
 pub enum ListItemSpacingStyle {
     #[default]
     Consistent,
@@ -14,12 +14,17 @@ pub enum ListItemSpacingStyle {
     Tight,
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, schemars::JsonSchema)]
 pub(super) struct MD076Config {
+    /// Style the gaps between consecutive list items must follow: `consistent` keeps
+    /// each list on whichever style it already uses, `loose` requires a blank line
+    /// between items and `tight` forbids one.
+    #[schemars(rename = "style")]
     pub style: ListItemSpacingStyle,
     /// When true, blank lines around continuation paragraphs within a list item
     /// are permitted even in tight mode. This allows tight inter-item spacing
     /// while using blank lines to visually separate continuation content.
+    #[schemars(rename = "allow-loose-continuation")]
     pub allow_loose_continuation: bool,
 }
 
@@ -685,6 +690,13 @@ impl Rule for MD076ListItemSpacing {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    // This rule reads its options one by one instead of deserializing a `RuleConfig`,
+    // so it names its config struct here to describe the section. Without this the
+    // section would fall back to the types inferred from `default_config_section`.
+    fn config_json_schema(&self) -> Option<(String, serde_json::Value)> {
+        crate::rule_config_serde::config_json_schema_named::<MD076Config>("MD076")
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {

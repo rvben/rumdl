@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD055Config {
+    /// Pipe style every row must use: `consistent` (the most common style in each
+    /// table), `leading-and-trailing`, `no-leading-or-trailing`, `trailing-only` or
+    /// `leading-only`. Kebab-case and snake_case are both read.
     #[serde(
         default = "default_style",
         serialize_with = "serialize_style",

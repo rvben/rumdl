@@ -95,16 +95,22 @@ impl Serialize for PreferredStyles {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD054Config {
+    /// Allows bare URLs in angle brackets: `<https://example.com>`.
     #[serde(default = "default_true")]
     pub autolink: bool,
+    /// Allows collapsed references whose label matches the link text: `[text][]`.
     #[serde(default = "default_true")]
     pub collapsed: bool,
+    /// Allows full references with a separate definition: `[text][label]`.
     #[serde(default = "default_true")]
     pub full: bool,
+    /// Allows direct links and images: `[text](url)` and `![alt](url)`.
     #[serde(default = "default_true")]
     pub inline: bool,
+    /// Allows shortcut references, where the text is the label: `[text]`.
     #[serde(default = "default_true")]
     pub shortcut: bool,
+    /// Allows the URL as both text and destination: `[https://example.com](https://example.com)`.
     #[serde(default = "default_true", rename = "url-inline", alias = "url_inline")]
     pub url_inline: bool,
     /// Ordered preference for the auto-fix target style. Accepts a scalar (one
