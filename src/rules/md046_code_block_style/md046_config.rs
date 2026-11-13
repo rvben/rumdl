@@ -90,3 +90,37 @@ mod tests {
         assert_eq!(config.style, CodeBlockStyle::Consistent);
     }
 }
+
+#[cfg(test)]
+mod schema_spelling_tests {
+    use super::*;
+
+    /// Every spelling the schema prints after "One of" has to deserialize.
+    ///
+    /// The style enum is parsed by this module, not by a serde derive, so the schema
+    /// spells it from the #[schemars(rename)] attributes and can drift from what
+    /// deserialize_style accepts. Parsing the config struct is the check that can
+    /// fail: loading a rumdl.toml cannot, because the loader only warns about a value
+    /// it cannot parse and keeps the rule's default.
+    #[test]
+    fn schema_publishes_spellings_that_deserialize() {
+        let schema = crate::config::schema_gen::config_schema_json();
+        let description = schema["$defs"]["MD046"]["properties"]["style"]["description"]
+            .as_str()
+            .expect("MD046.style describes its spellings");
+        let (_, spellings) = description
+            .rsplit_once("One of ")
+            .expect("MD046.style names its spellings after \"One of\"");
+
+        for spelling in spellings.trim_end_matches('.').split(", ") {
+            let spelling = spelling.trim().trim_matches('\u{60}');
+            let section = format!("style = \"{spelling}\"\n");
+            let parsed = toml::from_str::<MD046Config>(&section);
+            assert!(
+                parsed.is_ok(),
+                "the schema offers style = \"{spelling}\" and MD046Config rejects it: {:?}",
+                parsed.err()
+            );
+        }
+    }
+}

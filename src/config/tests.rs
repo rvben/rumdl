@@ -2402,16 +2402,15 @@ fn test_schema_never_enumerates_option_values() {
 }
 
 #[test]
-fn test_schema_publishes_spellings_the_loader_accepts() {
+fn test_schema_accepts_the_spellings_it_publishes() {
     // The description of an enumerated option is what an editor shows next to the
-    // key, so every spelling after "One of" is a promise. Enums that deserialize
-    // by hand carry no `rename`, and `schemars` then publishes the Rust variant
-    // name — `MD003 style = "AtxClosed"` reads fine in a hover and fails to load.
-    // This walks the promise and feeds each spelling to the real loader.
+    // key, so every spelling after "One of" is a promise the schema has to keep.
+    // What each spelling *deserializes* to is checked where the enums live
+    // (`rules::rule_option_spelling_tests`), because the loader only warns about a
+    // value it cannot parse and keeps the default, which would make a load-based
+    // check here pass regardless.
     let schema = super::schema_gen::config_schema_json();
     let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
-    let temp_dir = tempdir().unwrap();
-    let path = temp_dir.path().join("rumdl.toml");
     let mut checked = 0;
 
     for (rule, definition) in schema["$defs"].as_object().into_iter().flatten() {
@@ -2430,16 +2429,11 @@ fn test_schema_publishes_spellings_the_loader_accepts() {
             };
             for spelling in spellings.trim_end_matches('.').split(", ") {
                 let spelling = spelling.trim().trim_matches('`');
-                let content = format!("[{rule}]\n{key} = \"{spelling}\"\n");
-                fs::write(&path, &content).unwrap();
+                let instance: toml::Value = toml::from_str(&format!("[{rule}]\n{key} = \"{spelling}\"\n"))
+                    .expect("the generated spelling is valid TOML");
 
-                SourcedConfig::load_with_discovery(Some(path.to_str().unwrap()), None, true).unwrap_or_else(|error| {
-                    panic!("the schema offers {rule}.{key} = \"{spelling}\", the loader rejects it: {error}")
-                });
-
-                let parsed: toml::Value = toml::from_str(&content).unwrap();
                 assert!(
-                    validator.is_valid(&serde_json::to_value(parsed).unwrap()),
+                    validator.is_valid(&serde_json::to_value(instance).unwrap()),
                     "the schema offers {rule}.{key} = \"{spelling}\" and then rejects it"
                 );
                 checked += 1;
@@ -2448,7 +2442,7 @@ fn test_schema_publishes_spellings_the_loader_accepts() {
     }
 
     assert!(
-        checked > 40,
+        checked > 100,
         "expected to check the spellings of every enumerated option, checked {checked}"
     );
 }
