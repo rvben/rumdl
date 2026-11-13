@@ -185,7 +185,9 @@ fn extglob_regex_with_suffix(pattern: &str, following: &str) -> Result<String, S
         .replace_all(&expression, |capture: &regex::Captures<'_>| {
             let bytes = capture[0]
                 .as_bytes()
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|byte| u8::from_str_radix(std::str::from_utf8(&byte[2..]).unwrap(), 16).unwrap())
                 .collect::<Vec<_>>();
             std::str::from_utf8(&bytes).map_or_else(|_| capture[0].to_string(), regex::escape)

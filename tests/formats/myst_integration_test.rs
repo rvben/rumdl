@@ -212,9 +212,9 @@ fn test_myst_code_directive_body_stays_in_code_block() {
 fn test_myst_nested_colon_directives() {
     let content = "::::{note}\n:::{warning}\nInner content\n:::\nOuter content\n::::\n";
     let ctx = myst_ctx(content);
-    for i in 0..6 {
-        assert!(ctx.lines[i].in_myst_directive, "line {i} should be in_myst_directive");
-        assert!(!ctx.lines[i].in_code_block, "line {i} should not be in_code_block");
+    for (i, line) in ctx.lines[..6].iter().enumerate() {
+        assert!(line.in_myst_directive, "line {i} should be in_myst_directive");
+        assert!(!line.in_code_block, "line {i} should not be in_code_block");
     }
 }
 

@@ -1951,7 +1951,7 @@ Even more text";
             1,
             "Expected 1 warning for inconsistent indent within parent group, got: {result:?}"
         );
-        assert!(result[0].line == 3);
+        assert_eq!(result[0].line, 3);
         assert!(result[0].message.contains("Expected indentation of 4"));
     }
 

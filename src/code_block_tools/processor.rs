@@ -2076,10 +2076,9 @@ impl<'a> CodeBlockToolProcessor<'a> {
     fn parse_error_line(line: &str) -> Option<(String, DiagnosticSeverity)> {
         let (msg, severity) = if let Some(msg) = line.strip_prefix("Error:") {
             (msg, DiagnosticSeverity::Error)
-        } else if let Some(msg) = line.strip_prefix("Warning:") {
-            (msg, DiagnosticSeverity::Warning)
         } else {
-            return None;
+            let msg = line.strip_prefix("Warning:")?;
+            (msg, DiagnosticSeverity::Warning)
         };
         let msg = msg.trim();
         if msg.is_empty() {

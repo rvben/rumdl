@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn short_delimiter_sequences_preserve_general_parser_facts() {
-        let alphabet = [b'a', b'*', b'_', b'`', b'[', b']', b'(', b')', b' ', b'\n', b'-'];
+        let alphabet = *b"a*_`[]() \n-";
         for length in 1..=5 {
             for mut number in 0..alphabet.len().pow(length) {
                 let mut input = vec![0; length as usize];

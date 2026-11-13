@@ -479,11 +479,7 @@ impl MD063HeadingCapitalization {
         }
 
         // Preserve caret notation for control characters (^A, ^Z, ^@, etc.)
-        if self.is_caret_notation(word) {
-            return true;
-        }
-
-        false
+        self.is_caret_notation(word)
     }
 
     /// Whether `word` is an `ignore-words` entry, case-sensitively. A token is

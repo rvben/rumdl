@@ -46,6 +46,8 @@
 // Style-only: `"".to_string()` vs `String::new()`. Tests favor the former
 // for symmetry with non-empty string literals.
 #![allow(clippy::manual_string_new)]
+// Empty-collection assertions are clearer than typed empty arrays in tests.
+#![cfg_attr(test, allow(clippy::assert_is_empty))]
 
 extern crate alloc;
 

@@ -264,7 +264,7 @@ mod tests {
 
             assert!(profiler.measurements.contains_key("test_section"));
             let (duration, count) = profiler.measurements.get("test_section").unwrap();
-            assert!(*count == 1);
+            assert_eq!(*count, 1);
             assert!(duration.as_millis() >= 10);
         }
     }

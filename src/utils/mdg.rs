@@ -49,7 +49,7 @@ pub fn has_table_indent(line: &str) -> bool {
 
 /// Whether Gherkin finds at least one backtick-wrapped tag on a line.
 ///
-/// This deliberately mirrors the reference `/`(@[^`]+)`/g` scan: surrounding
+/// This deliberately mirrors the reference `` /`(@[^`]+)`/g `` scan: surrounding
 /// prose and trailing comments do not disqualify a tag, and the tag body may
 /// contain whitespace or `#` as long as it reaches a closing backtick.
 pub fn is_tag_line(line: &str) -> bool {

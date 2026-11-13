@@ -494,8 +494,8 @@ impl ContainerLines {
         let end = line_range.end.min(self.is_container_body.len());
         let mut spans = Vec::new();
         let mut span_start = None;
-        for i in start..end {
-            if self.is_container_body[i] {
+        for (i, &is_container_body) in self.is_container_body.iter().enumerate().take(end).skip(start) {
+            if is_container_body {
                 if let Some(from) = span_start.take() {
                     spans.push(from..i);
                 }
@@ -1888,8 +1888,8 @@ mod myst_tests {
     fn test_myst_colon_directive_nested() {
         let content = "::::{note}\n:::{warning}\nInner content\n:::\nOuter content\n::::\n";
         let ctx = myst_ctx(content);
-        for i in 0..6 {
-            assert!(ctx.lines[i].in_myst_directive, "line {i} should be in_myst_directive");
+        for (i, line) in ctx.lines[..6].iter().enumerate() {
+            assert!(line.in_myst_directive, "line {i} should be in_myst_directive");
         }
     }
 
