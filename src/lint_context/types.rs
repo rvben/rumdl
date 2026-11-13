@@ -247,7 +247,7 @@ pub struct CommonMarkItem {
 }
 
 /// Heading style type
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, schemars::JsonSchema)]
 pub enum HeadingStyle {
     /// ATX style heading (# Heading)
     ATX,

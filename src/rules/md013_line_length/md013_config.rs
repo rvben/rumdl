@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::utils::text_reflow::{CjkSoftBreak, LinkTextPunctuation};
 
 /// Reflow mode for MD013
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReflowMode {
     /// Only reflow lines that exceed the line length limit (default behavior)
@@ -29,7 +29,7 @@ pub enum ReflowMode {
 }
 
 /// Length calculation mode for MD013
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum LengthMode {
     /// Count Unicode characters (grapheme clusters)
@@ -46,7 +46,7 @@ pub enum LengthMode {
 }
 
 /// Configuration for MD013 (Line length)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD013Config {
     /// Maximum line length (default: 80, 0 means no limit)
@@ -107,7 +107,7 @@ pub struct MD013Config {
     /// leaves the data unchanged; anything else is only reported. JSON front
     /// matter is not checked. `reflow-mode` does not apply to front matter:
     /// values are always wrapped greedily to `line-length`.
-    #[serde(default, alias = "front_matter")]
+    #[serde(default, rename = "frontmatter", alias = "front-matter", alias = "front_matter")]
     pub front_matter: bool,
 
     /// Check paragraph/text line length (default: true)
@@ -857,5 +857,22 @@ mod tests {
         let config: MD013Config = toml::from_str(r#"cjk-soft-break = "space""#).unwrap();
         assert_eq!(config.cjk_soft_break, CjkSoftBreak::Space);
         assert!(toml::from_str::<MD013Config>(r#"cjk-soft-break = "remove""#).is_err());
+    }
+
+    #[test]
+    fn frontmatter_spellings_round_trip_to_the_canonical_name() {
+        assert!(!MD013Config::default().front_matter);
+        for key in ["frontmatter", "front-matter", "front_matter"] {
+            for enabled in [false, true] {
+                let config: MD013Config = toml::from_str(&format!("{key} = {enabled}")).unwrap();
+                assert_eq!(config.front_matter, enabled, "{key}");
+                let serialized = toml::to_string(&config).unwrap();
+                let table: toml::Table = toml::from_str(&serialized).unwrap();
+                assert_eq!(table["frontmatter"].as_bool(), Some(enabled));
+                assert!(!table.contains_key("front-matter"));
+                assert!(!table.contains_key("front_matter"));
+                assert_eq!(toml::from_str::<MD013Config>(&serialized).unwrap(), config);
+            }
+        }
     }
 }

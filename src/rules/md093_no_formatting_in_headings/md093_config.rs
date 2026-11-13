@@ -12,7 +12,7 @@ fn default_true() -> bool {
 /// only breaks generated artifacts, while emphasis is often an accident of a
 /// name that contains `_` or `*`. A project that wants only one of them
 /// reported turns the other two off.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub(super) struct MD093Config {
     /// Report inline code spans in headings.

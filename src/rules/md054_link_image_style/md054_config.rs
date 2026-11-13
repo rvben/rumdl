@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 ///
 /// `Auto` is a meta-value that expands to a source-aware default ordering. The
 /// six concrete variants are the six MD054 link/image styles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PreferredStyle {
     /// Use the source-aware default candidate ordering. As a list entry, this
@@ -29,7 +29,7 @@ pub enum PreferredStyle {
 /// that is allowed *and* reachable from the source style wins; `Auto` expands
 /// inline to the source-aware default ordering, so `[autolink, auto]` means
 /// "prefer autolink, else fall back to the normal Auto behaviour".
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, schemars::JsonSchema)]
 pub struct PreferredStyles(Vec<PreferredStyle>);
 
 impl PreferredStyles {
@@ -62,7 +62,7 @@ impl Default for PreferredStyles {
 
 impl<'de> Deserialize<'de> for PreferredStyles {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
+        #[derive(Deserialize, schemars::JsonSchema)]
         #[serde(untagged)]
         enum Either {
             Single(PreferredStyle),
@@ -93,18 +93,24 @@ impl Serialize for PreferredStyles {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD054Config {
+    /// Allows bare URLs in angle brackets: `<https://example.com>`.
     #[serde(default = "default_true")]
     pub autolink: bool,
+    /// Allows collapsed references whose label matches the link text: `[text][]`.
     #[serde(default = "default_true")]
     pub collapsed: bool,
+    /// Allows full references with a separate definition: `[text][label]`.
     #[serde(default = "default_true")]
     pub full: bool,
+    /// Allows direct links and images: `[text](url)` and `![alt](url)`.
     #[serde(default = "default_true")]
     pub inline: bool,
+    /// Allows shortcut references, where the text is the label: `[text]`.
     #[serde(default = "default_true")]
     pub shortcut: bool,
+    /// Allows the URL as both text and destination: `[https://example.com](https://example.com)`.
     #[serde(default = "default_true", rename = "url-inline", alias = "url_inline")]
     pub url_inline: bool,
     /// Ordered preference for the auto-fix target style. Accepts a scalar (one

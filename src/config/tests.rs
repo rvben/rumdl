@@ -2230,6 +2230,264 @@ fn test_schema_line_length_alias_matches_loader() {
 }
 
 #[test]
+fn test_schema_accepts_every_rule_default() {
+    use serde_json::json;
+
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+    let registry = super::registry::default_registry();
+
+    // Every default a rule publishes is something a user can write back into a
+    // config file, so every one of them has to validate. This is the widest net
+    // the schema can be checked against without inventing files: 90 sections, and
+    // the derived types are what makes a failure possible in the first place.
+    let mut checked = 0;
+    for (name, options) in &registry.rule_schemas {
+        let mut section = toml::map::Map::new();
+        for (key, value) in options {
+            if crate::rule_config_serde::is_sentinel(value) {
+                continue;
+            }
+            section.insert(key.clone(), value.clone());
+            checked += 1;
+        }
+
+        let document = json!({ name.as_str(): section });
+        assert!(
+            validator.is_valid(&document),
+            "the schema rejects the defaults of {name}: {document}"
+        );
+    }
+
+    assert!(
+        checked > 160,
+        "expected the rule defaults to be exercised, got {checked}"
+    );
+}
+
+#[test]
+fn test_schema_describes_the_options_it_derives() {
+    let schema = super::schema_gen::config_schema_json();
+    let options = &schema["$defs"]["MD013"]["properties"];
+
+    // Taken from the doc comment on `MD013Config::line_length`, which is the point
+    // of Stage 2: the struct that deserializes a section also explains it.
+    let line_length = &options["line-length"];
+    let description = line_length["description"]
+        .as_str()
+        .expect("a derived option carries its field's doc comment");
+    assert!(
+        description.contains("Maximum line length"),
+        "unexpected description: {description}"
+    );
+    // The real default travels with the schema, so an editor can show what the
+    // option does when it is left out.
+    assert_eq!(line_length["default"].as_i64(), Some(80));
+
+    // A key the loader deliberately leaves untyped keeps an empty schema — the
+    // derived one would describe whichever variant its `Deserialize` names first —
+    // but it keeps the description, which constrains nothing.
+    let untyped = &options["code-block-line-length"];
+    assert_eq!(
+        untyped.as_object().map(serde_json::Map::len),
+        Some(1),
+        "an untyped option carries its description and nothing else: {untyped}"
+    );
+    assert!(untyped["description"].as_str().is_some());
+
+    // Coverage guard: the descriptions come from `schemars` derives on the rule
+    // config structs, so a dropped derive silently degrades the schema to types.
+    // `severity` and `enabled` are written by the generator for every rule and are
+    // not options, so only the rule's own keys count here.
+    //
+    // MD073 is the one rule left: it has no config struct (it builds its section by
+    // hand), so its options keep the inferred types. Anything else turning up in
+    // `undescribed` means a derive or a doc comment went missing.
+    let mut undescribed = Vec::new();
+    for definition in schema["$defs"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(name, definition)| name.starts_with("MD").then_some((name, definition)))
+    {
+        let (name, definition) = definition;
+        let missing = definition["properties"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(option, schema)| {
+                !matches!(option.as_str(), "severity" | "enabled") && schema.get("description").is_none()
+            })
+            .count();
+        if missing > 0 {
+            undescribed.push(format!("{name} ({missing})"));
+        }
+    }
+    assert!(
+        undescribed.iter().all(|rule| rule.starts_with("MD073")),
+        "these rules lost the description of an option: {undescribed:?}"
+    );
+}
+
+#[test]
+fn test_schema_accepts_values_the_loader_parses() {
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+    let temp_dir = tempdir().unwrap();
+    let path = temp_dir.path().join("rumdl.toml");
+
+    // A field's Rust type is not always what its `Deserialize` accepts: these two
+    // store `char`s but read `U+XXXX` strings, and dedupe rather than reject. Typing
+    // them from the field (`maxLength: 1`, `uniqueItems`) rejected exactly the
+    // spelling their own doc comment recommends, so the values below are pinned here.
+    for (rule, values) in [
+        ("MD084", r#"["U+200B", "U+1F3FB"]"#),
+        ("MD084", r#"["U+200B", "U+200B"]"#),
+        ("MD088", r#"["U+2019", "’"]"#),
+    ] {
+        let content = format!("[{rule}]\nallow = {values}\n");
+        fs::write(&path, &content).unwrap();
+
+        SourcedConfig::load_with_discovery(Some(path.to_str().unwrap()), None, true)
+            .expect("the loader takes the codepoint spelling");
+
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert!(
+            validator.is_valid(&serde_json::to_value(parsed).unwrap()),
+            "the schema has to accept {rule} allow = {values}"
+        );
+    }
+}
+
+#[test]
+fn test_schema_never_enumerates_option_values() {
+    // `#[serde(alias)]` widens the spellings an enum variant accepts and `schemars`
+    // does not report aliases, so a published `enum` would reject valid config. The
+    // generator rewrites them into a description; this test is what notices when a
+    // new shape (an untagged variant, a nested `$defs`) slips past that rewrite.
+    let schema = super::schema_gen::config_schema_json();
+
+    fn find_enumeration(value: &serde_json::Value, path: &str, found: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for keyword in ["enum", "const"] {
+                    if map.contains_key(keyword) {
+                        found.push(format!("{path}/{keyword}"));
+                    }
+                }
+                for (key, nested) in map {
+                    find_enumeration(nested, &format!("{path}/{key}"), found);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for (index, nested) in items.iter().enumerate() {
+                    find_enumeration(nested, &format!("{path}/{index}"), found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (name, definition) in schema["$defs"].as_object().into_iter().flatten() {
+        if !name.starts_with("MD") {
+            continue;
+        }
+        let mut found = Vec::new();
+        find_enumeration(definition, name, &mut found);
+        assert!(
+            found.is_empty(),
+            "option values are described, not enumerated: {found:?}"
+        );
+    }
+}
+
+#[test]
+fn test_schema_accepts_the_spellings_it_publishes() {
+    // The description of an enumerated option is what an editor shows next to the
+    // key, so every spelling after "One of" is a promise the schema has to keep.
+    // What each spelling *deserializes* to is checked where the enums live
+    // (`rules::rule_option_spelling_tests`), because the loader only warns about a
+    // value it cannot parse and keeps the default, which would make a load-based
+    // check here pass regardless.
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+    let mut checked = 0;
+    let mut enumerated = 0;
+
+    for (rule, definition) in schema["$defs"].as_object().into_iter().flatten() {
+        if !rule.starts_with("MD") {
+            continue;
+        }
+        let Some(properties) = definition["properties"].as_object() else {
+            continue;
+        };
+        for (key, option) in properties {
+            let Some(description) = option["description"].as_str() else {
+                continue;
+            };
+            if !description.contains("One of ") {
+                continue;
+            }
+            enumerated += 1;
+            for spelling in super::schema_gen::published_spellings(rule, key) {
+                let instance: toml::Value = toml::from_str(&format!("[{rule}]\n{key} = \"{spelling}\"\n"))
+                    .expect("the generated spelling is valid TOML");
+
+                assert!(
+                    validator.is_valid(&serde_json::to_value(instance).unwrap()),
+                    "the schema offers {rule}.{key} = \"{spelling}\" and then rejects it"
+                );
+                checked += 1;
+            }
+        }
+    }
+
+    assert!(
+        enumerated >= 40,
+        "expected to find the enumerated options, found {enumerated}"
+    );
+    assert!(
+        checked > 100,
+        "expected to check the spellings of every enumerated option, checked {checked}"
+    );
+}
+
+#[test]
+fn test_schema_accepts_enum_aliases_rumdl_accepts() {
+    let schema = super::schema_gen::config_schema_json();
+    let validator = jsonschema::validator_for(&schema).expect("generated schema is itself valid");
+    let temp_dir = tempdir().unwrap();
+    let path = temp_dir.path().join("rumdl.toml");
+
+    // `#[serde(alias)]` on an enum variant widens what the loader takes and
+    // `schemars` does not report aliases, which is why option values are
+    // described rather than enumerated. Each pair below is a spelling the loader
+    // accepts and the schema therefore has to accept too.
+    for (key, value) in [
+        ("reflow-mode", "sentence_per_line"),
+        ("reflow-mode", "semantic_line_breaks"),
+        ("length-mode", "characters"),
+        ("length-mode", "display"),
+    ] {
+        let content = format!("[MD013]\n{key} = \"{value}\"\n");
+        fs::write(&path, &content).unwrap();
+
+        let sourced = SourcedConfig::load_with_discovery(Some(path.to_str().unwrap()), None, true)
+            .expect("the loader takes the alias");
+        assert!(
+            sourced.rules["MD013"].values.contains_key(key),
+            "the loader kept {key} = {value}"
+        );
+
+        let parsed: toml::Value = toml::from_str(&content).unwrap();
+        assert!(
+            validator.is_valid(&serde_json::to_value(parsed).unwrap()),
+            "the schema has to accept {key} = {value} as well"
+        );
+    }
+}
+
+#[test]
 fn test_schema_types_the_options_it_can_derive() {
     use serde_json::json;
 

@@ -94,6 +94,7 @@ The extension will automatically detect and use your project's `.rumdl.toml` con
 If you get a "VS Code not found" error, make sure:
 
 1. VS Code is installed
+
 2. The `code` command is available in your terminal:
 
     ```bash

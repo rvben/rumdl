@@ -1,17 +1,24 @@
 use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD044Config {
+    /// Names with the capitalization they should always have, e.g.
+    /// `["JavaScript", "GitHub", "Node.js"]`. Every other spelling of the same name
+    /// in the document is reported.
     #[serde(default)]
     pub names: Vec<String>,
 
+    /// Check fenced and indented code blocks too. Off by default, because code
+    /// often contains identifiers that intentionally differ from the prose spelling.
     #[serde(default = "default_code_blocks", rename = "code-blocks", alias = "code_blocks")]
     pub code_blocks: bool,
 
+    /// Check the text inside HTML elements.
     #[serde(default = "default_html_elements", rename = "html-elements", alias = "html_elements")]
     pub html_elements: bool,
 
+    /// Check the text inside HTML comments.
     #[serde(default = "default_html_comments", rename = "html-comments", alias = "html_comments")]
     pub html_comments: bool,
 

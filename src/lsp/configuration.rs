@@ -117,7 +117,7 @@ pub(super) fn apply_rule_config(config: &mut Config, rule_name: &str, rule_confi
             }
 
             if let Some(toml_value) = json_to_toml(value) {
-                rule_entry.values.insert(config_key, toml_value);
+                rule_entry.set_option(&rule_key, &config_key, toml_value);
             }
         }
     }
@@ -148,7 +148,7 @@ pub(super) fn apply_rule_config_if_absent(config: &mut Config, rule_name: &str, 
             }
 
             if !has_existing_values && let Some(toml_value) = json_to_toml(value) {
-                rule_entry.values.insert(config_key, toml_value);
+                rule_entry.set_option(&rule_key, &config_key, toml_value);
             }
         }
     }
@@ -710,4 +710,29 @@ fn with_editorconfig(config: Config, sourced: Option<&SourcedConfig<ConfigValida
     let mut sourced = sourced.clone();
     editorconfig::apply(&mut sourced, &resolution.settings, resolution.origin.as_deref());
     sourced.into()
+}
+
+#[cfg(test)]
+mod frontmatter_alias_tests {
+    use super::*;
+    use crate::rules::md013_line_length::MD013Config;
+
+    #[test]
+    fn editor_frontmatter_settings_replace_equivalent_file_options() {
+        for file_key in ["frontmatter", "front-matter", "front_matter", "Front-Matter"] {
+            for editor_key in ["frontmatter", "front-matter", "front_matter", "frontMatter"] {
+                for enabled in [false, true] {
+                    let mut config = Config::default();
+                    let rule = config.rules.entry("MD013".into()).or_default();
+                    rule.values.insert(file_key.into(), toml::Value::Boolean(!enabled));
+                    rule.values.insert("line-length".into(), toml::Value::Integer(40));
+                    apply_rule_config(&mut config, "MD013", &serde_json::json!({editor_key: enabled}));
+                    let actual: MD013Config = crate::rule_config_serde::load_rule_config(&config);
+                    assert_eq!(actual.front_matter, enabled, "{file_key} -> {editor_key}");
+                    assert_eq!(actual.line_length.get(), 40);
+                    assert_eq!(config.rules["MD013"].values.len(), 2);
+                }
+            }
+        }
+    }
 }

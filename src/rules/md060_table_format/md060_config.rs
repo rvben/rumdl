@@ -3,16 +3,20 @@ use crate::types::LineLength;
 use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
 /// Controls how cell text is aligned within padded columns.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, schemars::JsonSchema)]
 pub enum ColumnAlign {
     /// Use alignment indicators from delimiter row (`:---`, `:---:`, `---:`)
     #[default]
+    #[schemars(rename = "auto")]
     Auto,
     /// Force all columns to left-align text
+    #[schemars(rename = "left")]
     Left,
     /// Force all columns to center text
+    #[schemars(rename = "center")]
     Center,
     /// Force all columns to right-align text
+    #[schemars(rename = "right")]
     Right,
 }
 
@@ -48,11 +52,14 @@ impl<'de> Deserialize<'de> for ColumnAlign {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD060Config {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 
+    /// Table formatting style to enforce: `aligned` (padded for visual alignment),
+    /// `aligned-no-space` (aligned, delimiter row without spaces around the dashes),
+    /// `compact`, `tight`, or `any` (keep whatever style the table already has).
     #[serde(
         default = "default_style",
         serialize_with = "serialize_style",
@@ -60,31 +67,11 @@ pub struct MD060Config {
     )]
     pub style: String,
 
-    /// Maximum table width before auto-switching to compact mode.
+    /// Maximum table width before switching to compact mode.
     ///
-    /// - `0` (default): Inherit from MD013's `line-length` setting
-    /// - Non-zero: Explicit max width threshold
-    ///
-    /// When a table's aligned width would exceed this limit, MD060 automatically
-    /// uses compact formatting instead (minimal padding) to prevent excessively
-    /// long lines. This matches the behavior of Prettier's table formatting.
-    ///
-    /// # Examples
-    ///
-    /// ```toml
-    /// [MD013]
-    /// line-length = 100
-    ///
-    /// [MD060]
-    /// style = "aligned"
-    /// max-width = 0  # Uses MD013's line-length (100)
-    /// ```
-    ///
-    /// ```toml
-    /// [MD060]
-    /// style = "aligned"
-    /// max-width = 120  # Explicit threshold, independent of MD013
-    /// ```
+    /// `0` (default) inherits MD013's `line-length`; any other value is an explicit
+    /// threshold. Tables wider than this are formatted with minimal padding, which
+    /// matches Prettier's table formatting.
     #[serde(default = "default_max_width", rename = "max-width")]
     pub max_width: LineLength,
 

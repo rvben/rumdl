@@ -256,11 +256,7 @@ impl MD052ReferenceLinkImages {
             "object Object",
         ];
 
-        if common_non_refs.contains(&text) {
-            return true;
-        }
-
-        false
+        common_non_refs.contains(&text)
     }
 
     /// Check if a byte position is within an HTML tag. O(log n) via binary search.

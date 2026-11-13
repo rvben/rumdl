@@ -2,16 +2,20 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 /// Capitalization style for headings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, schemars::JsonSchema)]
 pub enum HeadingCapStyle {
     /// Title Case - capitalize major words (default)
     #[default]
+    #[schemars(rename = "title-case")]
     TitleCase,
     /// Sentence case - only first word capitalized
+    #[schemars(rename = "sentence-case")]
     SentenceCase,
     /// ALL CAPS - all letters uppercase
+    #[schemars(rename = "all-caps")]
     AllCaps,
     /// Infer a supported style independently for each document.
+    #[schemars(rename = "consistent")]
     Consistent,
 }
 
@@ -48,7 +52,7 @@ impl<'de> Deserialize<'de> for HeadingCapStyle {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD063Config {
     /// Whether this rule is enabled (default: false - opt-in rule)
     #[serde(default)]

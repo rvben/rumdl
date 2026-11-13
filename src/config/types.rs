@@ -24,6 +24,20 @@ pub struct RuleConfig {
     pub values: BTreeMap<String, toml::Value>,
 }
 
+impl RuleConfig {
+    /// Set an option, replacing any equivalent spelling already configured.
+    /// Unknown keys are stored verbatim; callers choose their normalization.
+    pub(crate) fn set_option(&mut self, rule: &str, key: &str, value: toml::Value) {
+        let registry = super::registry::default_registry();
+        let canonical = registry.canonical_config_key(rule, key);
+        if let Some(canonical) = canonical {
+            self.values
+                .retain(|existing, _| registry.canonical_config_key(rule, existing) != Some(canonical));
+        }
+        self.values.insert(canonical.unwrap_or(key).to_string(), value);
+    }
+}
+
 /// Generate a JSON schema for arbitrary configuration values
 fn arbitrary_value_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
@@ -417,12 +431,8 @@ impl Config {
             // Merge JSON values into the rule's config
             if let Some(obj) = json_override.as_object() {
                 for (key, value) in obj {
-                    // Normalize key to kebab-case for consistency
-                    let normalized_key = key.replace('_', "-");
-
-                    // Convert JSON value to TOML value
                     if let Some(toml_value) = json_to_toml(value) {
-                        rule_config.values.insert(normalized_key, toml_value);
+                        rule_config.set_option(rule_name, &key.replace('_', "-"), toml_value);
                     }
                 }
             }
@@ -1242,6 +1252,13 @@ pub fn get_rule_config_value<T: serde::de::DeserializeOwned>(config: &Config, ru
     let norm_rule_name = rule_name.to_ascii_uppercase(); // Use uppercase for lookup
 
     let rule_config = config.rules.get(&norm_rule_name)?;
+
+    if let Some(canonical) = super::registry::default_registry().canonical_config_key(&norm_rule_name, key)
+        && let Some(value) = rule_config.values.get(canonical)
+        && let Ok(result) = T::deserialize(value.clone())
+    {
+        return Some(result);
+    }
 
     // Try multiple key variants to support both underscore and kebab-case formats
     let key_variants = [

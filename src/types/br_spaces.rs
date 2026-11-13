@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 /// value below 2 cannot describe one. Such a value turns the exception off
 /// instead: every trailing space is then reported. This mirrors markdownlint,
 /// where `br_spaces` of 0 or 1 "disallows any trailing spaces".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct BrSpaces(usize);
 

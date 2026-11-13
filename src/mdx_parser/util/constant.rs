@@ -205,7 +205,7 @@ pub const HTML_BLOCK_NAMES: [&str; 62] = [
 ///
 /// [html_flow]: crate::mdx_parser::construct::html_flow
 /// [html_text]: crate::mdx_parser::construct::html_text
-pub const HTML_CDATA_PREFIX: [u8; 6] = [b'C', b'D', b'A', b'T', b'A', b'['];
+pub const HTML_CDATA_PREFIX: [u8; 6] = *b"CDATA[";
 
 /// List of HTML tag names that form the **raw** production of
 /// [HTML (flow)][html_flow].

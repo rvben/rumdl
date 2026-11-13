@@ -2,7 +2,7 @@ use crate::{rule_config_serde::RuleConfig, utils::unicode};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub(super) struct MD084Config {
     /// When enabled, report any invisible character anywhere in the document.
@@ -14,6 +14,11 @@ pub(super) struct MD084Config {
     /// Any matched invisible character with a codepoint present in this list
     /// is ignored.
     #[serde(default, deserialize_with = "deserialize_allow")]
+    // The field holds `char`s but the loader reads them from strings, accepting
+    // `U+XXXX` as well as a single character and ignoring duplicates. The element type
+    // would publish a one-character string that rejects the `U+XXXX` spelling, so the
+    // schema describes what the loader reads: a list of strings.
+    #[schemars(with = "Vec<String>")]
     pub(super) allow: HashSet<char>,
 }
 

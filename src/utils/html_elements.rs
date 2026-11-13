@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(value, "https://еxample.com");
         assert_eq!(&tag[range], value);
         assert!(!is_html_whitespace(&b'\x0b'));
-        for byte in [b' ', b'\t', b'\r', b'\n', b'\x0c'] {
+        for byte in *b" \t\r\n\x0c" {
             assert!(is_html_whitespace(&byte));
         }
     }

@@ -323,7 +323,10 @@ impl MarkdownlintConfig {
                         }
 
                         for (k, v) in table {
-                            let norm_config_key = k; // Already normalized
+                            let norm_config_key = crate::config::default_registry()
+                                .canonical_config_key(&norm_rule_key, &k)
+                                .unwrap_or(&k)
+                                .to_string();
                             rule_config
                                 .values
                                 .entry(norm_config_key.clone())
@@ -478,6 +481,10 @@ impl MarkdownlintConfig {
 
                         for (rk, rv) in table {
                             let norm_rk = crate::config::normalize_key(&rk);
+                            let norm_rk = crate::config::default_registry()
+                                .canonical_config_key(&norm_rule_key, &norm_rk)
+                                .unwrap_or(&norm_rk)
+                                .to_string();
                             let sv = rule_config.values.entry(norm_rk.clone()).or_insert_with(|| {
                                 crate::config::SourcedValue::new(rv.clone(), crate::config::ConfigSource::ProjectConfig)
                             });
@@ -1530,5 +1537,22 @@ MD013:
 
         // Display name is lowercased
         assert_eq!(fragment.rule_display_names.get("MD013").unwrap(), "line-length");
+    }
+
+    #[test]
+    fn frontmatter_import_spellings_use_the_canonical_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".markdownlint.yaml");
+        for key in ["frontmatter", "front-matter", "front_matter", "Front-Matter"] {
+            let input = format!("MD013:\n  {key}: true\n");
+            std::fs::write(&path, input).unwrap();
+            let config = load_markdownlint_config(path.to_str().unwrap()).unwrap();
+            let sourced = config.map_to_sourced_rumdl_config(None);
+            let fragment = config.map_to_sourced_rumdl_config_fragment(None);
+            for values in [&sourced.rules["MD013"].values, &fragment.rules["MD013"].values] {
+                assert_eq!(values.len(), 1, "{key}");
+                assert_eq!(values["frontmatter"].value.as_bool(), Some(true));
+            }
+        }
     }
 }

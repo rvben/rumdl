@@ -2,7 +2,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD035 (Horizontal rule style)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD035Config {
     /// The style for horizontal rules (default: "consistent")

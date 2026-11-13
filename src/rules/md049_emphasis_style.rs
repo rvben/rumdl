@@ -202,10 +202,7 @@ impl Rule for MD049EmphasisStyle {
             }
             // Skip if inside MkDocs markup (Keys, Caret, Mark, icon shortcodes)
             let line_pos = col.saturating_sub(1); // Convert 1-indexed col to 0-indexed position
-            if markup.contains(*line_num - 1, line_pos) {
-                return false;
-            }
-            true
+            !markup.contains(*line_num - 1, line_pos)
         });
 
         let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
@@ -598,7 +595,7 @@ This should be _flagged_ since we're using asterisk style.
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Emphasis should use * instead of _"));
         // Should flag "_flagged_" but not emphasis patterns inside links
-        assert!(result[0].line == 5); // Line with "_flagged_"
+        assert_eq!(result[0].line, 5); // Line with "_flagged_"
     }
 
     #[test]
@@ -614,7 +611,7 @@ This should be _flagged_ since we're using asterisk style.
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Emphasis should use _ instead of *"));
         // Should be the "real emphasis" text on line 1
-        assert!(result[0].line == 1);
+        assert_eq!(result[0].line, 1);
     }
 
     #[test]

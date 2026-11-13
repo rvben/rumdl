@@ -4,7 +4,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD059 (Link text should be descriptive)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD059Config {
     /// List of prohibited link text phrases (case-insensitive)

@@ -2325,9 +2325,9 @@ Real javascript should be flagged."#;
         // Line 3: standalone javascript
         assert_eq!(result.len(), 2, "Expected 2 warnings: 1 in alt text + 1 standalone");
         assert!(result[0].message.contains("'javascript' should be 'JavaScript'"));
-        assert!(result[0].line == 1); // "![javascript logo]"
+        assert_eq!(result[0].line, 1); // "![javascript logo]"
         assert!(result[1].message.contains("'javascript' should be 'JavaScript'"));
-        assert!(result[1].line == 3); // "Real javascript should be flagged."
+        assert_eq!(result[1].line, 3); // "Real javascript should be flagged."
     }
 
     #[test]
@@ -3307,7 +3307,7 @@ Visit [github documentation](https://github.com/docs) for details.
 
     #[test]
     fn test_fallback_delimiter_index_matches_direct_scans() {
-        let alphabet = [b'a', b'\\', b'[', b']', b'(', b')'];
+        let alphabet = *b"a\\[]()";
         for mut value in 0..alphabet.len().pow(6) {
             let mut bytes = [0; 6];
             for byte in &mut bytes {

@@ -67,10 +67,7 @@ pub(super) fn scan_mkdocs_container_code_spans(
                 }
                 let line_text = li.content(content);
                 // Exclude container openers from min_indent calculation
-                if mkdocs_admonitions::is_admonition_start(line_text) || mkdocs_tabs::is_tab_marker(line_text) {
-                    return false;
-                }
-                true
+                !(mkdocs_admonitions::is_admonition_start(line_text) || mkdocs_tabs::is_tab_marker(line_text))
             })
             .map(|li| li.indent)
             .min()

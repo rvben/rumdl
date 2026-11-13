@@ -1056,3 +1056,56 @@ mod filter_rules_alias_tests {
         assert_eq!(alias_names, canonical_names);
     }
 }
+
+#[cfg(test)]
+mod rule_option_spelling_tests {
+    use super::*;
+
+    /// Every spelling the schema prints after "One of" has to parse.
+    ///
+    /// The enums below write `Deserialize` (or `FromStr`) by hand, so `schemars` used
+    /// to publish the Rust variant name: an editor offered `MD003 style = "AtxClosed"`,
+    /// which no config can use. Enums that derive `Serialize`/`Deserialize` are left
+    /// out here — `schemars` reads their spelling from the same attributes serde does.
+    ///
+    /// This parses directly instead of loading a `rumdl.toml`: the loader only warns
+    /// about a value it cannot parse and keeps the rule's default (`rule_config_serde`),
+    /// so a load-based check would pass no matter what the schema said.
+    #[test]
+    fn schema_publishes_spellings_that_parse() {
+        for spelling in crate::config::schema_gen::published_spellings("MD003", "style") {
+            assert!(
+                spelling.parse::<heading_utils::HeadingStyle>().is_ok(),
+                "the schema offers MD003/style = \"{spelling}\", which does not parse"
+            );
+        }
+
+        for spelling in crate::config::schema_gen::published_spellings("MD060", "column-align") {
+            let parsed = <ColumnAlign as serde::Deserialize>::deserialize(toml::Value::String(spelling.clone()));
+            assert!(
+                parsed.is_ok(),
+                "the schema offers MD060/column-align = \"{spelling}\", which does not parse"
+            );
+        }
+
+        for spelling in crate::config::schema_gen::published_spellings("MD063", "style") {
+            let parsed = <md063_heading_capitalization::HeadingCapStyle as serde::Deserialize>::deserialize(
+                toml::Value::String(spelling.clone()),
+            );
+            assert!(
+                parsed.is_ok(),
+                "the schema offers MD063/style = \"{spelling}\", which does not parse"
+            );
+        }
+
+        // The probe has to be able to fail: these are the Rust identifiers the schema
+        // used to publish, and they are exactly what an editor used to suggest.
+        assert!("AtxClosed".parse::<heading_utils::HeadingStyle>().is_err());
+        assert!(
+            <md063_heading_capitalization::HeadingCapStyle as serde::Deserialize>::deserialize(toml::Value::String(
+                "TitleCase".to_string()
+            ))
+            .is_err()
+        );
+    }
+}

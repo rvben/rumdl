@@ -6,7 +6,7 @@ use std::fmt;
 /// Enforces reasonable indentation bounds. While Markdown technically allows any
 /// indentation, values outside 1-8 are either mistakes or impractical. Common values
 /// are 2 (default) and 4.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, schemars::JsonSchema)]
 pub struct IndentSize(u8);
 
 impl IndentSize {

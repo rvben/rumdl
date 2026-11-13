@@ -426,6 +426,8 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          # Keep in sync with rust-toolchain.toml and .mise.toml.
+          toolchain: 1.100.0
           targets: wasm32-unknown-unknown
 
       - name: Install wasm-pack

@@ -3,7 +3,7 @@ use crate::types::IndentSize;
 use serde::{Deserialize, Serialize};
 
 /// Indentation style for unordered lists
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum IndentStyle {
     /// Text-aligned: Nested items align with parent's text content (rumdl default)
@@ -16,11 +16,12 @@ pub enum IndentStyle {
 }
 
 /// Configuration for MD007 (Unordered list indentation)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD007Config {
     /// Indentation size for nested unordered lists (default: 2)
     #[serde(default = "default_indent")]
+    #[schemars(description = "Spaces of indentation per nesting level for nested unordered lists (default: 2).")]
     pub indent: IndentSize,
 
     /// Allow first level lists to start indented (default: false)

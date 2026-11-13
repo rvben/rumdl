@@ -587,6 +587,12 @@ fn apply_rule_table_toml(
         if withheld.contains(&norm_rk) {
             continue;
         }
+        // Resolve aliases before merging layers so a child can override the
+        // same option using a different spelling without creating duplicate fields.
+        let norm_rk = super::registry::default_registry()
+            .canonical_config_key(norm_rule_name, rk)
+            .unwrap_or(&norm_rk)
+            .to_string();
 
         if norm_rk == "severity" {
             if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
@@ -979,6 +985,12 @@ fn apply_rule_table_toml_edit(
         if withheld.contains(&norm_rk) {
             continue;
         }
+        // Resolve aliases before merging layers so a child can override the
+        // same option using a different spelling without creating duplicate fields.
+        let norm_rk = super::registry::default_registry()
+            .canonical_config_key(norm_rule_name, rk)
+            .unwrap_or(&norm_rk)
+            .to_string();
 
         // Special handling for severity - store in rule_entry.severity
         if norm_rk == "severity" {

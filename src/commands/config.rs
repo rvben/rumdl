@@ -186,17 +186,22 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
                 return;
             }
 
+            // Queries accept the same aliases as configuration input.
+            let lookup_field = registry
+                .canonical_config_key(&normalized_rule_name, &normalized_field)
+                .unwrap_or(&normalized_field);
+
             // Try to get the value from the final config first
             let final_value: Option<&toml::Value> = final_config
                 .rules
                 .get(&normalized_rule_name)
-                .and_then(|rule_cfg| rule_cfg.values.get(&normalized_field));
+                .and_then(|rule_cfg| rule_cfg.values.get(lookup_field));
 
             if let Some(value) = final_value {
                 let provenance = sourced
                     .rules
                     .get(&normalized_rule_name)
-                    .and_then(|sc| sc.values.get(&normalized_field))
+                    .and_then(|sc| sc.values.get(lookup_field))
                     .map_or(ConfigSource::Default, |sv| sv.source);
 
                 print_config_value(&normalized_rule_name, &normalized_field, value, provenance);
@@ -275,13 +280,13 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
                 let final_value = final_config
                     .rules
                     .get(&normalized_rule_name)
-                    .and_then(|rule_cfg| rule_cfg.values.get(&normalized_field));
+                    .and_then(|rule_cfg| rule_cfg.values.get(field));
 
                 let (value, source) = if let Some(v) = final_value {
                     let provenance = sourced
                         .rules
                         .get(&normalized_rule_name)
-                        .and_then(|sc| sc.values.get(&normalized_field))
+                        .and_then(|sc| sc.values.get(field))
                         .map_or(rumdl_config::ConfigSource::Default, |sv| sv.source);
                     (v, provenance)
                 } else if let Some(v) = defaults.get(field) {

@@ -16,6 +16,26 @@
 //! * Covered: the value of every documented option is typed, so
 //!   `[MD013] line-length = "eighty"` is caught in the editor instead of at
 //!   load time.
+//! * Covered as well: every option carries the doc comment of its field and the
+//!   default the loader falls back to, because the rule config structs derive
+//!   `schemars::JsonSchema`. The struct that deserializes a section is the one
+//!   that describes it ([`Rule::config_json_schema`](crate::rule::Rule::config_json_schema)),
+//!   so the keys an editor offers and the keys the loader takes cannot drift
+//!   apart. Options are still typed from the rule's own registry entry when a
+//!   struct does not derive the trait.
+//! * Option values that are enums are described, not enumerated
+//!   (`relax_value_enums`): `#[serde(alias)]` on a variant widens the spellings
+//!   the loader accepts and `schemars` does not report aliases, so a published
+//!   list would reject input rumdl takes. The spellings move into the
+//!   description, where an editor still shows them.
+//! * Options the registry deliberately leaves untyped (its nullable and
+//!   polymorphic sentinels) keep an empty schema but keep their description: a
+//!   description constrains nothing, and these are the options — `preferred-style`,
+//!   `lines-above` — that need explaining most.
+//! * MD073 is the one rule without a config struct: it builds its section by
+//!   hand, so its options stay typed from the rule's defaults and stay
+//!   undescribed. `test_schema_describes_the_options_it_derives` names it as the
+//!   only allowed gap, so a newly added rule cannot join it silently.
 //! * Not covered: a misspelled *key*. rumdl matches option keys case- and
 //!   separator-insensitively (`RuleRegistry::canonical_config_key`,
 //!   [`super::flavor::normalize_key`]), so the spellings it takes for one key
@@ -58,7 +78,7 @@ use serde_json::{Map, Value, json};
 
 use super::registry::{RULE_ALIAS_MAP, default_registry};
 use super::types::Config;
-use crate::rule_config_serde::{is_nullable_sentinel, is_polymorphic_sentinel};
+use crate::rule_config_serde::is_sentinel;
 
 /// Build the JSON Schema document for `rumdl.toml` / `.rumdl.toml`.
 pub fn config_schema_json() -> Value {
@@ -151,6 +171,7 @@ fn rule_section_definitions() -> BTreeMap<String, Value> {
         .map(|(name, options)| {
             let definition = rule_section_definition(
                 options,
+                registry.rule_json_schemas.get(name),
                 registry.rule_descriptions.get(name).map(String::as_str),
                 registry.rule_aliases.get(name),
             );
@@ -161,15 +182,53 @@ fn rule_section_definitions() -> BTreeMap<String, Value> {
 
 /// The definition of one rule section: `severity`, `enabled`, and every option
 /// the rule reports, `description` taken from the rule itself.
+///
+/// `derived` is the JSON Schema the rule's config struct produces through
+/// `schemars` (see [`Rule::config_json_schema`](crate::rule::Rule::config_json_schema)).
+/// Where it has an entry for a key, that entry is used: it carries the doc comment
+/// of the field and the variants of any enum behind it, which a value read off a
+/// serialized default cannot express. It never overrides a sentinel key, so the
+/// loader's "recognized but untyped" keys stay untyped in the schema too.
 fn rule_section_definition(
     options: &toml::map::Map<String, toml::Value>,
+    derived: Option<&Value>,
     description: Option<&str>,
     aliases: Option<&HashMap<String, String>>,
 ) -> Value {
     let mut properties = Map::new();
+    let derived_properties = derived
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object);
+
+    // One schema per option key, reused for the key itself, its other separator and
+    // every alias that names it.
+    let typed_option = |key: &str, value: &toml::Value| -> Value {
+        let derived = derived_properties.and_then(|properties| properties.get(key));
+
+        if is_sentinel(value) {
+            // The registry skips its own type check for this key because no single
+            // TOML type describes it. A derived schema would describe the one variant
+            // the field's `Deserialize` happens to name first and then reject the
+            // other, so the key keeps an empty schema — but a description constrains
+            // nothing, and these are the options that most need explaining.
+            return match derived.and_then(|derived| derived.get("description")) {
+                Some(description) => json!({ "description": description.clone() }),
+                None => json!({}),
+            };
+        }
+
+        match derived {
+            Some(derived) => {
+                let mut schema = derived.clone();
+                relax_value_enums(&mut schema);
+                schema
+            }
+            None => option_schema(value),
+        }
+    };
 
     for (key, value) in options {
-        let schema = option_schema(value);
+        let schema = typed_option(key, value);
         properties.insert(key.clone(), schema.clone());
         // The loader accepts either separator for every option key
         // ([`super::registry::RuleRegistry::canonical_config_key`]), so both
@@ -190,8 +249,8 @@ fn rule_section_definition(
     let mut alias_pairs: Vec<(&String, &String)> = aliases.into_iter().flatten().collect();
     alias_pairs.sort();
     for (alias, canonical) in alias_pairs {
-        if let Some(schema) = options.get(canonical).map(option_schema) {
-            properties.insert(alias.clone(), schema);
+        if let Some(value) = options.get(canonical) {
+            properties.insert(alias.clone(), typed_option(canonical, value));
         }
     }
 
@@ -239,6 +298,110 @@ fn rule_section_properties() -> Map<String, Value> {
 
 fn rule_ref(name: &str) -> Value {
     json!({ "$ref": format!("#/$defs/{name}") })
+}
+
+/// Replaces every enumerated set of spellings with the plain JSON type it
+/// constrains, moving the spellings into the description.
+///
+/// `schemars` lists what a variant is *renamed* to, but a `#[serde(alias)]` on the
+/// variant — which the loader honours — widens that set without telling the
+/// schema, so publishing the list would reject configs rumdl accepts. The values
+/// stay readable in the description (an editor shows them on hover) while the type
+/// check keeps working. `$defs/Severity` is widened by [`relax_severity`] for the
+/// same reason: a list of spellings is only as complete as the list.
+///
+/// Recurses into nested objects and arrays, because an option can be an object of
+/// its own (`[MD022]`) and hold enums one level down.
+fn relax_value_enums(value: &mut Value) {
+    let Some(map) = value.as_object_mut() else {
+        if let Some(items) = value.as_array_mut() {
+            for item in items {
+                relax_value_enums(item);
+            }
+        }
+        return;
+    };
+
+    if let Some((kind, spellings)) = enumerated_spellings(map) {
+        map.remove("enum");
+        map.remove("oneOf");
+        map.remove("anyOf");
+        map.remove("const");
+        map.insert("type".to_string(), Value::String(kind));
+        let sentence = format!("One of {spellings}.");
+        let existing = map.get("description").and_then(Value::as_str).map(str::to_string);
+        let description = match existing {
+            Some(description) => format!("{description} {sentence}"),
+            None => sentence,
+        };
+        map.insert("description".to_string(), Value::String(description));
+        return;
+    }
+
+    for key in [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+    ] {
+        if let Some(Value::Object(map)) = map.get_mut(key) {
+            for nested in map.values_mut() {
+                relax_value_enums(nested);
+            }
+        }
+    }
+    for key in ["items", "additionalProperties", "propertyNames", "contains"] {
+        if let Some(nested) = map.get_mut(key) {
+            relax_value_enums(nested);
+        }
+    }
+    // A list of subschemas, whether alternatives or tuples.
+    for key in ["anyOf", "oneOf", "allOf", "prefixItems"] {
+        if let Some(Value::Array(subschemas)) = map.get_mut(key) {
+            for subschema in subschemas {
+                relax_value_enums(subschema);
+            }
+        }
+    }
+}
+
+/// The JSON type an enumerated subschema constrains, plus its spellings rendered
+/// as a comma-separated list. `None` when the subschema is not one.
+fn enumerated_spellings(map: &Map<String, Value>) -> Option<(String, String)> {
+    let values: Vec<&Value> = if let Some(values) = map.get("enum").and_then(Value::as_array) {
+        values.iter().collect()
+    } else {
+        let variants = map.get("oneOf").or_else(|| map.get("anyOf"))?.as_array()?;
+        let mut constants = Vec::with_capacity(variants.len());
+        for variant in variants {
+            constants.push(variant.get("const")?);
+        }
+        constants
+    };
+
+    if values.is_empty() {
+        return None;
+    }
+
+    let kind = match values[0] {
+        Value::String(_) => "string",
+        Value::Number(number) if number.is_i64() || number.is_u64() => "integer",
+        Value::Number(_) => "number",
+        Value::Bool(_) => "boolean",
+        _ => return None,
+    };
+
+    let mut rendered = Vec::with_capacity(values.len());
+    for value in values {
+        let spelling = match value {
+            Value::String(text) => format!("`{text}`"),
+            other => format!("`{other}`"),
+        };
+        rendered.push(spelling);
+    }
+
+    Some((kind.to_string(), rendered.join(", ")))
 }
 
 /// `[rules.MD013]` is accepted as an alias for `[MD013]` (`parsers.rs`), which is
@@ -306,7 +469,7 @@ fn relax_severity(defs: &mut Map<String, Value>) {
 /// default can express, which is exactly when the loader skips the type check
 /// too.
 fn option_schema(value: &toml::Value) -> Value {
-    if is_nullable_sentinel(value) || is_polymorphic_sentinel(value) {
+    if is_sentinel(value) {
         return json!({});
     }
 
@@ -338,4 +501,28 @@ fn array_schema(items: &[toml::Value]) -> Value {
     } else {
         json!({ "type": "array" })
     }
+}
+
+/// The spellings a generated description offers for `rule.key`: the words after
+/// "One of " in, for example, `MD046.style`.
+///
+/// Test-only, and deliberately read back out of the generated schema: the guard tests
+/// assert that every spelling parses, and they have to check the list an editor shows
+/// rather than a list assembled next to it. A description that stops enumerating its
+/// spellings therefore fails here instead of quietly shrinking what is covered.
+#[cfg(test)]
+pub(crate) fn published_spellings(rule: &str, key: &str) -> Vec<String> {
+    let schema = config_schema_json();
+    let description = schema["$defs"][rule]["properties"][key]["description"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{rule}.{key} wants a description naming its spellings"));
+    let (_, spellings) = description
+        .rsplit_once("One of ")
+        .unwrap_or_else(|| panic!("{rule}.{key} wants its spellings after \"One of\""));
+
+    spellings
+        .trim_end_matches('.')
+        .split(", ")
+        .map(|spelling| spelling.trim().trim_matches('\u{60}').to_string())
+        .collect()
 }

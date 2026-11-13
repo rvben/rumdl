@@ -70,7 +70,9 @@ fn parse_documents(input: &[u8]) -> Result<Vec<SuppliedDocument>, String> {
     }
 
     fields
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let path =
                 std::str::from_utf8(pair[0]).map_err(|_| "batch document path is not valid UTF-8".to_string())?;

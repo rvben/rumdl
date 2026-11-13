@@ -3,7 +3,7 @@ use crate::rules::strong_style::StrongStyle;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD050Config {
     #[serde(
         default = "default_style",
@@ -60,5 +60,30 @@ mod tests {
 
         let config: MD050Config = toml::from_str(r#"style = "UNDERSCORE""#).unwrap();
         assert_eq!(config.style, StrongStyle::Underscore);
+    }
+}
+
+#[cfg(test)]
+mod schema_spelling_tests {
+    use super::*;
+
+    /// Every spelling the schema prints after "One of" has to deserialize.
+    ///
+    /// The style enum is parsed by this module rather than by a `serde` derive, so the
+    /// schema spells it from the `#[schemars(rename)]` attributes and can drift from
+    /// what `deserialize_style` accepts. Parsing the config struct is the check that
+    /// can fail: loading a `rumdl.toml` cannot, because the loader only warns about a
+    /// value it cannot parse and keeps the rule's default.
+    #[test]
+    fn schema_publishes_spellings_that_deserialize() {
+        for spelling in crate::config::schema_gen::published_spellings("MD050", "style") {
+            let section = format!("style = \"{spelling}\"\n");
+            let parsed = toml::from_str::<MD050Config>(&section);
+            assert!(
+                parsed.is_ok(),
+                "the schema offers MD050.style = \"{spelling}\" and `MD050Config` rejects it: {:?}",
+                parsed.err()
+            );
+        }
     }
 }

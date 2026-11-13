@@ -46,14 +46,17 @@ pub(crate) fn fence_ambiguity_limit(ctx: &crate::lint_context::LintContext) -> O
 }
 
 /// The style for code fence markers (MD048)
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash, schemars::JsonSchema)]
 pub enum CodeFenceStyle {
     /// Consistent with the first code fence style found
     #[default]
+    #[schemars(rename = "consistent")]
     Consistent,
     /// Backtick style (```)
+    #[schemars(rename = "backtick")]
     Backtick,
     /// Tilde style (~~~)
+    #[schemars(rename = "tilde")]
     Tilde,
 }
 

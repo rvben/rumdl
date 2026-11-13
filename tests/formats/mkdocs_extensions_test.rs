@@ -4733,8 +4733,8 @@ mod admonition_content_broader_rules {
         let content = "# Test\n\n!!! note\n\n    Content here\n    More content\n\n## Next\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         // Lines 4 and 5 (0-indexed) are admonition content
-        for i in 4..6 {
-            let info = &ctx.lines[i];
+        for (offset, info) in ctx.lines[4..6].iter().enumerate() {
+            let i = offset + 4;
             assert!(
                 !info.in_code_block,
                 "Line {} should not be in_code_block (is admonition content): {:?}",
@@ -4903,8 +4903,8 @@ mod admonition_content_broader_rules {
     fn test_content_tab_lines_not_marked_as_code_block() {
         let content = "# Test\n\n=== \"Tab 1\"\n\n    Content here\n    More content\n\n## Next\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        for i in 4..6 {
-            let info = &ctx.lines[i];
+        for (offset, info) in ctx.lines[4..6].iter().enumerate() {
+            let i = offset + 4;
             assert!(
                 !info.in_code_block,
                 "Line {} should not be in_code_block (is tab content): {:?}",

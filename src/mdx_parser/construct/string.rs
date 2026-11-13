@@ -19,7 +19,7 @@ use crate::mdx_parser::subtokenize::Subresult;
 use crate::mdx_parser::tokenizer::{ByteSet, LINE_STOP, Tokenizer, with_bytes};
 
 /// Characters that can start something in string.
-const MARKERS: [u8; 2] = [b'&', b'\\'];
+const MARKERS: [u8; 2] = *b"&\\";
 
 /// Bytes that data stops at.
 const STOP: ByteSet = with_bytes(LINE_STOP, &MARKERS);

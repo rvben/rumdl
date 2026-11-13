@@ -6,7 +6,7 @@ use std::fmt;
 /// Many configuration values allow explicitly specifying `0` to disable a behavior (e.g., no blank
 /// lines required) while still requiring validation for negative inputs during deserialization.
 /// `NonNegativeUsize` captures that intent and guarantees the stored value is never negative.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, schemars::JsonSchema)]
 pub struct NonNegativeUsize(usize);
 
 impl NonNegativeUsize {

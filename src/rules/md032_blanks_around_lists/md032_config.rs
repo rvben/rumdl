@@ -2,7 +2,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD032 (Lists should be surrounded by blank lines)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD032Config {
     /// Allow lazy continuation of list items (default: true)

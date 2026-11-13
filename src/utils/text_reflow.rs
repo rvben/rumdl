@@ -22,7 +22,7 @@ use std::sync::LazyLock;
 use unicode_width::UnicodeWidthStr;
 
 /// How reflow joins a soft line break between CJK characters.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CjkSoftBreak {
     /// Join with a space, as for every other soft break (default).
@@ -35,7 +35,7 @@ pub enum CjkSoftBreak {
 
 /// Whether punctuation at the end of a link label or image alt text may end
 /// the surrounding sentence. The entire Markdown construct remains atomic.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum LinkTextPunctuation {
     /// Only punctuation outside the link or image ends a sentence.
@@ -1180,18 +1180,14 @@ fn sentence_boundary(
     } else if is_closing_quote(next_char) && pos + 2 < chars.len() {
         // Sentence ends with a quote, optionally closing spans around it:
         // 'sentence." ', 'sentence."* ', 'sentence."** '
-        match marker_run_end(chars, pos + 2) {
-            Some(end) => (end, end + 1),
-            None => return None,
-        }
+        let end = marker_run_end(chars, pos + 2)?;
+        (end, end + 1)
     } else if matches!(next_char, '*' | '_' | '~') {
         // Sentence ends inside one or more spans, whose closers form a run of
         // any length and any mix: "sentence.* ", "sentence.** ", "sentence.~ ",
         // "sentence.*** ", "sentence._** ".
-        match marker_run_end(chars, pos + 1) {
-            Some(end) => (end, end + 1),
-            None => return None,
-        }
+        let end = marker_run_end(chars, pos + 1)?;
+        (end, end + 1)
     } else if next_char == '[' {
         // Sentence ends with one or more footnote references glued directly to
         // the punctuation, e.g. "sentence.[^1]" or "sentence.[^1][^2]". A bare
@@ -2730,7 +2726,7 @@ enum Element {
     EmptyReferenceImage(String),
     /// A clickable image badge
     LinkedImage(String),
-    /// Footnote reference [^note]
+    /// Footnote reference `[^note]`
     FootnoteReference(String),
     /// Strikethrough text ~~text~~ or ~text~ (GFM allows one or two tildes)
     Strikethrough {

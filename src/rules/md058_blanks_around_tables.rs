@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// Ensures tables have blank lines before and after them
 ///
 /// Configuration for MD058 rule
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD058Config {
     /// Minimum number of blank lines before tables

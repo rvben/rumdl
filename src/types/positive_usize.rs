@@ -6,7 +6,7 @@ use std::fmt;
 /// Many configuration values must be at least 1 (e.g., indentation sizes, spaces per tab).
 /// This type enforces that constraint at deserialization time, preventing invalid configs
 /// like "0 spaces per tab" or "0 character line length".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, schemars::JsonSchema)]
 pub struct PositiveUsize(usize);
 
 impl PositiveUsize {

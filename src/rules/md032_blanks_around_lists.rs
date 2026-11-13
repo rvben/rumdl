@@ -905,7 +905,7 @@ impl MD032BlanksAroundLists {
     ) -> &'a crate::lint_context::NativeListSpacingPlan {
         // Only default instances enter this per-context plan. Custom configs
         // use check_native/withheld_fixes and cannot read or populate it.
-        debug_assert!(self.config == Default::default());
+        debug_assert_eq!(self.config, Default::default());
         ctx.native_list_spacing_plan(|| {
             let blocks = self.convert_list_blocks(ctx);
             let (mut warnings, separating_from) = self.unguarded_warnings_with_blocks(ctx, &blocks);

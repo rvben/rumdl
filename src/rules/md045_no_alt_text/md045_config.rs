@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// rule. It declares no fields: serde ignores keys a struct does not name, so a
 /// config still carrying the long-removed `placeholder-text` deserializes fine and
 /// gets the usual "Unknown option" warning naming the key that does nothing.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD045Config {}
 
 impl RuleConfig for MD045Config {

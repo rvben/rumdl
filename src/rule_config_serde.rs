@@ -175,6 +175,15 @@ pub fn is_polymorphic_sentinel(value: &toml::Value) -> bool {
     matches!(value, toml::Value::String(s) if s == POLYMORPHIC_SENTINEL)
 }
 
+/// Returns true if the TOML value is any sentinel placeholder.
+///
+/// A sentinel means "no single TOML type describes this key", which is also the answer to
+/// "may the derived schema type this key": it may not, because a derived schema would
+/// describe one variant and reject the others.
+pub fn is_sentinel(value: &toml::Value) -> bool {
+    is_nullable_sentinel(value) || is_polymorphic_sentinel(value)
+}
+
 /// Construct a polymorphic sentinel TOML value. Used by the `RuleRegistry` to overwrite
 /// schema entries for keys returned by `Rule::polymorphic_config_keys()`, so the validator
 /// skips the type check rather than flagging the alternative form as invalid. Rules must
@@ -234,6 +243,108 @@ pub fn config_schema_for<T: RuleConfig>() -> Option<(String, toml::Value)> {
     Some((T::RULE_NAME.to_string(), toml::Value::Table(table)))
 }
 
+/// JSON Schema for a rule config struct, derived from the struct's own serde shape.
+///
+/// Where [`config_schema_for`] reports one sample value per key, this reports the type,
+/// the doc comment and the enum variants the struct actually declares, which is what an
+/// editor needs to complete and explain an option. The struct that deserializes a rule
+/// section is therefore also the one that describes it: there is no second list of option
+/// metadata to keep in sync.
+///
+/// The returned object carries `properties` only. `required` is dropped because rumdl
+/// accepts a section with any subset of its keys; a schema that demanded them would be
+/// stricter than the loader. Nested types are inlined so every `$ref` that reaches the
+/// published schema points into the document's own `$defs`, which this module owns.
+pub fn config_json_schema_for<T: RuleConfig + schemars::JsonSchema>() -> Option<(String, serde_json::Value)> {
+    config_json_schema_named::<T>(T::RULE_NAME)
+}
+
+/// Same as [`config_json_schema_for`], for a config struct that is not a full
+/// [`RuleConfig`].
+///
+/// A handful of rules read their options field by field instead of deserializing a
+/// `RuleConfig`, so their config struct carries the doc comments without implementing the
+/// trait. They name themselves here instead, which keeps one derivation path.
+pub fn config_json_schema_named<T: schemars::JsonSchema>(name: &str) -> Option<(String, serde_json::Value)> {
+    let settings = schemars::generate::SchemaSettings::draft2020_12().with(|settings| {
+        settings.inline_subschemas = true;
+        // The document declares its meta-schema once, at the root.
+        settings.meta_schema = None;
+    });
+
+    let schema = settings.into_generator().into_root_schema_for::<T>();
+    let mut value = serde_json::to_value(schema).ok()?;
+    {
+        let object = value.as_object_mut()?;
+        object.remove("required");
+        object.remove("title");
+        object.get("properties")?;
+    }
+    strip_nonstandard_formats(&mut value);
+
+    Some((name.to_string(), value))
+}
+
+/// Removes `format` values that JSON Schema does not define.
+///
+/// `schemars` writes `format: "uint"` for a `usize` and `format: "uint8"` for a `u8`.
+/// Neither is a JSON Schema format — draft 2020-12 has no unsigned integer formats — and
+/// publishing them once already had to be undone (#368 was "Remove non-standard `uint`
+/// format", because editors reported validation errors). The bound the format stood in
+/// for comes through as `minimum`/`maximum`, so dropping it loses nothing.
+fn strip_nonstandard_formats(value: &mut serde_json::Value) {
+    /// The formats the specification defines, which an editor may act on.
+    const STANDARD_FORMATS: [&str; 26] = [
+        "date-time",
+        "date",
+        "time",
+        "duration",
+        "email",
+        "idn-email",
+        "hostname",
+        "idn-hostname",
+        "ipv4",
+        "ipv6",
+        "uuid",
+        "uri",
+        "uri-reference",
+        "uri-template",
+        "iri",
+        "iri-reference",
+        "json-pointer",
+        "relative-json-pointer",
+        "regex",
+        "int32",
+        "int64",
+        "float",
+        "double",
+        "password",
+        "binary",
+        "byte",
+    ];
+
+    match value {
+        serde_json::Value::Object(map) => {
+            let nonstandard = match map.get("format") {
+                Some(serde_json::Value::String(format)) => !STANDARD_FORMATS.contains(&format.as_str()),
+                _ => false,
+            };
+            if nonstandard {
+                map.remove("format");
+            }
+            for nested in map.values_mut() {
+                strip_nonstandard_formats(nested);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                strip_nonstandard_formats(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Implements `config_schema` for a rule backed by a serde `RuleConfig` struct, so the
 /// set of keys config validation accepts is derived from the same struct `from_config`
 /// deserializes and cannot drift from it. Use inside the rule's `impl Rule` block.
@@ -247,6 +358,10 @@ macro_rules! impl_rule_config_schema {
     ($config_ty:ty) => {
         fn config_schema(&self) -> Option<(String, toml::Value)> {
             $crate::rule_config_serde::config_schema_for::<$config_ty>()
+        }
+
+        fn config_json_schema(&self) -> Option<(String, serde_json::Value)> {
+            $crate::rule_config_serde::config_json_schema_for::<$config_ty>()
         }
     };
 }

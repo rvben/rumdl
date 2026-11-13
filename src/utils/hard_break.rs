@@ -46,8 +46,5 @@ pub(crate) fn br_produces_useful_break(ctx: &LintContext, line_num: usize) -> bo
     let Some(next) = ctx.line_info(next_idx + 1) else {
         return false;
     };
-    if next.is_blank || !next.is_paragraph_context() || next.list_item.is_some() || is_setext_underline(ctx, next_idx) {
-        return false;
-    }
-    true
+    !next.is_blank && next.is_paragraph_context() && next.list_item.is_none() && !is_setext_underline(ctx, next_idx)
 }

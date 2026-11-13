@@ -21,7 +21,7 @@ pub mod python_markdown;
 use serde::{Deserialize, Serialize};
 
 /// Anchor generation style for heading fragments
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[derive(Default)]
 pub enum AnchorStyle {

@@ -12,7 +12,7 @@ use crate::utils::range_utils::calculate_line_range;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD031 rule
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD031Config {
     /// Whether to require blank lines around code blocks in lists

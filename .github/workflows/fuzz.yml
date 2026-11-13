@@ -25,6 +25,8 @@ permissions:
 
 jobs:
   fuzz:
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     timeout-minutes: 90
     name: Fuzz all targets
     runs-on: ubuntu-latest

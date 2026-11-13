@@ -2,7 +2,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 /// Represents the style for ordered lists
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ListStyle {
     One, // Use '1.' for all items
@@ -18,7 +18,7 @@ pub enum ListStyle {
 }
 
 /// Configuration for MD029 (Ordered list item prefix)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD029Config {
     /// Style for ordered list numbering (default: "one-or-ordered" - matches markdownlint)
