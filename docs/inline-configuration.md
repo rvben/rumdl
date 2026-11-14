@@ -348,4 +348,5 @@ configuration (disable rules), not loosen it.
 
 - [Global Settings Reference](global-settings.md) - Configure rules globally
 - [Rules Reference](rules.md) - Complete list of available rules
-- [Configuration Guide](../README.md#configuration) - General configuration documentation
+- [Configuration Files](configuration/index.md) - Create a project config and check which file is active
+- [MD013 Line Length](md013.md) - Configure line-length checks and automatic reflow

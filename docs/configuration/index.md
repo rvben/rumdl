@@ -15,6 +15,31 @@ Looking for something more specific?
 - For per-document overrides via HTML comments, see
   [Inline Configuration](../inline-configuration.md).
 
+## Start with a project config
+
+From your project directory, create a configuration file and check your Markdown:
+
+```bash
+rumdl init
+rumdl check .
+```
+
+For example, set a project-wide line length in `.rumdl.toml`:
+
+```toml
+[MD013]
+line-length = 100
+```
+
+This changes the [MD013 line-length rule](../md013.md); it does not turn on
+automatic line wrapping. See [MD013 automatic fixes](../md013.md#automatic-fixes)
+if you want rumdl to reflow prose.
+
+Use [global settings](../global-settings.md) to select rules or exclude files,
+and [inline comments](../inline-configuration.md#disable-for-next-line) for an
+exception on one line. To try a setting without editing your config file, see
+[CLI overrides](../cli-config-overrides.md).
+
 ## Supported config files
 
 rumdl looks for these files, in this order of precedence:

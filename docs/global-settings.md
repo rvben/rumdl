@@ -1670,8 +1670,9 @@ find . -name "*.md" -o -name "*.markdown" | head -10
 
 ## See Also
 
-- [Configuration Guide](../README.md#configuration) - Basic configuration setup
-- [Rules Reference](rules.md) - Complete list of available rules
-- [CLI Reference](../README.md#command-line-interface) - Command-line options
-- [Rule-specific Configuration](../README.md#configuration-file-example) - Configuring individual rules
+- [Configuration Files](configuration/index.md) - Create a project config and understand discovery
+- [Inline Configuration](inline-configuration.md) - Make an exception for one line, section, or file
+- [MD013 Line Length](md013.md) - Configure line-length checks and automatic reflow
+- [Rules Reference](rules.md) - Find available rules and their configuration options
+- [CLI Reference](usage/cli.md) - Command-line options
 - [Code Block Tools](code-block-tools.md) - External linters/formatters for code blocks
