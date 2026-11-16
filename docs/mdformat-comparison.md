@@ -15,14 +15,14 @@ Both tools format Markdown files, but serve different purposes:
 
 **Key Differences:**
 
-| Aspect          | mdformat                  | rumdl                           |
-| --------------- | ------------------------- | ------------------------------- |
-| Primary purpose | Formatting only           | Linting + formatting            |
-| Language        | Python                    | Rust                            |
-| Performance     | Good                      | Faster (native + caching)       |
-| Linting rules   | ❌                        | ✅ <!-- RULE_COUNT -->90<!-- /RULE_COUNT --> rules                     |
-| Extensibility   | Plugin ecosystem          | Built-in flavors                |
-| CommonMark      | Strict compliance         | Strict compliance               |
+| Aspect          | mdformat          | rumdl                                              |
+| --------------- | ----------------- | -------------------------------------------------- |
+| Primary purpose | Formatting only   | Linting + formatting                               |
+| Language        | Python            | Rust                                               |
+| Performance     | Good              | Faster (native + caching)                          |
+| Linting rules   | ❌                | ✅ <!-- RULE_COUNT -->90<!-- /RULE_COUNT --> rules |
+| Extensibility   | Plugin ecosystem  | Built-in flavors                                   |
+| CommonMark      | Strict compliance | Strict compliance                                  |
 
 ## When to Use rumdl
 
@@ -212,44 +212,44 @@ line-length = 80
 1. **Install rumdl:**
 
     ```bash
-   pip install rumdl
+    pip install rumdl
     ```
 
 2. **Replace format command:**
 
     ```bash
-   # Before
-   mdformat docs/
+    # Before
+    mdformat docs/
 
-   # After
-   rumdl fmt docs/
+    # After
+    rumdl fmt docs/
     ```
 
 3. **Update pre-commit config:**
 
     ```yaml
-   # Before
-   - repo: https://github.com/executablebooks/mdformat
-     rev: 0.7.17
-     hooks:
-       - id: mdformat
+    # Before
+    - repo: https://github.com/executablebooks/mdformat
+      rev: 0.7.17
+      hooks:
+        - id: mdformat
 
-   # After
-   - repo: https://github.com/rvben/rumdl-pre-commit
-     rev: v0.3.4
-     hooks:
-       - id: rumdl
+    # After
+    - repo: https://github.com/rvben/rumdl-pre-commit
+      rev: v0.3.4
+      hooks:
+        - id: rumdl
     ```
 
 4. **Convert configuration:**
 
     ```toml
-   # mdformat .mdformat.toml
-   wrap = 80
+    # mdformat .mdformat.toml
+    wrap = 80
 
-   # rumdl equivalent .rumdl.toml
-   [global]
-   line-length = 80
+    # rumdl equivalent .rumdl.toml
+    [global]
+    line-length = 80
     ```
 
 ## Using Both Tools Together
@@ -300,14 +300,14 @@ style = "atx"
 
 ## Summary
 
-| Capability              | mdformat           | rumdl                  |
-| ----------------------- | ------------------ | ---------------------- |
-| Markdown formatting     | ✅ Primary focus   | ✅ Via `rumdl fmt`     |
-| Markdown linting        | ❌                 | ✅ <!-- RULE_COUNT -->90<!-- /RULE_COUNT --> rules            |
-| Performance             | Good               | Faster (native binary) |
-| Extended syntax         | Plugins            | Built-in flavors       |
-| Editor integration      | Basic              | LSP + VS Code          |
-| Installation complexity | Python + plugins   | Single binary          |
+| Capability              | mdformat         | rumdl                                              |
+| ----------------------- | ---------------- | -------------------------------------------------- |
+| Markdown formatting     | ✅ Primary focus | ✅ Via `rumdl fmt`                                 |
+| Markdown linting        | ❌               | ✅ <!-- RULE_COUNT -->90<!-- /RULE_COUNT --> rules |
+| Performance             | Good             | Faster (native binary)                             |
+| Extended syntax         | Plugins          | Built-in flavors                                   |
+| Editor integration      | Basic            | LSP + VS Code                                      |
+| Installation complexity | Python + plugins | Single binary                                      |
 
 **Bottom line:** If you only need formatting, mdformat works well. If you want linting, better performance, or a single tool for both, rumdl is the better choice.
 

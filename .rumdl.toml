@@ -8,7 +8,7 @@ include = [
 ]
 # Exclude rule documentation files (contain intentional violations as examples)
 exclude = [
-    "docs/md*.md",
+    "docs/md[0-9][0-9][0-9].md",
     "**/flavors/*.md",
     "docs/inline-configuration.md",
     "docs/markdownlint-comparison.md"
