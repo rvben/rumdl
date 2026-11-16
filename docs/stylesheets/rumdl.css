@@ -122,8 +122,34 @@ body[data-md-color-scheme="slate"] :is(
   text-decoration-thickness: 0.08em;
 }
 
-.md-content__inner > :is(p, ul, ol, blockquote) {
-  max-width: 75ch;
+/* Prose measure of about 73 characters per line. Expressed in em rather than
+   ch: Manrope's average glyph is 0.46em wide while its "0" (the ch unit) is
+   0.61em, so 75ch rendered close to 100 characters per line. */
+.md-content__inner > :is(p, ul, ol, blockquote),
+.md-typeset .admonition > :is(p, ul, ol) {
+  max-width: 34em;
+}
+
+/* A note box holding only prose takes the prose measure too, so the capped
+   text does not leave an empty band inside the tinted box. Boxes with code,
+   tables or tabs keep the full column. */
+.md-typeset .admonition:not(:has(pre, table, .tabbed-set)) {
+  box-sizing: content-box;
+  max-width: 34em;
+}
+
+/* Manrope's "liga" feature draws "--" as a single dash glyph, so a CLI flag
+   written in prose (a heading or note title such as "check --fix") rendered
+   as an en dash. Keep kerning, drop the ligatures the theme turns on. */
+aside,
+body,
+input {
+  font-feature-settings: "kern";
+}
+
+/* Avoid a single word stranded on the last line of a paragraph or list item. */
+.md-typeset :is(p, li, blockquote) {
+  text-wrap: pretty;
 }
 
 * {
