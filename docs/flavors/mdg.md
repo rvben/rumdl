@@ -36,7 +36,7 @@ them can name them all, and rumdl matches the colon rather than a keyword
 table. A backtick before the colon disqualifies it: dialect keywords are one or
 two plain words, so such a colon sits inside a code span. `` # See `x: y` Notes ``
 names no structure and is treated as ordinary prose. A later colon belongs to
-the name — `## Scenario: ratio: two to one` splits after `Scenario:` only.
+the name: `## Scenario: ratio: two to one` splits after `Scenario:` only.
 
 ### Tag Line
 
@@ -70,17 +70,17 @@ Two to five whitespace characters, spaces or tabs, followed directly by a pipe:
 ```
 
 A tab counts as one whitespace character, exactly as a space does. Anything
-else in that position — a blockquote marker, a list marker, text — makes the
+else in that position (a blockquote marker, a list marker, text) makes the
 line ordinary Markdown.
 
 ## Supported Patterns
 
 ### Headings
 
-MDG parses ATX headings only — one to six `#` characters followed by a space. A
+MDG parses ATX headings only: one to six `#` characters followed by a space. A
 Setext heading never becomes a Gherkin node, and a closing sequence leaks into
 the node's name: `# Feature: F #` is named `F #`. MD003 therefore steers every
-heading to plain ATX under this flavor, whichever style is configured — the one
+heading to plain ATX under this flavor, whichever style is configured, the one
 spelling a Gherkin structure can carry.
 
 Heading *levels* carry no meaning in the Gherkin syntax tree, so a document can
@@ -97,7 +97,7 @@ explicit configuration.
 
 Because MD026 matches punctuation only at the very end of a heading, dropping
 the colon from the set is complete: no heading whose last character is a colon
-is inspected at all. `## Scenario!:` is left exactly as written — it names no
+is inspected at all. `## Scenario!:` is left exactly as written: it names no
 Gherkin structure, but repairing it is not this rule's business.
 
 Only the ASCII colon leaves the set. A full-width `：` carries no structural
@@ -186,7 +186,7 @@ sits in one. Tab indentation is recognized and normalized the same way.
 Past five whitespace characters no indentation both keeps the rows inside the
 list item and keeps them a table, so MD060 falls back to its ordinary Markdown
 handling there. It also falls back when any line of the table is not a table
-row — rows carrying a blockquote or list marker are ordinary Markdown, and
+row: rows carrying a blockquote or list marker are ordinary Markdown, and
 re-indenting them would corrupt the construct around them.
 
 Because a row is an indent followed *directly* by a pipe, MD055 always uses
@@ -196,7 +196,7 @@ restyling it. MD060 owns the indent's width.
 An indented run that consists entirely of table rows is withheld from MD046's
 indented-code detection, so such a table is never converted into a fence. The
 decision is made per blank-line-delimited run, before runs are joined, and it
-requires every line of the run to be a row — see [Limitations](#limitations).
+requires every line of the run to be a row; see [Limitations](#limitations).
 
 ### Placeholders
 
@@ -248,8 +248,8 @@ All other enabled rules lint the Markdown normally.
 ## Configuration Overrides
 
 Five rules enforce a form this flavor requires over a configured value that
-cannot express it. When the value was set explicitly — a defaulted value is
-never reported — and the override applies, rumdl prints one line on stderr:
+cannot express it. When the value was set explicitly (a defaulted value is
+never reported) and the override applies, rumdl prints one line on stderr:
 
 ```text
 [config warning] MD046: Markdown with Gherkin flavor requires style="fenced" (a Gherkin Doc String is only ever a backtick fence). Overriding style="indented" to style="fenced".
@@ -372,6 +372,6 @@ Use the Markdown with Gherkin flavor when:
 
 ## See Also
 
-- [Flavors Overview](../flavors.md) — compare all flavors
-- [Standard Flavor](standard.md) — the base flavor this one adjusts
+- [Flavors Overview](../flavors.md): compare all flavors
+- [Standard Flavor](standard.md): the base flavor this one adjusts
 - [Markdown with Gherkin specification](https://github.com/cucumber/gherkin/blob/main/MARKDOWN_WITH_GHERKIN.md)

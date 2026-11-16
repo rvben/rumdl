@@ -11,7 +11,7 @@ hide:
 
 <p class="pg-privacy">
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z"/><path d="m9 12 2 2 4-4"/></svg>
-  <span>Your Markdown stays in this browser. It is linted locally, is not uploaded, and a draft is kept only in this tab until it closes. Interaction analytics records named actions only—never your text.</span>
+  <span>Your Markdown stays in this browser. It is linted locally, is not uploaded, and a draft is kept only in this tab until it closes. Interaction analytics records named actions only, never your text.</span>
 </p>
 
 <div id="rumdl-playground">
@@ -773,7 +773,7 @@ function renderWarnings(nextWarnings, documentSnapshot = getContent()) {
       <button type="button" class="pg-warning-main" data-warning-open="${index}">
         <span class="pg-warning-message">${message}</span>
         <span class="pg-location">${line}:${column}</span>
-        <span class="pg-visually-hidden"> — show in editor</span>
+        <span class="pg-visually-hidden">, show in editor</span>
       </button>
       ${hasFix ? `<button type="button" class="pg-warning-fix" data-warning-fix="${index}" aria-label="${escapeHtml(fixLabel)}">Fix</button>` : ''}
     </div>`;

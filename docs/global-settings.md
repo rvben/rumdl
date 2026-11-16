@@ -188,8 +188,8 @@ rumdl uses four settings to control which rules are active. These follow the sam
 | ---------------- | --------------- | ----------- | ----------------------------- |
 | `enable`         | `select`        | `--enable`  | Set the enabled rules         |
 | `disable`        | `ignore`        | `--disable` | Set the disabled rules        |
-| `extend-enable`  | `extend-select` | —           | Add rules to the enabled set  |
-| `extend-disable` | `extend-ignore` | —           | Add rules to the disabled set |
+| `extend-enable`  | `extend-select` | (none)      | Add rules to the enabled set  |
+| `extend-disable` | `extend-ignore` | (none)      | Add rules to the disabled set |
 
 ### How rules are resolved
 
@@ -199,12 +199,12 @@ rumdl uses four settings to control which rules are active. These follow the sam
 
 Key behaviors:
 
-- **`enable` omitted** — all non-opt-in rules are active (the default)
-- **`enable = []`** (empty list) — *no rules are active*; this is an explicit empty allowlist, not the same as omitting `enable`
-- **`enable = ["ALL"]`** — every rule is active, including opt-in rules
-- **`extend-enable = ["ALL"]`** — every rule is active (same effect as `enable = ["ALL"]`)
-- **`disable = ["all"]`** with no `enable` — no rules are active
-- **Disabling wins** — if a rule appears in both an enable list and a disable list, it is disabled
+- **`enable` omitted**: all non-opt-in rules are active (the default)
+- **`enable = []`** (empty list): *no rules are active*; this is an explicit empty allowlist, not the same as omitting `enable`
+- **`enable = ["ALL"]`**: every rule is active, including opt-in rules
+- **`extend-enable = ["ALL"]`**: every rule is active (same effect as `enable = ["ALL"]`)
+- **`disable = ["all"]`** with no `enable`: no rules are active
+- **Disabling wins**: if a rule appears in both an enable list and a disable list, it is disabled
 
 ### Config precedence and merging
 
@@ -218,7 +218,7 @@ When CLI flags overlap with file settings:
 
 ```bash
 # Config file has disable = ["MD013"]
-# CLI replaces it — only MD033 is disabled, MD013 is re-enabled
+# CLI replaces it: only MD033 is disabled, MD013 is re-enabled
 rumdl check --disable MD033 .
 ```
 
@@ -456,7 +456,7 @@ Circular references (A extends B extends A) are detected and produce a clear err
 **Subdirectory override:**
 
 ```toml
-# docs/.rumdl.toml — relaxed rules for documentation
+# docs/.rumdl.toml: relaxed rules for documentation
 extends = "../.rumdl.toml"
 
 [global]
@@ -489,7 +489,7 @@ enable = ["MD001", "MD003", "MD013", "MD022"]
 **Usage Notes**:
 
 - Rule IDs are case-insensitive but conventionally uppercase (e.g., "MD001")
-- `enable = []` (empty list) disables **all** rules — nothing will be linted
+- `enable = []` (empty list) disables **all** rules; nothing will be linted
 - Omitting `enable` entirely uses the default: all non-opt-in rules enabled, `disable` applied normally
 - `enable = ["ALL"]` explicitly enables every rule including [opt-in rules](#opt-in-rules); `disable` still applies on top
 - If `enable` lists specific rules, only those rules run (subject to `disable` and `extend-disable`)
@@ -513,7 +513,7 @@ This is the primary way to activate [opt-in rules](#opt-in-rules)
 (MD060, MD063, MD072, MD073, MD074) without replacing the default rule set.
 
 When CLI `--enable` is used, it replaces the config file's `enable` list entirely.
-`extend-enable` in the config file is always additive —
+`extend-enable` in the config file is always additive;
 see [Config precedence and merging](#config-precedence-and-merging).
 
 ```toml
@@ -524,7 +524,7 @@ extend-enable = ["MD060", "MD063"]
 **Usage Notes**:
 
 - `extend-enable = ["ALL"]` enables every rule including opt-in rules (same as `enable = ["ALL"]`)
-- Can be combined with `enable` — when both are set, `extend-enable` entries are merged into the `enable` allowlist
+- Can be combined with `enable`: when both are set, `extend-enable` entries are merged into the `enable` allowlist
 - Disabling always wins: if a rule appears in both `extend-enable` and `disable`/`extend-disable`, it is disabled
 - Rule IDs are case-insensitive but conventionally uppercase
 
@@ -564,7 +564,7 @@ disable = ["MD013", "MD033", "MD041"]
   - `MD013`: Line length (for projects with longer lines)
   - `MD033`: Inline HTML (for projects that use HTML in Markdown)
   - `MD041`: First line heading (for files that don't start with headings)
-- Disabling always wins over enabling — if a rule appears in both `enable` and `disable`, it is disabled
+- Disabling always wins over enabling: if a rule appears in both `enable` and `disable`, it is disabled
 - CLI `--disable` replaces the config file's `disable` list; use [`extend-disable`](#extend-disable) in the config file for values that shouldn't be overridden by CLI
 
 **Example CLI usage**:
@@ -580,7 +580,7 @@ rumdl check --disable MD013,MD033 .
 **CLI Equivalent**: None (configuration file only)
 
 Adds rules to the disabled set. Always merges additively with `disable`, regardless of source.
-Useful for adding disabled rules that survive CLI `--disable` overrides —
+Useful for adding disabled rules that survive CLI `--disable` overrides;
 see [Config precedence and merging](#config-precedence-and-merging).
 
 ```toml
@@ -994,11 +994,11 @@ flavor = "mkdocs"  # Use MkDocs flavor
 - `"quarto"`: Quarto/RMarkdown for scientific publishing (citations, shortcodes, div blocks)
 - `"obsidian"`: Obsidian notes with callouts, wikilinks, and Dataview syntax
 - `"kramdown"`: Jekyll/kramdown attribute lists and extension blocks
-- `"azure_devops"`: Azure DevOps wikis — treats `:::mermaid` blocks as opaque code fences
+- `"azure_devops"`: Azure DevOps wikis; treats `:::mermaid` blocks as opaque code fences
 - `"myst"`: MyST/Jupyter Book directives, roles, math, comments, targets, and block breaks
 - `"hugo"`: Hugo/Goldmark block attribute lists
-- `"mdg"`: Markdown with Gherkin — steers headings, Doc String fences, and Gherkin tables toward the one spelling Gherkin accepts, and withholds corrections that are not safe
-- `"gh-aw"`: GitHub Agentic Workflows — preserves runtime imports, conditionals, and Markdown-looking message templates (preview)
+- `"mdg"`: Markdown with Gherkin; steers headings, Doc String fences, and Gherkin tables toward the one spelling Gherkin accepts, and withholds corrections that are not safe
+- `"gh-aw"`: GitHub Agentic Workflows; preserves runtime imports, conditionals, and Markdown-looking message templates (preview)
 
 **Aliases**: `"gfm"`, `"commonmark"`, and `"github"` map to `"standard"`; `"qmd"`, `"rmd"`, and `"rmarkdown"` map to `"quarto"`; `"jekyll"` maps to `"kramdown"`; `"azure"` and `"ado"` map to
 `"azure_devops"`; `"mystmd"` maps to `"myst"`; `"goldmark"` maps to `"hugo"`; and `"markdown_with_gherkin"` maps to `"mdg"`
@@ -1352,7 +1352,7 @@ and details.
 
 ### Subdirectory configs are standalone
 
-Subdirectory configs are **independent** by default — they do not inherit from the root config. To inherit settings from a parent config, use [`extends`](#extends):
+Subdirectory configs are **independent** by default: they do not inherit from the root config. To inherit settings from a parent config, use [`extends`](#extends):
 
 ```text
 project/

@@ -12,7 +12,7 @@ The `--config` flag accepts either:
 1. A **path** to a TOML configuration file (`.rumdl.toml`, `rumdl.toml`,
    `pyproject.toml`, …), or
 2. An **inline TOML `KEY = VALUE` snippet** that overrides specific options at
-   the highest precedence — beating values from config files and from other CLI
+   the highest precedence, beating values from config files and from other CLI
    flags such as `--disable` or `--line-length`.
 
 Both forms can be mixed; `--config` may be passed multiple times. At most one
@@ -24,7 +24,7 @@ value may be a file path; the remaining values must be inline TOML.
 # Override a rule option without editing config
 rumdl check --config 'MD013.line-length=120'
 
-# Combine multiple overrides — each --config is independent, not replacement
+# Combine multiple overrides; each --config is independent, not replacement
 rumdl check --config 'MD013.line-length=120' --config 'MD013.reflow=true'
 
 # Override a top-level (global) setting
@@ -37,7 +37,7 @@ rumdl check --config 'global.flavor="mkdocs"'
 rumdl check --config 'disable=["MD013","MD033"]'
 rumdl check --config 'exclude=["**/tmp/*.md"]'
 
-# A file plus inline overrides — inline always wins
+# A file plus inline overrides: inline always wins
 rumdl check --config my-config.toml --config 'MD013.line-length=120'
 
 # Inline overrides remain in effect with --no-config / --isolated
@@ -97,7 +97,7 @@ override the only patterns to match are the ones it named.
 
 ## Precedence
 
-Inline `--config` overrides are applied at `ConfigSource::Cli` precedence — the
+Inline `--config` overrides are applied at `ConfigSource::Cli` precedence, the
 highest. Order from lowest to highest:
 
 1. Built-in defaults
@@ -128,7 +128,7 @@ literal name exists; otherwise it is parsed as inline TOML.
 
 If a `--config` value has `=` and is neither an existing file nor valid TOML,
 clap reports a `ValueValidation` error with the parser's TOML error message and
-a usage tip — no panic, no silent fallback.
+a usage tip, with no panic and no silent fallback.
 
 ## Validation Warnings
 
@@ -176,6 +176,6 @@ edits to `.rumdl.toml` cannot quietly undo what was set on the command line.
 
 ## Related References
 
-- [Configuration File Format](global-settings.md) — full list of global settings.
-- [Inline Configuration](inline-configuration.md) — `<!-- rumdl-disable -->`
+- [Configuration File Format](global-settings.md): full list of global settings.
+- [Inline Configuration](inline-configuration.md): `<!-- rumdl-disable -->`
   directives inside Markdown files (a different feature with a similar name).

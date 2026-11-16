@@ -26,8 +26,8 @@ content type). The closer is a bare `:::`. Up to three leading spaces are
 allowed on both lines; four or more leading spaces disqualify the opener.
 
 **Treated as opaque code blocks**: All content between the opener and closer
-is treated as a code block. Lint rules that inspect prose — MD013 (line
-length), MD034 (bare URLs), link validation, and all similar rules — do not
+is treated as a code block. Lint rules that inspect prose (MD013 for line
+length, MD034 for bare URLs, link validation, and all similar rules) do not
 fire inside colon fences.
 
 **Affected rules**: MD013, MD031, MD034, MD046, MD048, and any rule that
@@ -39,7 +39,7 @@ skips code block content.
 | -------------------------------- | --------------------------------------------------------- |
 | `::: mermaid`                    | Yes                                                       |
 | `:::mermaid`                     | Yes (no space between `:::` and type)                     |
-| `<1–3 spaces>::: mermaid`        | Yes (0–3 leading spaces allowed)                          |
+| `<1-3 spaces>::: mermaid`        | Yes (0-3 leading spaces allowed)                          |
 | `<4 spaces>::: mermaid`          | No (4 spaces = CommonMark indented code block)            |
 | `<tab>::: mermaid`               | No (tab-indented)                                         |
 | `:::` (no type after)            | No (bare `:::` without a type is a closer, not an opener) |
@@ -113,7 +113,7 @@ Or per-file:
 "wiki/**/*.md" = "azure_devops"
 ```
 
-Azure DevOps wiki files use plain `.md` extensions — there is no automatic
+Azure DevOps wiki files use plain `.md` extensions, so there is no automatic
 file-extension detection. Opt in explicitly.
 
 ## CLI Usage
@@ -132,12 +132,12 @@ Use the Azure DevOps flavor when:
 - Your files contain `:::mermaid` or `:::` blocks that are treated as opaque diagrams.
 - You are getting false positives from MD013 or link rules inside diagram blocks.
 
-Do **not** use this flavor for Pandoc, Docusaurus, or VuePress projects — those
+Do **not** use this flavor for Pandoc, Docusaurus, or VuePress projects: those
 platforms use `:::` with different (non-opaque) semantics. Use
 [pandoc](pandoc.md) for Pandoc projects or `standard` for Docusaurus/VuePress.
 
 ## See Also
 
-- [Flavors Overview](../flavors.md) — compare all flavors
-- [Pandoc Flavor](pandoc.md) — Pandoc fenced divs (transparent `:::` blocks)
+- [Flavors Overview](../flavors.md): compare all flavors
+- [Pandoc Flavor](pandoc.md): Pandoc fenced divs (transparent `:::` blocks)
 - [Azure DevOps Markdown documentation](https://learn.microsoft.com/en-us/azure/devops/project/wiki/wiki-markdown-guidance)

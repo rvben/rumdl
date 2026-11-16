@@ -1,7 +1,7 @@
 # Link and Nav Validation
 
 rumdl provides offline-only validation for documentation links and MkDocs navigation
-entries. All validation is local filesystem only — rumdl never makes network requests.
+entries. All validation is local filesystem only: rumdl never makes network requests.
 
 This guide covers the three rules that work together:
 
@@ -48,7 +48,7 @@ exist. This catches broken links from typos, moved files, or deleted documents.
 
 - External URLs (`http://`, `https://`)
 - Special schemes (`mailto:`, `tel:`, `javascript:`)
-- Same-document anchors (`#section`) — handled by MD051
+- Same-document anchors (`#section`), handled by MD051
 
 ### Absolute links (MD057)
 
@@ -206,14 +206,14 @@ MD057 since the targets don't exist during linting.
 
 Options for handling this:
 
-**Per-file ignores** — disable MD057 for files that link to generated content:
+**Per-file ignores:** disable MD057 for files that link to generated content:
 
 ```toml
 [per-file-ignores]
 "docs/reference/**/*.md" = ["MD057"]
 ```
 
-**Inline suppression** — disable for a section of links:
+**Inline suppression:** disable for a section of links:
 
 ```markdown
 <!-- rumdl-disable MD057 -->
@@ -222,7 +222,7 @@ Options for handling this:
 <!-- rumdl-enable MD057 -->
 ```
 
-**File-level suppression** — for files that primarily link to generated content:
+**File-level suppression:** for files that primarily link to generated content:
 
 ```markdown
 <!-- rumdl-disable-file MD057 -->
@@ -260,9 +260,9 @@ absolute-links = "warn"
 
 ## Related Documentation
 
-- [MD057 — Relative link validation](md057.md)
-- [MD051 — Anchor link validation](md051.md)
-- [MD074 — MkDocs nav validation](md074.md)
-- [Inline Configuration](inline-configuration.md) — Suppress rules per-line or per-file
-- [Global Settings](global-settings.md) — Project-wide configuration
-- [MkDocs Flavor](flavors/mkdocs.md) — MkDocs-specific features
+- [MD057: Relative link validation](md057.md)
+- [MD051: Anchor link validation](md051.md)
+- [MD074: MkDocs nav validation](md074.md)
+- [Inline Configuration](inline-configuration.md): suppress rules per-line or per-file
+- [Global Settings](global-settings.md): project-wide configuration
+- [MkDocs Flavor](flavors/mkdocs.md): MkDocs-specific features

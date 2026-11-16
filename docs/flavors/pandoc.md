@@ -1,6 +1,6 @@
 # Pandoc Flavor
 
-For projects using [Pandoc](https://pandoc.org/) Markdown — academic
+For projects using [Pandoc](https://pandoc.org/) Markdown: academic
 papers, books, and reports converted via Pandoc.
 
 The Pandoc flavor is the foundation that the [Quarto](quarto.md) flavor
@@ -284,12 +284,12 @@ under Pandoc and Standard:
   **pipe-table captions** (`: caption`): MD055, MD056, MD058, MD060,
   MD075 iterate the table-block scanner, which only recognizes pipe
   tables with `|`-bounded delimiter rows. The other table shapes never
-  enter the iteration source — under any flavor.
+  enter the iteration source, under any flavor.
 
 ## Limitations
 
 - Smart-typography linting (smart quotes, em-dashes, ellipses, emoji
-  shortcodes, `\` hard line breaks) is out of scope — these are rendering
+  shortcodes, `\` hard line breaks) is out of scope: these are rendering
   features that do not trigger rumdl rules.
 - `[TOC]` placeholder syntax is **not** Pandoc syntax (Pandoc generates
   table-of-contents via the `--toc` flag) and is not recognized.
@@ -311,7 +311,7 @@ Or per-file:
 ```
 
 Pandoc files use `.md`, so there is no automatic file-extension
-detection — opt in explicitly.
+detection; opt in explicitly.
 
 ## When to Use
 
@@ -323,11 +323,11 @@ Use the Pandoc flavor when:
 - You write academic papers, books, or reports in Markdown.
 
 If you use the Quarto toolchain, use the [Quarto flavor](quarto.md)
-instead — it includes everything Pandoc does plus Quarto-specific syntax
+instead: it includes everything Pandoc does plus Quarto-specific syntax
 (executable code blocks, shortcodes, `#|` cell options).
 
 ## See Also
 
-- [Flavors Overview](../flavors.md) — compare all flavors
-- [Quarto Flavor](quarto.md) — Pandoc + Quarto extensions
+- [Flavors Overview](../flavors.md): compare all flavors
+- [Quarto Flavor](quarto.md): Pandoc + Quarto extensions
 - [Pandoc Documentation](https://pandoc.org/MANUAL.html#pandocs-markdown)

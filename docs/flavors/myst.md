@@ -61,7 +61,7 @@ This is also a note directive.
 For **content-bearing directives** (note, warning, tip, hint, important,
 caution, danger, admonition, seealso, topic, sidebar, margin, exercise,
 solution, dropdown, tab-item, grid, card, figure), the body is linted as
-Markdown — `in_code_block` is cleared.
+Markdown: `in_code_block` is cleared.
 
 For **code-bearing directives** (code-cell, code-block, raw, eval-rst,
 literalinclude), the body remains treated as a code block and is not linted.
@@ -200,12 +200,12 @@ Use the MyST flavor when:
 - You use role syntax like `{ref}`label`` or `{math}`expression``.
 - You are getting false positives from MD040 (missing language) on directive fences.
 
-Do **not** use this flavor for Pandoc projects — Pandoc uses `:::` with
+Do **not** use this flavor for Pandoc projects: Pandoc uses `:::` with
 different semantics (fenced divs without `{name}`). Use
 [pandoc](pandoc.md) for Pandoc projects.
 
 ## See Also
 
-- [Flavors Overview](../flavors.md) — compare all flavors
-- [Pandoc Flavor](pandoc.md) — Pandoc fenced divs (transparent `:::` blocks)
+- [Flavors Overview](../flavors.md): compare all flavors
+- [Pandoc Flavor](pandoc.md): Pandoc fenced divs (transparent `:::` blocks)
 - [MyST Markdown documentation](https://mystmd.org/guide)

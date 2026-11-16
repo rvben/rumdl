@@ -36,7 +36,7 @@ hide:
 <div class="rm-terminal-shot__window">
 <div class="rm-terminal-shot__bar" aria-hidden="true">
 <span class="rm-terminal-shot__controls"><i></i><i></i><i></i></span>
-<strong>rumdl — docs</strong>
+<strong>rumdl - docs</strong>
 <span class="rm-terminal-shot__shell">zsh</span>
 </div>
 <img src="images/homepage-terminal.png" width="1068" height="342" alt="Terminal running uvx rumdl check dot, reporting two Markdown issues, and suggesting rumdl fmt" fetchpriority="high" decoding="sync">
