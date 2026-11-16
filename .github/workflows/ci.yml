@@ -6,6 +6,7 @@ on:
     # workflow_dispatch validation does not satisfy required status checks.
     branches: [main, 'ci/validate-**']
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:

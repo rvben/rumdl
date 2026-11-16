@@ -1,7 +1,7 @@
 name: dependencies
 
-# Weekly dependency refresh. `upd` rewrites Cargo.toml, this job runs the
-# repo's own checks against the result, and the outcome is offered as a single
+# Weekly dependency refresh. `upd` rewrites the root and fuzz manifests and
+# this job checks the result. The outcome is offered as a single
 # rolling pull request rather than pushed to main.
 on:
   schedule:
@@ -19,8 +19,8 @@ env:
   # Pinned by digest as well as by version, so a replaced or re-tagged release
   # fails the checksum instead of running an unreviewed binary against this
   # repo. Bump both together.
-  UPD_VERSION: v0.9.2
-  UPD_SHA256: 3f15cf4ccf532501e40c648c9f971093685017b4d06221097e920bf4d3696b0c
+  UPD_VERSION: v0.18.7
+  UPD_SHA256: c95e061a33c2961974812243366931700436f3aadf40ff210eb63aeb4b4dbe8b
   UPD_BRANCH: deps/upd
 
 jobs:
@@ -68,9 +68,8 @@ jobs:
         with:
           shared-key: ci
 
-      # Named explicitly rather than left to discovery: this is the manifest
-      # the checks below cover. `--lock` runs `cargo update -p` for exactly the
-      # packages upd rewrote, leaving the rest of Cargo.lock where it was.
+      # Name both workspaces explicitly. `--lock` refreshes their lockfiles;
+      # lint, tests and the fuzz compile check below cover the changed manifests.
       - name: Apply updates
         id: upd
         env:
@@ -80,12 +79,36 @@ jobs:
         run: |
           set -euo pipefail
           upd --apply --max-bump minor --min-age 7d --lock --no-color \
-            --format text Cargo.toml 2>&1 | tee /tmp/upd.txt
-          if git diff --quiet; then
+            --format text Cargo.toml fuzz/Cargo.toml 2>&1 | tee /tmp/upd.txt
+          {
+            echo "### Dependency updates"
+            echo '```'
+            cat /tmp/upd.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if git diff --quiet -- Cargo.toml Cargo.lock fuzz/Cargo.toml fuzz/Cargo.lock; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Report incompatible dependency upgrades left for review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! upd --dry-run --only-bump major --min-age 7d --no-color \
+            --format text Cargo.toml fuzz/Cargo.toml > /tmp/upd-major.txt 2>&1; then
+            echo "::warning::The incompatible-upgrade report failed; see the step summary for details."
+            echo "Report incomplete: upd returned an error." >> /tmp/upd-major.txt
+          fi
+          {
+            echo "### Incompatible dependency upgrades (not applied)"
+            echo "Review API and MSRV changes; an MSRV increase requires a minor rumdl release."
+            echo '```'
+            cat /tmp/upd-major.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Reported, never applied. GITHUB_TOKEN is not allowed to push changes
       # under .github/workflows, and a mise toolchain bump changes what every
@@ -112,10 +135,10 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The checks run here rather than on the pull request because GitHub does
-      # not start `on: pull_request` workflows for a PR opened with
-      # GITHUB_TOKEN. `make check-versions` is included because Cargo.toml is
-      # the file this job rewrites and the file that check reads.
+      # Validate before proposing changes. GITHUB_TOKEN-created PRs do not
+      # trigger PR workflows, so the proposal stays draft until a maintainer
+      # marks it ready. ci.yml listens for that event to run required checks
+      # before merging, with the branch protections still enforced.
       - name: Check version references in sync with Cargo.toml
         if: steps.upd.outputs.changed == 'true'
         run: make check-versions
@@ -127,6 +150,14 @@ jobs:
       - name: Run tests
         if: steps.upd.outputs.changed == 'true'
         run: make test-ci
+
+      - name: Check the declared minimum Rust version
+        if: steps.upd.outputs.changed == 'true'
+        run: make msrv-check
+
+      - name: Check fuzz targets
+        if: steps.upd.outputs.changed == 'true'
+        run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
 
       - name: Open or update the pull request
         if: steps.upd.outputs.changed == 'true'
@@ -141,7 +172,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "${UPD_BRANCH}"
-          git add Cargo.toml Cargo.lock
+          git add Cargo.toml Cargo.lock fuzz/Cargo.toml fuzz/Cargo.lock
           git commit -m "chore(deps): weekly dependency update"
 
           # Force-pushed so the branch stays a single rolling proposal rather
@@ -160,27 +191,40 @@ jobs:
             echo
             echo "### Checks"
             echo
-            echo "\`make check-versions\`, \`make lint\` and \`make test-ci\` passed in the job that"
-            echo "opened this pull request. GitHub does not start \`on: pull_request\` workflows"
-            echo "for a pull request opened with \`GITHUB_TOKEN\`, so they run there rather than"
-            echo "appearing as status checks here."
+            echo "\`make check-versions\`, \`make lint\`, \`make test-ci\`, \`make msrv-check\`"
+            echo "and the fuzz compile check passed in the dependency-refresh job."
             echo
-            echo "That is the \`lint\` and \`test\` jobs' set. Windows, MSRV, WASM, Docker and fuzz"
-            echo "are not part of this run; merging is what puts the change through them."
+            echo "This proposal is a draft because GitHub does not trigger PR workflows"
+            echo "for changes made with \`GITHUB_TOKEN\`. Mark it ready for review to"
+            echo "run the required CI checks on this commit before reviewing or merging."
+            echo "Each weekly refresh returns the proposal to draft for fresh validation."
             echo
-            echo "### Not applied"
+            echo "### Incompatible upgrades (not applied)"
+            echo
+            echo "Review API and MSRV changes; an MSRV increase requires a minor rumdl release."
+            echo '```'
+            cat /tmp/upd-major.txt
+            echo '```'
+            echo
+            echo "### Actions, hooks and toolchains (not applied)"
             echo
             echo '```'
             cat /tmp/upd-actions.txt
             echo '```'
           } > /tmp/pr-body.md
 
-          if [ -n "$(gh pr list --head "${UPD_BRANCH}" --state open --json number --jq '.[0].number // empty')" ]; then
-            echo "Existing pull request updated in place."
-          else
-            gh pr create --base main --head "${UPD_BRANCH}" \
-              --title "chore(deps): weekly dependency update" \
-              --body-file /tmp/pr-body.md
+          pr_number=$(gh pr list --head "${UPD_BRANCH}" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$pr_number" ]; then
+            gh pr edit "$pr_number" --body-file /tmp/pr-body.md
+            if [ "$(gh pr view "$pr_number" --json isDraft --jq .isDraft)" != true ]; then
+              gh pr ready "$pr_number" --undo
+            fi
+          elif ! gh pr create --draft --base main --head "${UPD_BRANCH}" \
+            --title "chore(deps): weekly dependency update" \
+            --body-file /tmp/pr-body.md; then
+            echo "::error::Could not open the dependency PR. Check Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests."
+            echo "The tested updates remain on ${UPD_BRANCH}; PR creation failed." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
       - name: Nothing to update
