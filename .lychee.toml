@@ -35,11 +35,15 @@ accept = [200, 429]
 # rust-lang.rust-analyzer alike, so the status says nothing about the link. The
 # extension page linked from the README and docs is where the rumdl-vscode
 # release job publishes, and it resolves fine in a browser.
+#
+# opensource.org returns 403 to automated clients, browser user agent included.
+# The MIT license page linked from the README is live and resolves in a browser.
 exclude = [
     '^https://www\.npmjs\.com/',
     '^https://github\.com/.+/stargazers$',
     '^https://stackoverflow\.com/',
     '^https://marketplace\.visualstudio\.com/',
+    '^https://opensource\.org/',
 ]
 
 # Timeout per request in seconds
