@@ -13,12 +13,12 @@ ignored = ["rumdl"] # Imported as rumdl_lib (lib rename in parent Cargo.toml)
 [dependencies]
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 arbitrary = { version = "1", features = ["derive"] }
-toml = "1.0"
+toml = "1.2"
 # Independent renderers for the reflow semantics oracle; versions match the
 # parent crate's.
 markdown = "1.0.0"
-pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
-comrak = { version = "0.55.0", default-features = false }
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
+comrak = { version = "0.59.0", default-features = false }
 
 [dependencies.rumdl]
 path = ".."
