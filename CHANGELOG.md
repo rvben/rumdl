@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The MSRV policy is now a rolling window: rumdl supports at least the three
+  most recent stable Rust releases, and raising the MSRV within that window may
+  happen in any release, announced in the changelog. Previously an MSRV raise
+  required a minor release. Prebuilt binaries, PyPI wheels and npm packages are
+  unaffected.
+
 ### Fixed
 
 - MD076 preserves loose-list spacing when blank-separated blocks inside an item
