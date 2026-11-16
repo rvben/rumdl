@@ -155,15 +155,19 @@ documentation, and tests.
    module. Cover valid input, violations, fixes when supported, and important
    edge cases. Configurable rules should also test their options. Add broader
    integration tests under `tests/rules/` when the rule needs them.
+
 2. Add a simple representative test for the rule to
    `get_test_content_for_rule()` in `tests/cli/cli_lsp_fix_consistency.rs`.
    This lets the shared test verify that CLI batch fixes and LSP warning fixes
    produce the same result.
+
 3. Create `docs/mdNNN.md` using an existing rule page as a template. Include
    the rule's purpose, rationale, correct and incorrect examples,
    configuration, and flavor-specific behavior when relevant.
+
 4. Add exactly one row for the rule to the appropriate category table in
    `docs/rules.md`. If the rule is opt-in, also add it to the opt-in overview.
+
 5. Update generated rule-count markers with:
 
    ```bash
