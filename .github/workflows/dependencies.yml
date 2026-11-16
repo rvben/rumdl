@@ -22,6 +22,9 @@ env:
   UPD_VERSION: v0.18.7
   UPD_SHA256: c95e061a33c2961974812243366931700436f3aadf40ff210eb63aeb4b4dbe8b
   UPD_BRANCH: deps/upd
+  # The identity the proposal commits are made under. scripts/deps_branch.py
+  # treats any commit on UPD_BRANCH by anyone else as hand-made.
+  BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
 
 jobs:
   update:
@@ -34,6 +37,25 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+
+      # Decided before anything is applied: a commit someone pushed onto the
+      # proposal branch by hand (say, a compile fix for an upgrade) must never
+      # be force-pushed away or deleted with the branch.
+      - name: Inspect the proposal branch
+        id: branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/deps_branch.py --repo "${GITHUB_REPOSITORY}" --base main \
+            --branch "${UPD_BRANCH}" --bot-email "${BOT_EMAIL}"
+
+      - name: Leave a hand-edited proposal branch alone
+        if: steps.branch.outputs.state == 'hand-edited'
+        run: |
+          msg="${UPD_BRANCH} carries commits not made by this workflow, so it is left as is. Merge or close its pull request and delete the branch to resume weekly proposals."
+          echo "::warning::${msg}"
+          echo "${msg}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install upd
         run: |
@@ -140,29 +162,31 @@ jobs:
       # marks it ready. ci.yml listens for that event to run required checks
       # before merging, with the branch protections still enforced.
       - name: Check version references in sync with Cargo.toml
-        if: steps.upd.outputs.changed == 'true'
+        if: steps.upd.outputs.changed == 'true' && steps.branch.outputs.state != 'hand-edited'
         run: make check-versions
 
       - name: Run linting
-        if: steps.upd.outputs.changed == 'true'
+        if: steps.upd.outputs.changed == 'true' && steps.branch.outputs.state != 'hand-edited'
         run: make lint
 
       - name: Run tests
-        if: steps.upd.outputs.changed == 'true'
+        if: steps.upd.outputs.changed == 'true' && steps.branch.outputs.state != 'hand-edited'
         run: make test-ci
 
       - name: Check the declared minimum Rust version
-        if: steps.upd.outputs.changed == 'true'
+        if: steps.upd.outputs.changed == 'true' && steps.branch.outputs.state != 'hand-edited'
         run: make msrv-check
 
       - name: Check fuzz targets
-        if: steps.upd.outputs.changed == 'true'
+        if: steps.upd.outputs.changed == 'true' && steps.branch.outputs.state != 'hand-edited'
         run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
 
       - name: Open or update the pull request
-        if: steps.upd.outputs.changed == 'true'
+        if: steps.upd.outputs.changed == 'true' && steps.branch.outputs.state != 'hand-edited'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The tip inspected above, empty when the branch did not exist.
+          EXPECTED_TIP: ${{ steps.branch.outputs.sha }}
           # Named rather than inferred from the git remote, so `gh` never falls
           # back to the interactive prompt it cannot answer here.
           GH_REPO: ${{ github.repository }}
@@ -170,14 +194,15 @@ jobs:
           set -euo pipefail
 
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "${BOT_EMAIL}"
           git switch -c "${UPD_BRANCH}"
           git add Cargo.toml Cargo.lock fuzz/Cargo.toml fuzz/Cargo.lock
           git commit -m "chore(deps): weekly dependency update"
 
           # Force-pushed so the branch stays a single rolling proposal rather
-          # than accumulating a commit per week.
-          git push --force \
+          # than accumulating a commit per week. The lease fails the push if
+          # anything landed on the branch since it was inspected.
+          git push --force-with-lease="refs/heads/${UPD_BRANCH}:${EXPECTED_TIP}" \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "HEAD:refs/heads/${UPD_BRANCH}"
 
@@ -227,6 +252,35 @@ jobs:
             exit 1
           fi
 
+      # main already carries every update within policy (typically because an
+      # upgrade landed there by hand), so an open proposal from an earlier run
+      # is stale. Close it and delete its branch rather than leave an outdated
+      # diff open for review. A hand-edited branch is left for a maintainer.
       - name: Nothing to update
-        if: steps.upd.outputs.changed != 'true'
-        run: echo "No dependency updates within policy." >> "$GITHUB_STEP_SUMMARY"
+        if: steps.upd.outputs.changed != 'true' && steps.branch.outputs.state != 'hand-edited'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_TIP: ${{ steps.branch.outputs.sha }}
+        run: |
+          set -euo pipefail
+          echo "No dependency updates within policy." >> "$GITHUB_STEP_SUMMARY"
+
+          pr_number=$(gh pr list --head "${UPD_BRANCH}" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$pr_number" ]; then
+            gh pr close "$pr_number" \
+              --comment "main already includes every dependency update within policy, so this proposal is out of date. The next refresh that finds updates opens a new one."
+            echo "Closed the stale proposal #${pr_number}." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Deleted under the same lease as the force-push, so a commit pushed
+          # since the inspection keeps the branch alive.
+          if [ -n "${EXPECTED_TIP}" ]; then
+            if git push --force-with-lease="refs/heads/${UPD_BRANCH}:${EXPECTED_TIP}" \
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              ":refs/heads/${UPD_BRANCH}"; then
+              echo "Deleted ${UPD_BRANCH}." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::${UPD_BRANCH} changed after it was inspected, so it was kept."
+            fi
+          fi

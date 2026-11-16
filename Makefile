@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc doc-check dev-install setup-mise dev-setup dev-verify build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long fuzz-reflow fuzz-sentence-layout fuzz-seed-corpus reflow-sweep check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics docs-search-test docs-site sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc doc-check dev-install setup-mise dev-setup dev-verify build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long fuzz-reflow fuzz-sentence-layout fuzz-seed-corpus reflow-sweep check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics docs-search-test docs-site sync-rule-docs check-rule-docs test-release-scripts test-dependency-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -514,6 +514,9 @@ check-rule-docs:
 test-release-scripts:
 	python3 scripts/release_assets_test.py
 	python3 scripts/artifact_sizes_test.py
+
+test-dependency-scripts:
+	python3 scripts/deps_branch_test.py
 
 doc:
 	cargo doc --no-deps

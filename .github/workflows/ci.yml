@@ -58,6 +58,11 @@ jobs:
       - name: Test release asset guard
         run: make test-release-scripts
 
+      # The dependency workflow's guard against rewriting a hand-edited
+      # proposal branch runs only in that weekly job; its logic is tested here.
+      - name: Test dependency branch guard
+        run: make test-dependency-scripts
+
       - name: Check Rust formatting
         run: make fmt-check
 
