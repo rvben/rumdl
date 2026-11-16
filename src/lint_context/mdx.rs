@@ -622,7 +622,7 @@ fn parse_expression(value: &str, kind: &markdown::MdxExpressionKind) -> markdown
 fn parse_esm(value: &str) -> markdown::MdxSignal {
     let allocator = oxc_allocator::Allocator::default();
     let parsed = oxc_parser::Parser::new(&allocator, value, oxc_span::SourceType::jsx()).parse();
-    if parsed.diagnostics.is_empty() && !parsed.panicked {
+    if parsed.diagnostics.is_empty() && !parsed.fatal_error {
         markdown::MdxSignal::Ok
     } else {
         // A candidate ending may lie inside JS. Ask markdown-rs to continue to

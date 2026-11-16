@@ -75,7 +75,7 @@ rumdl follows [Semantic Versioning](https://semver.org/).
 
 ## Minimum Supported Rust Version (MSRV)
 
-- Current MSRV: **Rust 1.94**.
+- Current MSRV: **Rust 1.97**.
 - The MSRV may be raised in a minor release and is announced in the changelog.
 - Raising the MSRV affects only users who build rumdl from source
   (`cargo install`, or depending on the crate). It does not affect users of the

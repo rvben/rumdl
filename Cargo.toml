@@ -2,7 +2,7 @@
 name = "rumdl"
 version = "0.3.4"
 edition = "2024"
-rust-version = "1.94.0"
+rust-version = "1.97.0"
 description = "A fast Markdown linter and formatter written in Rust"
 authors = ["Ruben J. Jongejan <ruben.jongejan@gmail.com>"]
 license = "MIT"
@@ -52,17 +52,17 @@ strip = false
 aho-corasick = "1.1"
 clap = { version = "4.6", features = ["derive"] }
 colored = { version = "3.1.1", optional = true }
-fancy-regex = "0.17.0"
+fancy-regex = "0.20.2"
 ignore = "0.4.34"
 rayon = { version = "1.12.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 serde-saphyr = "2.1.1"
-toml = "1.1"
+toml = "1.2"
 thiserror = "2.0.21"
-globset = "0.4.20"
+globset = "0.4.21"
 indexmap = { version = "2", features = ["serde"] }
-log = "0.4.34"
+log = "0.4.35"
 memchr = "2.8"
 # `default-features` would add `getopts` for pulldown-cmark's own CLI binary,
 # which rumdl never builds. `html` is the renderer MD085 uses.
@@ -70,11 +70,11 @@ pulldown-cmark = { version = "0.13.6", default-features = false, features = ["ht
 unicase = "2.10"
 # Identifier classification for the bundled markdown-rs parser.
 unicode-id = { version = "0.3", features = ["no_std"] }
-# MDX JavaScript boundaries. Oxc 0.137 supports our Rust 1.94 minimum;
+# MDX JavaScript boundaries. Oxc 0.158 needs Rust 1.97, which sets our minimum;
 # regular-expression validation is unnecessary for boundaries.
-oxc_parser = { version = "0.137.0", default-features = false }
-oxc_allocator = "0.137.0"
-oxc_span = "0.137.0"
+oxc_parser = { version = "0.158.0", default-features = false }
+oxc_allocator = "0.158.0"
+oxc_span = "0.158.0"
 regex = "1.13"
 toml_edit = "0.25"
 dyn-clone = "1"
@@ -89,7 +89,7 @@ tower-lsp = { version = "0.20", optional = true }
 # LSP needs async file/stdio/TCP I/O, tasks, synchronization, timers and macros.
 # Keep the existing parking_lot runtime locks; process and signal support are
 # unused. Avoid `full` so unrelated Tokio features do not enter native builds.
-tokio = { version = "1.53.3", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "rt-multi-thread", "sync", "time"], optional = true }
+tokio = { version = "1.54.1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "rt-multi-thread", "sync", "time"], optional = true }
 # The default `humantime` feature pulls in jiff purely to render log timestamps,
 # which `main.rs` turns off with `.format_timestamp(None)`.
 env_logger = { version = "0.11", default-features = false, features = [
@@ -116,7 +116,7 @@ ec4rs = { version = "1.2.0", features = ["track-source"], optional = true }
 
 # Unified diffs for `--diff` and `fmt --check`. Only the CLI prints them, so the
 # browser wasm build leaves this out.
-similar = "3.2.0"
+similar = "3.2.1"
 
 [features]
 default = ["parallel", "native"]
@@ -153,20 +153,20 @@ proptest = "1.12"
 # CodSpeed's criterion compatibility layer, imported as `criterion`: plain
 # `cargo bench` runs ordinary criterion, and `cargo codspeed` builds the same
 # benches with CodSpeed instrumentation (see `make bench-codspeed`).
-criterion = { package = "codspeed-criterion-compat", version = "5.0.2", features = ["html_reports"] }
+criterion = { package = "codspeed-criterion-compat", version = "6.0.0", features = ["html_reports"] }
 pretty_assertions = "1.4"
-quick-xml = "0.41"
+quick-xml = "0.42"
 unicode-segmentation = "1.13"
-serial_test = "3.2"
-jsonschema = "0.46"
-ureq = "3.4"
+serial_test = "4.0"
+jsonschema = "0.61"
+ureq = "3.5"
 url = "2"
 # The reflow semantics oracle's third renderer, a port of cmark-gfm, which
 # GitHub renders with. `default-features` would add its CLI and syntect.
-comrak = { version = "0.55.0", default-features = false }
+comrak = { version = "0.59.0", default-features = false }
 
 [target.'cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = "0.7"
 
 [target.'cfg(all(target_env = "msvc", not(target_arch = "wasm32")))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
