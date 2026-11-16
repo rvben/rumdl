@@ -1,10 +1,10 @@
 // Use jemalloc for better memory allocation performance on Unix-like systems
-#[cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))]
+#[cfg(all(feature = "native", not(target_env = "msvc"), not(target_arch = "wasm32")))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 // Use mimalloc on Windows for better performance
-#[cfg(target_env = "msvc")]
+#[cfg(all(feature = "native", target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -282,7 +282,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // mimalloc's exit hook return immediately (`_mi_auto_process_done` in
     // init.c). The bindings have no constant for this option: 22 is its
     // position in `mi_option_e` in the vendored mimalloc.h.
-    #[cfg(target_env = "msvc")]
+    #[cfg(all(feature = "native", target_env = "msvc"))]
     {
         const MI_OPTION_DESTROY_ON_EXIT: libmimalloc_sys::mi_option_t = 22;
         // SAFETY: sets a plain integer option; no memory is touched.

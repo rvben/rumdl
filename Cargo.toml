@@ -133,6 +133,9 @@ native = [
     "postcard",
     "colored",
     "ec4rs",
+    "dep:tikv-jemallocator",
+    "dep:mimalloc",
+    "dep:libmimalloc-sys",
 ]
 wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
 # Build the CLI for wasm/WASI targets (e.g. wasm32-wasip1-threads under wasmtime).
@@ -165,13 +168,16 @@ url = "2"
 # GitHub renders with. `default-features` would add its CLI and syntect.
 comrak = { version = "0.55.0", default-features = false }
 
+# The CLI's global allocators. Optional and enabled by `native`, so a library
+# consumer built with `default-features = false` does not link an allocator it
+# never installs (and cannot conflict with its own `links = "jemalloc"`).
 [target.'cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [target.'cfg(all(target_env = "msvc", not(target_arch = "wasm32")))'.dependencies]
-mimalloc = { version = "0.1", default-features = false }
+mimalloc = { version = "0.1", default-features = false, optional = true }
 # Direct dependency only for `mi_option_set`, which `mimalloc` does not re-export.
-libmimalloc-sys = { version = "0.1", default-features = false, features = ["extended"] }
+libmimalloc-sys = { version = "0.1", default-features = false, features = ["extended"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
