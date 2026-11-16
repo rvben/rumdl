@@ -104,7 +104,7 @@ jobs:
           fi
           {
             echo "### Incompatible dependency upgrades (not applied)"
-            echo "Review API and MSRV changes; an MSRV increase requires a minor rumdl release."
+            echo "Review API changes and check the proposed MSRV against docs/stability.md."
             echo '```'
             cat /tmp/upd-major.txt
             echo '```'
@@ -201,7 +201,7 @@ jobs:
             echo
             echo "### Incompatible upgrades (not applied)"
             echo
-            echo "Review API and MSRV changes; an MSRV increase requires a minor rumdl release."
+            echo "Review API changes and check the proposed MSRV against docs/stability.md."
             echo '```'
             cat /tmp/upd-major.txt
             echo '```'
