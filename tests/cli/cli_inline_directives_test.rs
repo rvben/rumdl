@@ -211,6 +211,34 @@ fn control_default_reflow_without_a_directive_offers_the_fix_and_rewraps() {
     }
 }
 
+/// A line-scoped directive exempts one line from another rule. Rewrapping would
+/// carry part of that line onto a line the directive does not cover, so the
+/// paragraph is left as written.
+#[test]
+fn default_reflow_leaves_a_paragraph_with_a_line_exempt_from_another_rule_as_written() {
+    let long_html = format!("{LONG_A} <b>x</b>");
+    for doc in [
+        format!("<!-- rumdl-disable-next-line MD033 -->\n{long_html}\n"),
+        format!("{long_html} <!-- rumdl-disable-line MD033 -->\n"),
+        format!("{long_html} <!-- markdownlint-disable-line MD033 -->\n"),
+        format!("<!-- rumdl-disable-next-line MD033 -->\n{long_html}\n{LONG_B}\n"),
+    ] {
+        assert!(
+            findings(MD013_REFLOW, "MD013", &doc)
+                .iter()
+                .all(|&(_, fixable)| !fixable),
+            "no fix is offered: {doc:?}"
+        );
+        assert_eq!(fmt(MD013_REFLOW, &doc), doc, "{doc:?}");
+    }
+}
+
+#[test]
+fn control_default_reflow_still_rewraps_inside_a_region_disabled_for_another_rule() {
+    let doc = format!("<!-- rumdl-disable MD033 -->\n{LONG_A} <b>x</b>\n<!-- rumdl-enable MD033 -->\n");
+    assert_ne!(fmt(MD013_REFLOW, &doc), doc);
+}
+
 // ── 20, 21: MD044 and tool comments ─────────────────────────────────────────
 
 fn md044_lines(doc: &str) -> Vec<usize> {

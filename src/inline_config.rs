@@ -655,6 +655,17 @@ impl InlineConfig {
         self.disabling_layer(rule_name, line_number).is_some()
     }
 
+    /// Whether a line-scoped directive (`disable-line`, `disable-next-line` or
+    /// `prettier-ignore`) applies to `line_number` for any rule.
+    ///
+    /// A line-scoped exemption belongs to that exact line, so a rewrite that
+    /// moves its text onto another line takes the text out of the exemption.
+    pub fn has_line_scoped_disable(&self, line_number: usize) -> bool {
+        self.line_disabled_rules
+            .get(&line_number)
+            .is_some_and(|rules| !rules.is_empty())
+    }
+
     /// Which kind of directive keeps `rule_name` off at `line_number`, if any.
     ///
     /// A file-wide disable answers first: it decides on its own, so a rule enabled
