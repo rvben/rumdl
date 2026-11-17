@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   happen in any release, announced in the changelog. Previously an MSRV raise
   required a minor release. Prebuilt binaries, PyPI wheels and npm packages are
   unaffected.
-- Raise the minimum supported Rust version to 1.97 and move the MDX
-  JavaScript parser to Oxc 0.158, so projects that embed rumdl alongside
+- Raise the minimum supported Rust version to 1.98 and move the MDX
+  JavaScript parser to Oxc 0.159, so projects that embed rumdl alongside
   current Oxc link one copy of the parser. All dependencies, including the
   development and fuzz ones, are upgraded to their latest releases.
 

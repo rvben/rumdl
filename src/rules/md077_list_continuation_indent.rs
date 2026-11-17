@@ -1312,7 +1312,7 @@ impl MD077ListContinuationIndent {
                     .binary_search_by_key(&item_line, |(line, _)| *line)
                     .ok()
                     .map(|at| &chains[at].1)
-                    .map(|chain| {
+                    .map_or_default(|chain| {
                         chain
                             .iter()
                             .filter(|inner| inner.marker_column > marker_col)
@@ -1322,8 +1322,7 @@ impl MD077ListContinuationIndent {
                                 is_empty: inner.is_empty,
                             })
                             .collect()
-                    })
-                    .unwrap_or_default();
+                    });
                 ItemScope {
                     item_line,
                     marker_col,

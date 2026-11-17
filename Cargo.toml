@@ -2,7 +2,7 @@
 name = "rumdl"
 version = "0.3.4"
 edition = "2024"
-rust-version = "1.97.0"
+rust-version = "1.98.0"
 description = "A fast Markdown linter and formatter written in Rust"
 authors = ["Ruben J. Jongejan <ruben.jongejan@gmail.com>"]
 license = "MIT"
@@ -70,11 +70,11 @@ pulldown-cmark = { version = "0.13.6", default-features = false, features = ["ht
 unicase = "2.10"
 # Identifier classification for the bundled markdown-rs parser.
 unicode-id = { version = "0.3", features = ["no_std"] }
-# MDX JavaScript boundaries. Oxc 0.158 needs Rust 1.97, which sets our minimum;
+# MDX JavaScript boundaries. Oxc 0.159 needs Rust 1.98, which sets our minimum;
 # regular-expression validation is unnecessary for boundaries.
-oxc_parser = { version = "0.158.0", default-features = false }
-oxc_allocator = "0.158.0"
-oxc_span = "0.158.0"
+oxc_parser = { version = "0.159.0", default-features = false }
+oxc_allocator = "0.159.0"
+oxc_span = "0.159.0"
 regex = "1.13"
 toml_edit = "0.25"
 dyn-clone = "1"

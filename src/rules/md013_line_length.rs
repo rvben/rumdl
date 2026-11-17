@@ -4743,8 +4743,7 @@ impl MD013LineLength {
                 paragraph_lines
                     .iter()
                     .find(|l| !l.trim().is_empty())
-                    .map(|l| l[..min_len].to_string())
-                    .unwrap_or_default()
+                    .map_or_default(|l| l[..min_len].to_string())
             } else {
                 String::new()
             };
