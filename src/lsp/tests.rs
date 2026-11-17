@@ -2823,7 +2823,7 @@ allowed-languages = ["Python", "Rust", "Go"]
     // Should only have items for Python, Rust, Go and their aliases
     for item in &items {
         let label_lower = item.label.to_lowercase();
-        let detail = item.detail.as_ref().map(|d| d.to_lowercase()).unwrap_or_default();
+        let detail = item.detail.as_ref().map_or_default(|d| d.to_lowercase());
 
         // Check that the canonical language (in detail) is one of the allowed ones
         let is_allowed = detail.contains("python") || detail.contains("rust") || detail.contains("go");
@@ -2870,7 +2870,7 @@ disallowed-languages = ["Python"]
 
     // Should NOT include Python or py
     for item in &items {
-        let detail = item.detail.as_ref().map(|d| d.to_lowercase()).unwrap_or_default();
+        let detail = item.detail.as_ref().map_or_default(|d| d.to_lowercase());
         assert!(
             !detail.contains("python"),
             "Completion '{}' should not include Python (disallowed)",

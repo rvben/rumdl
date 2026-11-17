@@ -252,13 +252,12 @@ impl LspTestClient {
                 let mut codes: Vec<String> = m
                     .pointer("/params/diagnostics")
                     .and_then(Value::as_array)
-                    .map(|items| {
+                    .map_or_default(|items| {
                         items
                             .iter()
                             .filter_map(|d| d.get("code").and_then(Value::as_str).map(str::to_string))
                             .collect()
-                    })
-                    .unwrap_or_default();
+                    });
                 codes.sort();
                 codes
             })
@@ -302,14 +301,13 @@ fn publish_messages(message: &Value) -> Vec<String> {
     message
         .pointer("/params/diagnostics")
         .and_then(Value::as_array)
-        .map(|items| {
+        .map_or_default(|items| {
             items
                 .iter()
                 .filter_map(|d| d.get("message").and_then(Value::as_str))
                 .map(str::to_string)
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 async fn read_loop(
@@ -1054,15 +1052,12 @@ async fn test_an_evicted_file_drops_the_disk_read_that_was_still_waiting() {
 /// Anchors the index holds for `path`, for asserting what an edit reached.
 async fn indexed_anchors(client: &LspTestClient, path: &Path) -> Vec<String> {
     let index = client.server.workspace_index.read().await;
-    index
-        .get_file(path)
-        .map(|file| {
-            file.headings
-                .iter()
-                .map(|heading| heading.auto_anchor.clone())
-                .collect()
-        })
-        .unwrap_or_default()
+    index.get_file(path).map_or_default(|file| {
+        file.headings
+            .iter()
+            .map(|heading| heading.auto_anchor.clone())
+            .collect()
+    })
 }
 
 /// A rescan re-reads the workspace from disk, so an edit still waiting out its

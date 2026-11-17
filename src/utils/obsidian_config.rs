@@ -93,8 +93,7 @@ pub fn resolve_attachment_folder(start_path: &Path, file_dir: &Path) -> Option<P
         std::fs::read_to_string(&app_json_path)
             .ok()
             .and_then(|content| serde_json::from_str::<ObsidianAppConfig>(&content).ok())
-            .map(|config| config.attachment_folder_path)
-            .unwrap_or_default()
+            .map_or_default(|config| config.attachment_folder_path)
     } else {
         String::new()
     };

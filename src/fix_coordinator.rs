@@ -581,8 +581,7 @@ impl FixCoordinator {
         // pre-filter. Empty when no path is available (e.g. WASM without a path).
         let ignored_for_file: HashSet<String> = paths
             .config_path
-            .map(|p| config.get_ignored_rules_for_file(p))
-            .unwrap_or_default();
+            .map_or_default(|p| config.get_ignored_rules_for_file(p));
 
         let proof_policies: Vec<_> = ordered_rules
             .iter()

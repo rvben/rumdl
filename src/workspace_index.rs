@@ -866,8 +866,7 @@ impl WorkspaceIndex {
     pub fn get_dependents(&self, path: &Path) -> Vec<PathBuf> {
         self.reverse_deps
             .get(path)
-            .map(|set| set.iter().cloned().collect())
-            .unwrap_or_default()
+            .map_or_default(|set| set.iter().cloned().collect())
     }
 
     /// Check if a file needs re-indexing based on its content hash

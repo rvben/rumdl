@@ -436,14 +436,12 @@ fn markdown_excerpt(
     // The 1-indexed first text lines of the headings that end the section. A
     // heading is recorded on its last line, so a multi-line Setext heading is
     // keyed by the line its text starts on.
-    let section_ends: std::collections::HashSet<usize> = stop_level
-        .map(|stop| {
-            ctx.headings()
-                .filter(|parsed| parsed.heading.level <= stop)
-                .map(|parsed| parsed.first_line_num())
-                .collect()
-        })
-        .unwrap_or_default();
+    let section_ends: std::collections::HashSet<usize> = stop_level.map_or_default(|stop| {
+        ctx.headings()
+            .filter(|parsed| parsed.heading.level <= stop)
+            .map(|parsed| parsed.first_line_num())
+            .collect()
+    });
     let ends_section = |line: usize| line >= checks_from && section_ends.contains(&(line + 1));
     let mut end = begin;
     while end < lines.len() && !ends_section(end) && end - begin < max_lines {
@@ -827,10 +825,7 @@ impl RumdlLanguageServer {
             };
 
             let source_content = crate::lsp::read_markdown_lossy(source_path).await.ok();
-            let source_lines: Vec<&str> = source_content
-                .as_deref()
-                .map(|c| c.lines().collect())
-                .unwrap_or_default();
+            let source_lines: Vec<&str> = source_content.as_deref().map_or_default(|c| c.lines().collect());
 
             locations.extend(
                 matching_links
@@ -964,10 +959,7 @@ impl RumdlLanguageServer {
             // to avoid acquiring additional locks while holding the workspace
             // index read lock.
             let source_content = crate::lsp::read_markdown_lossy(source_path).await.ok();
-            let source_lines: Vec<&str> = source_content
-                .as_deref()
-                .map(|c| c.lines().collect())
-                .unwrap_or_default();
+            let source_lines: Vec<&str> = source_content.as_deref().map_or_default(|c| c.lines().collect());
 
             locations.extend(
                 matching_links
