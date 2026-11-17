@@ -43,6 +43,7 @@ mod cli_md013_terminal_link_punctuation_test;
 mod cli_md022_exact_spacing_test;
 mod cli_md026_container_heading_test;
 mod cli_md027_quoted_list_test;
+mod cli_md029_zero_test;
 mod cli_md030_paragraph_text_test;
 mod cli_md031_bare_marker_fix_test;
 mod cli_md035_setext_test;

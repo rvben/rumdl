@@ -2719,7 +2719,7 @@
       "type": "object",
       "properties": {
         "style": {
-          "description": "Style for ordered list numbering (default: \"one-or-ordered\" - matches markdownlint) One of `one`, `one-one`, `ordered`, `ordered0`, `one-or-ordered`, `consistent`.",
+          "description": "Style for ordered list numbering (default: \"one-or-ordered\" - matches markdownlint) One of `one`, `one-one`, `ordered`, `ordered0`, `zero`, `one-or-ordered`, `consistent`.",
           "type": "string",
           "default": "one-or-ordered"
         },

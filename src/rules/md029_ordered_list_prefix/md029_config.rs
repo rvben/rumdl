@@ -11,6 +11,7 @@ pub enum ListStyle {
     Ordered, // Sequential (1. 2. 3.)
     #[serde(rename = "ordered0")]
     Ordered0, // Zero-based (0. 1. 2.)
+    Zero, // All zeros (0. 0. 0.)
     #[default]
     #[serde(rename = "one-or-ordered", alias = "one_or_ordered")]
     OneOrOrdered, // Either all ones OR sequential per-list (markdownlint default)

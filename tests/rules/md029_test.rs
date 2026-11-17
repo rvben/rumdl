@@ -1712,3 +1712,94 @@ fn test_md029_runs_on_ordered_only_document() {
         assert_eq!(warnings[0].line, 2);
     }
 }
+
+fn zero_rule() -> MD029OrderedListPrefix {
+    MD029OrderedListPrefix::new(ListStyle::Zero)
+}
+
+fn check_len(rule: &MD029OrderedListPrefix, content: &str) -> usize {
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    rule.check(&ctx).unwrap().len()
+}
+
+fn fixed(rule: &MD029OrderedListPrefix, content: &str) -> String {
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    rule.fix(&ctx).unwrap()
+}
+
+#[test]
+fn test_md029_zero_style_accepts_all_zeros() {
+    assert_eq!(check_len(&zero_rule(), "0. a\n0. b\n0. c\n"), 0);
+    assert_eq!(check_len(&zero_rule(), "0) a\n0) b\n"), 0);
+    assert_eq!(check_len(&zero_rule(), "0. only\n"), 0);
+}
+
+#[test]
+fn test_md029_zero_style_renumbers_every_item_to_zero() {
+    let rule = zero_rule();
+    for (input, expected) in [
+        ("1. a\n2. b\n3. c\n", "0. a\n0. b\n0. c\n"),
+        ("0. a\n1. b\n2. c\n", "0. a\n0. b\n0. c\n"),
+        ("1. a\n1. b\n1. c\n", "0. a\n0. b\n0. c\n"),
+        ("5. a\n6. b\n", "0. a\n0. b\n"),
+        ("1. only\n", "0. only\n"),
+        ("1) a\n2) b\n", "0) a\n0) b\n"),
+        ("9. a\n10. b\n", "0. a\n0. b\n"),
+    ] {
+        assert_eq!(fixed(&rule, input), expected, "{input:?}");
+        assert_eq!(fixed(&rule, expected), expected, "idempotent: {input:?}");
+        assert_eq!(check_len(&rule, expected), 0, "{input:?}");
+    }
+}
+
+#[test]
+fn test_md029_zero_style_message_and_fix_range() {
+    let ctx = LintContext::new("0. a\n1. b\n", rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = zero_rule().check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0].message,
+        "Ordered list item number 1 does not match configured style 'zero' (expected 0)"
+    );
+    assert_eq!(warnings[0].line, 2);
+    assert_eq!(warnings[0].fix.as_ref().unwrap().replacement, "0");
+}
+
+#[test]
+fn test_md029_zero_style_handles_nested_lists_independently() {
+    let rule = zero_rule();
+    assert_eq!(
+        fixed(&rule, "1. a\n\n   1. x\n   2. y\n\n2. b\n"),
+        "0. a\n\n   0. x\n   0. y\n\n0. b\n"
+    );
+}
+
+#[test]
+fn test_md029_zero_style_leaves_a_nested_list_that_cannot_start_at_zero() {
+    // A list can interrupt a paragraph only when it starts at 1, so renumbering
+    // the nested `1.` to `0.` would turn the nested list into paragraph text.
+    // The items are reported and left alone.
+    let rule = zero_rule();
+    let input = "1. a\n   1. x\n   2. y\n2. b\n";
+    let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(warnings.iter().any(|w| w.line == 2));
+    assert!(
+        warnings
+            .iter()
+            .filter(|w| w.line == 2 || w.line == 3)
+            .all(|w| w.fix.is_none())
+    );
+    assert_eq!(rule.fix(&ctx).unwrap(), input);
+}
+
+#[test]
+fn test_md029_zero_is_never_auto_detected() {
+    // Controls: without the explicit style, an all-zero list is still reported,
+    // and a list starting at 0 is sequential (0, 1, 2).
+    for style in [ListStyle::OneOrOrdered, ListStyle::Consistent, ListStyle::Ordered0] {
+        let rule = MD029OrderedListPrefix::new(style);
+        assert_eq!(check_len(&rule, "0. a\n0. b\n0. c\n"), 2, "{style:?}");
+    }
+    assert_eq!(check_len(&MD029OrderedListPrefix::default(), "0. a\n1. b\n2. c\n"), 0);
+}

@@ -55,6 +55,7 @@ impl MD029OrderedListPrefix {
             ListStyle::One | ListStyle::OneOne => 1,
             ListStyle::Ordered => (start_value as usize) + index,
             ListStyle::Ordered0 => index,
+            ListStyle::Zero => 0,
             ListStyle::OneOrOrdered | ListStyle::Consistent => {
                 // This shouldn't be reached since we handle these above
                 1
@@ -171,6 +172,7 @@ impl MD029OrderedListPrefix {
                             ListStyle::OneOne => "one",
                             ListStyle::Ordered => "ordered",
                             ListStyle::Ordered0 => "ordered0",
+                            ListStyle::Zero => "zero",
                             _ => "ordered",
                         };
 
@@ -180,15 +182,17 @@ impl MD029OrderedListPrefix {
                             ListStyle::One | ListStyle::OneOne => "configured style 'one'".to_string(),
                             ListStyle::Ordered => "configured style 'ordered'".to_string(),
                             ListStyle::Ordered0 => "configured style 'ordered0'".to_string(),
+                            ListStyle::Zero => "configured style 'zero'".to_string(),
                         };
 
                         // Only provide auto-fix when:
                         // 1. The list starts at 1 (default numbering), OR
-                        // 2. We're using explicit 'one' style (numbers are meaningless)
+                        // 2. We're using an explicit constant style, 'one' or 'zero'
+                        //    (the numbers carry no information)
                         // When start_value > 1, the user explicitly chose that number,
                         // so auto-fixing would destroy their intent.
-                        let should_provide_fix =
-                            start_value == 1 || matches!(self.config.style, ListStyle::One | ListStyle::OneOne);
+                        let should_provide_fix = start_value == 1
+                            || matches!(self.config.style, ListStyle::One | ListStyle::OneOne | ListStyle::Zero);
 
                         // marker_column is a byte offset within the line; convert to a
                         // character column for the diagnostic.
