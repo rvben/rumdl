@@ -5559,8 +5559,22 @@ fn link_index_holds_parsed_links_and_definitions_only() {
         crate::config::MarkdownFlavor::Standard,
         Some(std::path::PathBuf::from("s.md")),
     );
-    let mut found: Vec<_> = index
+    // A link written in a comment is indexed under its own origin, so a consumer
+    // that does not read comments can leave it out; it is checked separately.
+    let (commented, rendered): (Vec<_>, Vec<_>) = index
         .cross_file_links
+        .iter()
+        .partition(|link| link.origin == crate::workspace_index::LinkOrigin::HtmlComment);
+    assert_eq!(
+        commented
+            .iter()
+            .map(|link| (link.target_path.as_str(), link.fragment.as_str(), link.line))
+            .collect::<Vec<_>>(),
+        [("t.md", "a", 2)],
+        "{:#?}",
+        index.cross_file_links
+    );
+    let mut found: Vec<_> = rendered
         .iter()
         .map(|link| {
             (
@@ -6758,6 +6772,89 @@ async fn test_find_references_finds_root_relative_links() {
         locations[0].uri,
         Url::from_file_path(&source_file).unwrap(),
         "reference should point to the linking file"
+    );
+}
+
+/// A root-relative link written in a comment, or in frontmatter, is indexed
+/// for the rules but is not a link the editor navigates by: a rename cannot
+/// rewrite it, so find-references must not list it. The body link beside it is
+/// the positive control.
+#[tokio::test]
+async fn test_find_references_excludes_non_navigable_root_relative_links() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path().resolve_like_server();
+    let target_file = root.join("guide.md");
+    fs::write(&target_file, "# Installation\n\nHow to install.\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: "# Installation\n\nHow to install.\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let sources = [
+        ("body.md", LinkOrigin::Body),
+        ("comment.md", LinkOrigin::HtmlComment),
+        ("front.md", LinkOrigin::FrontMatter { field: None }),
+    ];
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut target_fi = FileIndex::default();
+        target_fi.add_heading(HeadingIndex {
+            text: "Installation".to_string(),
+            auto_anchor: "installation".to_string(),
+            custom_anchor: None,
+            line: 1,
+            text_lines: 1,
+            is_setext: false,
+        });
+        index.insert_file(target_file.clone(), target_fi);
+        for (name, origin) in &sources {
+            let mut fi = FileIndex::default();
+            fi.add_root_relative_link(CrossFileLinkIndex {
+                target_path: "guide.md".to_string(),
+                fragment: "installation".to_string(),
+                line: 1,
+                column: 15,
+                origin: origin.clone(),
+            });
+            index.insert_file(root.join(name), fi);
+        }
+    }
+
+    // On the heading: the by-anchor path.
+    let by_anchor = server
+        .handle_references(&target_uri, Position { line: 0, character: 5 })
+        .await
+        .expect("the body link is a reference");
+    let uris: Vec<_> = by_anchor.iter().map(|l| l.uri.clone()).collect();
+    assert_eq!(
+        uris,
+        vec![Url::from_file_path(root.join("body.md")).unwrap()],
+        "{uris:?}"
+    );
+
+    // On plain text: the by-file fallback path.
+    let by_file = server
+        .handle_references(&target_uri, Position { line: 2, character: 3 })
+        .await
+        .expect("the body link is a reference");
+    let uris: Vec<_> = by_file.iter().map(|l| l.uri.clone()).collect();
+    assert_eq!(
+        uris,
+        vec![Url::from_file_path(root.join("body.md")).unwrap()],
+        "{uris:?}"
     );
 }
 

@@ -19,6 +19,7 @@ mod heading_detection;
 mod line_computation;
 mod line_facts;
 pub(crate) use line_facts::LineContextMask;
+mod comment_links;
 mod link_destinations;
 mod link_parser;
 mod list_blocks;
@@ -403,6 +404,7 @@ pub struct LintContext<'a> {
     blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
     document_anchors_cache: OnceLock<anchors::DocumentAnchors>,
     link_destinations_cache: OnceLock<link_destinations::LinkDestinations>,
+    html_comment_links_cache: OnceLock<Vec<comment_links::CommentLink>>,
     links: Vec<ParsedLink<'a>>,                                   // Pre-parsed links
     rendered_link_ends_cache: OnceLock<Vec<usize>>,               // Prefix maxima for containment queries
     parsed_link_ranges: Vec<(usize, usize)>,                      // Native links, without undefined-reference fallbacks
@@ -1934,6 +1936,7 @@ impl<'a> LintContext<'a> {
                 blockquote_headings,
                 document_anchors_cache: OnceLock::new(),
                 link_destinations_cache: OnceLock::new(),
+                html_comment_links_cache: OnceLock::new(),
                 links,
                 rendered_link_ends_cache: OnceLock::new(),
                 parsed_link_ranges,

@@ -210,6 +210,12 @@ fn is_tool_comment_body(body: &str, depth: usize) -> bool {
     TOOL_PREFIXES.iter().any(|tool| body.starts_with(tool)) || is_vale_body(body, depth) || is_lint_body(body, depth)
 }
 
+/// Whether the text after a comment opener (`<!--`) starts a linter
+/// configuration comment of any supported tool.
+pub(crate) fn is_directive_comment(after_open: &str) -> bool {
+    is_tool_comment_body(comment_body(after_open, 0), 0)
+}
+
 /// Whether `rest` ends a word: nothing, whitespace, or the comment's closer.
 fn at_word_end(rest: &str) -> bool {
     rest.is_empty() || rest.starts_with(is_comment_space) || rest.starts_with("-->")

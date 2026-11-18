@@ -444,8 +444,12 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             .entry(document.group_index)
             .or_insert_with(|| LinkResolver::from_config(&resolved.groups[document.group_index].config));
         let document_links = resolver.for_document(&document.normalized_path);
+        let follow_comment_links =
+            rumdl_lib::rules::md051_link_fragments::reads_comment_links(&resolved.groups[document.group_index].config);
         for link in &document.file_index.cross_file_links {
-            if link.fragment.is_empty() {
+            if link.fragment.is_empty()
+                || (link.origin == rumdl_lib::workspace_index::LinkOrigin::HtmlComment && !follow_comment_links)
+            {
                 continue;
             }
             match document_links.resolve(&link.target_path, Some(&link_target_policy)) {

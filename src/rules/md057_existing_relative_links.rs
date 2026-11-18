@@ -626,6 +626,17 @@ impl MD057ExistingRelativeLinks {
             });
         }
 
+        for link in ctx.html_comment_link_destinations() {
+            let url = link.destination.url;
+            if !self.comment_destination_is_file(url, ctx.flavor) {
+                continue;
+            }
+            index.add_md057_link_target(Md057LinkTarget {
+                target: url.to_string(),
+                origin: LinkOrigin::HtmlComment,
+            });
+        }
+
         for link in frontmatter_values::link_destinations(ctx) {
             let line = ctx.lines[link.line - 1].content(ctx.content);
             let url = &line[link.range];
@@ -864,6 +875,70 @@ impl MD057ExistingRelativeLinks {
                 end_column,
                 message: Self::missing_relative_message(url, ctx.link_target_policy()),
                 severity: Severity::Error,
+                fix: None,
+            });
+        }
+    }
+
+    /// Whether a destination written in an HTML comment names a file this
+    /// rule validates: not empty, not a rustdoc intra-doc reference, not an
+    /// external or fragment-only destination.
+    fn comment_destination_is_file(&self, url: &str, flavor: crate::config::MarkdownFlavor) -> bool {
+        if url.is_empty() || (url.starts_with('`') && url.ends_with('`')) {
+            return false;
+        }
+        !self.is_non_file_destination(url, flavor) && !self.is_fragment_only_link(url)
+    }
+
+    /// Report the inline links written in HTML comments that point at nothing.
+    ///
+    /// Only the existence and absolute-link policies apply. The compact-path
+    /// and self-referential suggestions stay out: both offer a rewrite, and the
+    /// text of a comment is never rewritten.
+    fn check_comment_links(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        anchor: &LazyAnchor<'_>,
+        project_root: &Path,
+        position: &mut dyn FnMut(usize) -> (usize, usize),
+        warnings: &mut Vec<LintWarning>,
+    ) {
+        if !self.config.html_comments {
+            return;
+        }
+        for link in ctx.html_comment_link_destinations() {
+            let destination = &link.destination;
+            let url = destination.url;
+            if !self.comment_destination_is_file(url, ctx.flavor) {
+                continue;
+            }
+            let message = if Self::is_absolute_path(url) {
+                match self.absolute_link_message(url, anchor, project_root, ctx.link_target_policy()) {
+                    Some(message) => (message, Severity::Warning),
+                    None => continue,
+                }
+            } else if Self::relative_target_exists(
+                url,
+                &anchor.base_path,
+                &anchor.search_paths,
+                ctx.link_target_policy(),
+            ) {
+                continue;
+            } else {
+                (
+                    Self::missing_relative_message(url, ctx.link_target_policy()),
+                    Severity::Error,
+                )
+            };
+            let (line, column) = position(destination.url_range.start);
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line,
+                column,
+                end_line: line,
+                end_column: position(destination.url_range.end).1,
+                message: message.0,
+                severity: message.1,
                 fix: None,
             });
         }
@@ -1225,6 +1300,12 @@ impl MD057ExistingRelativeLinks {
                 continue;
             }
 
+            // Comment destinations are tracked whether or not the option is on
+            // in the configuration: an inline directive can enable it for this
+            // one file, after the cache key was formed. A configuration-level
+            // toggle is already covered by the config hash.
+            let from_comment = matches!(dependency.origin, LinkOrigin::HtmlComment);
+
             let url = dependency.target.as_str();
             if self.is_non_file_destination(url, flavor) || self.is_fragment_only_link(url) {
                 continue;
@@ -1261,6 +1342,7 @@ impl MD057ExistingRelativeLinks {
             } else {
                 hasher.update(b"relative");
                 if self.config.self_referential_links
+                    && !from_comment
                     && Self::observe_self_referential_resolution(
                         &mut hasher,
                         url,
@@ -1845,6 +1927,7 @@ impl Rule for MD057ExistingRelativeLinks {
             });
         }
 
+        self.check_comment_links(ctx, &anchor, &project_root, &mut position, &mut warnings);
         self.check_front_matter(ctx, &anchor, &project_root, &mut warnings);
 
         Ok(warnings)

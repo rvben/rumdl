@@ -808,12 +808,9 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| link.is_navigable() && link_target_file(source_dir, &link.target_path) == *target_file)
-                .chain(
-                    file_index
-                        .root_relative_links
-                        .iter()
-                        .filter(|link| root_relative_link_resolves(&content_roots, &link.target_path, target_file)),
-                )
+                .chain(file_index.root_relative_links.iter().filter(|link| {
+                    link.is_navigable() && root_relative_link_resolves(&content_roots, &link.target_path, target_file)
+                }))
                 .collect();
 
             if matching_links.is_empty() {
@@ -941,7 +938,8 @@ impl RumdlLanguageServer {
                         && link.fragment.eq_ignore_ascii_case(fragment)
                 })
                 .chain(file_index.root_relative_links.iter().filter(|link| {
-                    link.fragment.eq_ignore_ascii_case(fragment)
+                    link.is_navigable()
+                        && link.fragment.eq_ignore_ascii_case(fragment)
                         && root_relative_link_resolves(&content_roots, &link.target_path, target_path)
                 }))
                 .collect();
@@ -1162,10 +1160,12 @@ impl RumdlLanguageServer {
             .filter(|(source_path, file_index)| {
                 let source_dir = source_path.parent().unwrap_or(Path::new(""));
                 file_index.cross_file_links.iter().any(|link| {
-                    renamed_anchor(&link.fragment, renames).is_some()
+                    link.is_navigable()
+                        && renamed_anchor(&link.fragment, renames).is_some()
                         && link_target_file(source_dir, &link.target_path) == *target_path
                 }) || file_index.root_relative_links.iter().any(|link| {
-                    renamed_anchor(&link.fragment, renames).is_some()
+                    link.is_navigable()
+                        && renamed_anchor(&link.fragment, renames).is_some()
                         && root_relative_link_resolves(content_roots, &link.target_path, target_path)
                 })
             })

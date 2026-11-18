@@ -111,6 +111,23 @@ pub struct MD057Config {
     /// ```
     pub check_frontmatter: bool,
 
+    /// Also check inline links written inside HTML comments.
+    ///
+    /// Off by default: a comment is not rendered, so a link in one is not a
+    /// link the reader can follow. Enable it for projects that keep links in
+    /// comments to bring back later or to hand to another tool, and want them
+    /// kept valid. Only inline links are read (`[text](path)`); images,
+    /// autolinks, reference links and linter directive comments are not.
+    /// Nothing inside a comment is ever rewritten.
+    ///
+    /// Example:
+    /// ```toml
+    /// [MD057]
+    /// html-comments = true
+    /// ```
+    #[serde(alias = "html_comments")]
+    pub html_comments: bool,
+
     /// Top-level frontmatter keys whose values are not checked. Matched
     /// case-insensitively. A parent key excludes its whole subtree. Applies
     /// only when `check-frontmatter` is enabled.
@@ -119,4 +136,19 @@ pub struct MD057Config {
 
 impl RuleConfig for MD057Config {
     const RULE_NAME: &'static str = "MD057";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn html_comments_is_off_by_default_and_reads_both_spellings() {
+        assert!(!MD057Config::default().html_comments);
+        let kebab: MD057Config = toml::from_str("html-comments = true").unwrap();
+        let snake: MD057Config = toml::from_str("html_comments = true").unwrap();
+        assert!(kebab.html_comments && snake.html_comments);
+        let unrelated: MD057Config = toml::from_str("check-frontmatter = true").unwrap();
+        assert!(!unrelated.html_comments);
+    }
 }

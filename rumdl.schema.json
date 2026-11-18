@@ -3512,6 +3512,16 @@
           "type": "boolean",
           "default": false
         },
+        "html-comments": {
+          "description": "Also check the fragments of inline links written inside HTML comments.\n\nOff by default: a comment is not rendered, so a link in one is not a\nlink the reader can follow. A `#heading` link resolves against this\ndocument's headings and a `file.md#heading` link against the other\nfile's, as a link in the text does. A heading written inside a comment\nis never an anchor. Only inline links are read; images, autolinks,\nreference links and linter directive comments are not, and nothing\ninside a comment is ever rewritten.\n\nExample:\n```toml\n[MD051]\nhtml-comments = true\n```",
+          "type": "boolean",
+          "default": false
+        },
+        "html_comments": {
+          "description": "Also check the fragments of inline links written inside HTML comments.\n\nOff by default: a comment is not rendered, so a link in one is not a\nlink the reader can follow. A `#heading` link resolves against this\ndocument's headings and a `file.md#heading` link against the other\nfile's, as a link in the text does. A heading written inside a comment\nis never an anchor. Only inline links are read; images, autolinks,\nreference links and linter directive comments are not, and nothing\ninside a comment is ever rewritten.\n\nExample:\n```toml\n[MD051]\nhtml-comments = true\n```",
+          "type": "boolean",
+          "default": false
+        },
         "ignore-case": {
           "description": "Match link fragments against headings case-insensitively.\n\nrumdl defaults to `true` (permissive matching), which deviates from\nmarkdownlint's default of `false`. Set this to `false` for strict\nmarkdownlint parity.",
           "type": "boolean",
@@ -3729,6 +3739,16 @@
         },
         "compact_paths": {
           "description": "Warn when relative links contain unnecessary path traversal.\nWhen enabled, `../sub_dir/file.md` from within `sub_dir/` warns\nand suggests the shorter equivalent `file.md`.",
+          "type": "boolean",
+          "default": false
+        },
+        "html-comments": {
+          "description": "Also check inline links written inside HTML comments.\n\nOff by default: a comment is not rendered, so a link in one is not a\nlink the reader can follow. Enable it for projects that keep links in\ncomments to bring back later or to hand to another tool, and want them\nkept valid. Only inline links are read (`[text](path)`); images,\nautolinks, reference links and linter directive comments are not.\nNothing inside a comment is ever rewritten.\n\nExample:\n```toml\n[MD057]\nhtml-comments = true\n```",
+          "type": "boolean",
+          "default": false
+        },
+        "html_comments": {
+          "description": "Also check inline links written inside HTML comments.\n\nOff by default: a comment is not rendered, so a link in one is not a\nlink the reader can follow. Enable it for projects that keep links in\ncomments to bring back later or to hand to another tool, and want them\nkept valid. Only inline links are read (`[text](path)`); images,\nautolinks, reference links and linter directive comments are not.\nNothing inside a comment is ever rewritten.\n\nExample:\n```toml\n[MD057]\nhtml-comments = true\n```",
           "type": "boolean",
           "default": false
         },

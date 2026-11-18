@@ -93,7 +93,13 @@ fn cross_file_warnings(
 
     let resolver = LinkResolver::from_config(config);
     let document_links = resolver.for_document(file_path);
+    let follow_comment_links = rumdl_lib::rules::md051_link_fragments::reads_comment_links(config);
     for link in &file_index.cross_file_links {
+        // A link in an HTML comment leads somewhere only for MD051 with
+        // `html-comments`; anything else must not load the target's config.
+        if link.origin == rumdl_lib::workspace_index::LinkOrigin::HtmlComment && !follow_comment_links {
+            continue;
+        }
         // A destination with no fragment names a file, which MD057 checks; there
         // is nothing to resolve against the target's headings.
         if link.fragment.is_empty() {

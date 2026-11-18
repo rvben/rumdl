@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 /// Splits a destination at its first `#` into the path part and the fragment
 /// with its `#`, empty when there is none.
-fn split_fragment(url: &str) -> (&str, &str) {
+pub(super) fn split_fragment(url: &str) -> (&str, &str) {
     url.find('#').map_or((url, ""), |hash| url.split_at(hash))
 }
 
@@ -393,7 +393,7 @@ fn definition_destination_range(content: &str, span: &Range<usize>, dest: &str) 
 /// a candidate counts only when it reads as the parser's destination. A
 /// container marker, or anything else mistaken for the destination, thus
 /// yields no range rather than a wrong one.
-fn destination_after(content: &str, gap_start: usize, end: usize, dest: &str) -> Option<Range<usize>> {
+pub(super) fn destination_after(content: &str, gap_start: usize, end: usize, dest: &str) -> Option<Range<usize>> {
     let mut at_line_start = false;
     for (offset, ch) in content.get(gap_start..end)?.char_indices() {
         let start = gap_start + offset;

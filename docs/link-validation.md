@@ -153,6 +153,44 @@ omitted-files = "warn"
 
 Detects absolute paths (starting with `/`) in nav entries.
 
+## HTML Comments
+
+Text inside an HTML comment is not rendered, and most rules leave it alone. These
+are the rules that read it, each checked against a fixture that breaks the rule
+inside a comment:
+
+| Rule              | Reads comment text                                      |
+| ----------------- | ------------------------------------------------------- |
+| [MD044](md044.md) | Yes by default; `html-comments = false` turns it off    |
+| [MD009](md009.md) | Trailing spaces on the lines of a multi-line comment    |
+| [MD013](md013.md) | Only a line that also holds text outside the comment    |
+| [MD057](md057.md) | Only with `html-comments = true`: inline links to files |
+| [MD051](md051.md) | Only with `html-comments = true`: inline link fragments |
+
+The same fixture, with every one of these violations written as ordinary text
+instead, is reported by MD004, MD009, MD010, MD013, MD018, MD022, MD025, MD026,
+MD029, MD032, MD033, MD034, MD037, MD042, MD045, MD051, MD052, MD057, MD063,
+MD064 and MD085. Written on lines that hold only comment text, and with default
+settings, only MD009 and, once `names` is set, MD044 report. MD013 reports a long
+line only when the line also holds text outside the comment. The rest do not read
+comment text.
+
+MD057 and MD051 read comments only when asked, because a link in a comment is not
+one the reader can follow. Their `html-comments` option checks inline links
+written there, for projects that keep links in comments to bring back later:
+
+```toml
+[MD057]
+html-comments = true
+
+[MD051]
+html-comments = true
+```
+
+Only inline links are read. Images, autolinks, reference links, wikilinks and
+rumdl or markdownlint directive comments are not, and nothing inside a comment
+is ever rewritten by either rule.
+
 ## Controlling Severity
 
 You can control whether link validation warnings fail your build using per-rule severity

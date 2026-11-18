@@ -285,7 +285,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
     }
 
     let mut positions = SourcePositions::new(content, &ctx.lines);
-    let mut record = |path: &str, fragment: &str, start: usize| {
+    let mut record = |path: &str, fragment: &str, start: usize, origin: LinkOrigin| {
         let Some(destination) = indexed_destination(path) else {
             return;
         };
@@ -295,7 +295,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
             fragment: fragment.to_string(),
             line,
             column: column + 1,
-            origin: LinkOrigin::Body,
+            origin: origin.clone(),
         };
         match destination {
             IndexedDestination::Relative(path) => links.relative.push(entry(path)),
@@ -312,7 +312,12 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
         } else {
             destination.url_range.start
         };
-        record(destination.url, destination.fragment.trim_start_matches('#'), at);
+        record(
+            destination.url,
+            destination.fragment.trim_start_matches('#'),
+            at,
+            LinkOrigin::Body,
+        );
     }
 
     // A definition whose destination cannot be located is positioned at its
@@ -323,7 +328,26 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
             .destination
             .as_ref()
             .map_or(definition.start, |range| range.start);
-        record(path, fragment, at);
+        record(path, fragment, at, LinkOrigin::Body);
+    }
+
+    // Inline links written in HTML comments, positioned at their destination
+    // (the same place MD051 records them, so the two entries are one). The
+    // index keeps them whatever the rules read; each reader filters by its own
+    // `html-comments`. A fragment with template syntax is not one MD051 checks,
+    // so it is not recorded either.
+    for link in ctx.html_comment_link_destinations() {
+        let destination = &link.destination;
+        let fragment = destination.fragment.strip_prefix('#').unwrap_or("");
+        if fragment.contains("{{") || fragment.contains("{%") {
+            continue;
+        }
+        record(
+            destination.url,
+            fragment,
+            link.full_range.start,
+            LinkOrigin::HtmlComment,
+        );
     }
 
     // Entries are kept in source order, whichever construct produced them.
@@ -382,8 +406,13 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// `FileIndex::defined_references`, which were always written empty. The
 /// encoding is positional, so an entry written with them would be decoded
 /// with every later field shifted.
+///
+/// Version 18 adds `LinkOrigin::HtmlComment`, recorded for inline links written
+/// inside HTML comments. The origin is encoded by position, and an older entry
+/// has none of these links, so it would answer a run with `html-comments` on
+/// as if the document had no commented links.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 17;
+const CACHE_FORMAT_VERSION: u32 = 18;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -524,6 +553,10 @@ pub enum LinkOrigin {
     /// (`link: [a](other.md#a)`) is `Body`: it is real Markdown link syntax, so
     /// the extraction that finds body links finds it and rename can rewrite it.
     FrontMatter { field: Option<String> },
+    /// An inline link written inside an HTML comment. Recorded whatever the
+    /// rules are configured to read, so one index serves every configuration;
+    /// each consumer filters by its own `html-comments` setting.
+    HtmlComment,
 }
 
 /// Information about a cross-file link for validation
@@ -1319,7 +1352,10 @@ impl FileIndex {
     /// however each of them spells the destination.
     pub fn add_cross_file_link(&mut self, link: CrossFileLinkIndex) {
         let existing = self.cross_file_links.iter_mut().find(|existing| {
-            existing.fragment == link.fragment
+            // A link in a comment is its own entry: it can never stand in for
+            // one the document renders, or be merged away by it.
+            (existing.origin == LinkOrigin::HtmlComment) == (link.origin == LinkOrigin::HtmlComment)
+                && existing.fragment == link.fragment
                 && existing.line == link.line
                 && strip_query_and_fragment(&existing.target_path) == strip_query_and_fragment(&link.target_path)
         });
@@ -1337,8 +1373,12 @@ impl FileIndex {
 
     /// Add a root-relative link to the index (deduplicates by target_path, fragment, line)
     pub fn add_root_relative_link(&mut self, link: CrossFileLinkIndex) {
+        // A link in a comment is its own entry, as in `add_cross_file_link`.
         let is_duplicate = self.root_relative_links.iter().any(|existing| {
-            existing.target_path == link.target_path && existing.fragment == link.fragment && existing.line == link.line
+            (existing.origin == LinkOrigin::HtmlComment) == (link.origin == LinkOrigin::HtmlComment)
+                && existing.target_path == link.target_path
+                && existing.fragment == link.fragment
+                && existing.line == link.line
         });
         if !is_duplicate {
             self.root_relative_links.push(link);
@@ -2485,5 +2525,27 @@ And another [link](also-missing.md) on this line.
         assert!(index.get_resolved_file(&alias.join("a.md")).is_some());
         assert!(index.get_resolved_file(&alias.join("./sub/../a.md")).is_some());
         assert!(index.get_resolved_file(&alias.join("b.md")).is_none());
+    }
+
+    #[test]
+    fn root_relative_dedupe_keeps_a_comment_link_and_a_rendered_link_apart() {
+        let link = |origin| CrossFileLinkIndex {
+            target_path: "/guide.md".to_string(),
+            fragment: "intro".to_string(),
+            line: 1,
+            column: 1,
+            origin,
+        };
+        let mut file_index = FileIndex::new();
+        file_index.add_root_relative_link(link(LinkOrigin::HtmlComment));
+        file_index.add_root_relative_link(link(LinkOrigin::Body));
+        file_index.add_root_relative_link(link(LinkOrigin::Body));
+
+        let origins: Vec<_> = file_index
+            .root_relative_links
+            .iter()
+            .map(|l| l.origin.clone())
+            .collect();
+        assert_eq!(origins, vec![LinkOrigin::HtmlComment, LinkOrigin::Body]);
     }
 }

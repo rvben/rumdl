@@ -61,6 +61,24 @@ pub struct MD051Config {
     /// only when `check-frontmatter` is enabled.
     #[serde(default)]
     pub ignore_frontmatter_fields: Vec<String>,
+
+    /// Also check the fragments of inline links written inside HTML comments.
+    ///
+    /// Off by default: a comment is not rendered, so a link in one is not a
+    /// link the reader can follow. A `#heading` link resolves against this
+    /// document's headings and a `file.md#heading` link against the other
+    /// file's, as a link in the text does. A heading written inside a comment
+    /// is never an anchor. Only inline links are read; images, autolinks,
+    /// reference links and linter directive comments are not, and nothing
+    /// inside a comment is ever rewritten.
+    ///
+    /// Example:
+    /// ```toml
+    /// [MD051]
+    /// html-comments = true
+    /// ```
+    #[serde(default, alias = "html_comments")]
+    pub html_comments: bool,
 }
 
 fn default_ignore_case() -> bool {
@@ -75,6 +93,7 @@ impl Default for MD051Config {
             ignored_pattern: None,
             check_frontmatter: false,
             ignore_frontmatter_fields: Vec::new(),
+            html_comments: false,
         }
     }
 }
@@ -346,6 +365,11 @@ impl MD051LinkFragments {
             .collect()
     }
 
+    /// Whether the option reads comment links and this document has some.
+    fn reads_comment_links(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        self.config.html_comments && ctx.html_comment_link_destinations().next().is_some()
+    }
+
     /// Whether this rule's configuration reports a link written at `origin`.
     ///
     /// Applied when reading the workspace index rather than when building it:
@@ -361,6 +385,7 @@ impl MD051LinkFragments {
                         .as_ref()
                         .is_some_and(|field| self.ignored_front_matter_fields.contains(field))
             }
+            LinkOrigin::HtmlComment => self.config.html_comments,
         }
     }
 
@@ -479,6 +504,13 @@ impl MD051LinkFragments {
     }
 }
 
+/// Whether `config` has MD051 read the links written in HTML comments. Run
+/// modes that follow indexed links to the files they name use it to skip the
+/// links no rule reads.
+pub fn reads_comment_links(config: &crate::config::Config) -> bool {
+    crate::rule_config_serde::load_rule_config::<MD051Config>(config).html_comments
+}
+
 impl Rule for MD051LinkFragments {
     fn name(&self) -> &'static str {
         "MD051"
@@ -511,7 +543,10 @@ impl Rule for MD051LinkFragments {
         }
 
         let front_matter_links = self.front_matter_links(ctx);
-        if ctx.links().is_empty() && ctx.body_reference_definitions().next().is_none() && front_matter_links.is_empty()
+        if ctx.links().is_empty()
+            && ctx.body_reference_definitions().next().is_none()
+            && front_matter_links.is_empty()
+            && !self.reads_comment_links(ctx)
         {
             return Ok(warnings);
         }
@@ -549,6 +584,44 @@ impl Rule for MD051LinkFragments {
                     column: link.start_col + 1,
                     end_line: link.end_line,
                     end_column: link.end_col + 1,
+                    severity: Severity::Error,
+                    fix: None,
+                });
+            }
+        }
+
+        // Inline links written in HTML comments, when the option reads them.
+        // The report spans the written destination.
+        if self.config.html_comments {
+            let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
+            for link in ctx.html_comment_link_destinations() {
+                if ctx.flavor.is_pandoc_compatible() && ctx.is_in_citation(link.destination.link_start) {
+                    continue;
+                }
+                let full_url = link.destination.full_url();
+                let Some(fragment) = Self::same_document_fragment(&full_url) else {
+                    continue;
+                };
+                // A fragment with template syntax is not an anchor, as for the
+                // links to other files.
+                if fragment.contains("{{") || fragment.contains("{%") {
+                    continue;
+                }
+                if self.fragment_is_exempt(ctx, fragment) || self.fragment_resolves(ctx, fragment, &anchors) {
+                    continue;
+                }
+                let (_, line, column) = positions.position(link.full_range.start);
+                let (_, end_line, end_column) = positions.position(link.full_range.end);
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    message: format!(
+                        "Link anchor '#{fragment}' does not exist in document headings{}",
+                        self.anchor_hint(ctx, fragment, &anchors, &suggester)
+                    ),
+                    line,
+                    column: column + 1,
+                    end_line,
+                    end_column: end_column + 1,
                     severity: Severity::Error,
                     fix: None,
                 });
@@ -697,8 +770,30 @@ impl Rule for MD051LinkFragments {
             }
         }
 
-        // Reference definitions, used or not, positioned at their destination.
+        // Inline links written in HTML comments, recorded whatever this rule
+        // is configured to read, like frontmatter values: the index is shared
+        // by every configuration of the workspace and `cross_file_check`
+        // applies this file's own `html-comments`.
         let mut positions = SourcePositions::new(ctx.content, &ctx.lines);
+        for link in ctx.html_comment_link_destinations() {
+            let full_url = link.destination.full_url();
+            let Some((path_part, fragment)) = Self::cross_file_parts(&full_url) else {
+                continue;
+            };
+            if fragment.is_empty() || fragment.contains("{{") || fragment.contains("{%") {
+                continue;
+            }
+            let (_, line, column) = positions.position(link.full_range.start);
+            file_index.add_cross_file_link(CrossFileLinkIndex {
+                target_path: path_part.to_string(),
+                fragment: fragment.to_string(),
+                line,
+                column: column + 1,
+                origin: LinkOrigin::HtmlComment,
+            });
+        }
+
+        // Reference definitions, used or not, positioned at their destination.
         for definition in ctx.body_reference_definitions() {
             let Some((path_part, fragment)) = Self::cross_file_parts(definition.url) else {
                 continue;
@@ -876,6 +971,16 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use std::path::PathBuf;
+
+    #[test]
+    fn html_comments_is_off_by_default_and_reads_both_spellings() {
+        assert!(!MD051Config::default().html_comments);
+        let kebab: MD051Config = toml::from_str("html-comments = true").unwrap();
+        let snake: MD051Config = toml::from_str("html_comments = true").unwrap();
+        assert!(kebab.html_comments && snake.html_comments);
+        let unrelated: MD051Config = toml::from_str("anchor-style = \"github\"").unwrap();
+        assert!(!unrelated.html_comments);
+    }
 
     #[test]
     fn local_fragments_after_skipped_links_keep_duplicate_and_html_targets() {

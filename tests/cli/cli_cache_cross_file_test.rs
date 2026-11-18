@@ -584,3 +584,96 @@ fn workspace_index_cache_is_saved_when_files_change() {
         "a pruned file must be saved to the index cache"
     );
 }
+
+#[test]
+fn md057_cache_tracks_html_comment_targets_when_the_option_is_on() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    fs::write(dir.join(".rumdl.toml"), "[MD057]\nhtml-comments = true\n").unwrap();
+    fs::write(dir.join("a.md"), "# Source\n\n<!-- [link](b.md) -->\n").unwrap();
+
+    let (first_success, first) = run_with_status(dir, &["check", "a.md", "--enable", "MD057"]);
+    assert!(!first_success, "missing comment target must fail:\n{first}");
+    assert!(first.contains("Relative link 'b.md' does not exist"), "got:\n{first}");
+
+    fs::write(dir.join("b.md"), "# Target\n").unwrap();
+    let (second_success, second) = run_with_status(dir, &["check", "a.md", "b.md", "--enable", "MD057"]);
+    assert!(
+        second_success,
+        "creating the target must invalidate the cached warning:\n{second}"
+    );
+
+    fs::remove_file(dir.join("b.md")).unwrap();
+    let (third_success, third) = run_with_status(dir, &["check", "a.md", "--enable", "MD057"]);
+    assert!(
+        !third_success,
+        "removing the target must invalidate the cached pass:\n{third}"
+    );
+    assert!(third.contains("Relative link 'b.md' does not exist"), "got:\n{third}");
+}
+
+#[test]
+fn md057_cache_tracks_comment_targets_when_only_the_inline_directive_enables_the_option() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    fs::write(
+        dir.join("a.md"),
+        "<!-- rumdl-configure-file { \"MD057\": { \"html-comments\": true } } -->\n\n<!-- [link](b.md) -->\n",
+    )
+    .unwrap();
+
+    let (first_success, first) = run_with_status(dir, &["check", "a.md", "--enable", "MD057"]);
+    assert!(!first_success, "missing comment target must fail:\n{first}");
+    assert!(first.contains("Relative link 'b.md' does not exist"), "got:\n{first}");
+
+    fs::write(dir.join("b.md"), "# Target\n").unwrap();
+    let (second_success, second) = run_with_status(dir, &["check", "a.md", "b.md", "--enable", "MD057"]);
+    assert!(
+        second_success,
+        "creating the target must invalidate the cached warning:\n{second}"
+    );
+}
+
+#[test]
+fn md057_toggling_html_comments_with_a_warm_cache_changes_the_result() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    fs::write(dir.join("a.md"), "# Source\n\n<!-- [link](missing.md) -->\n").unwrap();
+
+    fs::write(dir.join(".rumdl.toml"), "").unwrap();
+    let (off_success, off) = run_with_status(dir, &["check", "a.md", "--enable", "MD057"]);
+    assert!(off_success, "option off must pass:\n{off}");
+
+    fs::write(dir.join(".rumdl.toml"), "[MD057]\nhtml-comments = true\n").unwrap();
+    let (on_success, on) = run_with_status(dir, &["check", "a.md", "--enable", "MD057"]);
+    assert!(!on_success, "option on must report despite the warm cache:\n{on}");
+
+    fs::write(dir.join(".rumdl.toml"), "").unwrap();
+    let (again_success, again) = run_with_status(dir, &["check", "a.md", "--enable", "MD057"]);
+    assert!(again_success, "option off again must pass:\n{again}");
+}
+
+#[test]
+fn md051_toggling_html_comments_reuses_the_index_but_follows_the_option() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    fs::write(dir.join("a.md"), "# Source\n\n<!-- [link](b.md#nope) -->\n").unwrap();
+    write_target(dir);
+
+    fs::write(dir.join(".rumdl.toml"), "").unwrap();
+    let (off_success, off) = run_with_status(dir, &["check", "a.md", "b.md", "--enable", "MD051"]);
+    assert!(off_success, "option off must pass:\n{off}");
+
+    fs::write(dir.join(".rumdl.toml"), "[MD051]\nhtml-comments = true\n").unwrap();
+    let (on_success, on) = run_with_status(dir, &["check", "a.md", "b.md", "--enable", "MD051"]);
+    assert!(!on_success, "option on must report from the cached index:\n{on}");
+    assert!(on.contains("Link fragment 'nope' not found in 'b.md'"), "got:\n{on}");
+
+    fs::write(dir.join(".rumdl.toml"), "").unwrap();
+    let (again_success, again) = run_with_status(dir, &["check", "a.md", "b.md", "--enable", "MD051"]);
+    assert!(again_success, "option off again must pass:\n{again}");
+}
