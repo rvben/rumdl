@@ -1,0 +1,76 @@
+name: Heading test Windows benchmark
+
+on:
+  push:
+    branches: [bench/heading-test-windows]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: 1.100.0
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+
+      - name: Run original and batched heading tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal --no-self-update
+
+          $harness = Join-Path $env:RUNNER_TEMP 'rumdl-heading-harness'
+          $tests = Join-Path $harness 'tests'
+          New-Item -ItemType Directory -Path $tests -Force | Out-Null
+          @'
+          [package]
+          name = "rumdl-heading-test-harness"
+          version = "0.0.0"
+          edition = "2024"
+          publish = false
+
+          [dev-dependencies]
+          pulldown-cmark = "=0.13.6"
+          tempfile = "=3.27.0"
+          '@ | Set-Content (Join-Path $harness 'Cargo.toml') -Encoding utf8NoBOM
+
+          $testSource = 'tests/cli/cli_list_item_heading_fix_test.rs'
+          git show "074bb03cedbe7e37554bee3a4edc66813b198db5:${testSource}" |
+            Set-Content (Join-Path $tests 'original.rs') -Encoding utf8NoBOM
+          Copy-Item $testSource (Join-Path $tests 'batched.rs')
+
+          $archive = Join-Path $harness 'rumdl.zip'
+          $url = 'https://github.com/rvben/rumdl/releases/download/v0.3.5/rumdl-v0.3.5-x86_64-pc-windows-msvc.zip'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $digest = (Get-FileHash $archive -Algorithm SHA256).Hash
+          if ($digest -ne 'ff40c7b64f8c67e5a39d5734837d2fc9984c0da436e4cc79bb72a08cea413b2d') {
+            throw "Unexpected rumdl archive digest: $digest"
+          }
+          Expand-Archive -Path $archive -DestinationPath $harness
+          $env:CARGO_BIN_EXE_rumdl = (Get-ChildItem $harness -Filter 'rumdl.exe' -File -Recurse).FullName
+          & $env:CARGO_BIN_EXE_rumdl --version
+
+          Push-Location $harness
+          try {
+            cargo test --tests -- --test-threads 2
+            $test = 'each_heading_rule_alone_keeps_a_marker_line_heading_in_its_item'
+            foreach ($variant in 'original', 'batched', 'batched', 'original', 'original', 'batched') {
+              Write-Host "Focused timing: $variant"
+              cargo test --locked --test $variant -- --exact $test --test-threads 1
+            }
+          } finally {
+            Pop-Location
+          }
