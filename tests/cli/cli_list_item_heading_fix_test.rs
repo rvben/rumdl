@@ -72,19 +72,40 @@ fn structure(content: &str) -> Structure {
     }
 }
 
+fn fix_command(extra: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rumdl"));
+    command.args(["check", "--isolated", "--no-cache", "--fix"]).args(extra);
+    command
+}
+
 /// The document after `rumdl check --fix`, with the given extra arguments.
 fn fix(content: &str, extra: &[&str]) -> String {
     let dir = tempdir().unwrap();
     let path = dir.path().join("doc.md");
     fs::write(&path, content).unwrap();
     // The exit status reports what is left unfixed, which is not under test.
-    Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .args(["check", "--isolated", "--no-cache", "--fix"])
-        .args(extra)
-        .arg(&path)
-        .output()
-        .expect("run rumdl check --fix");
+    fix_command(extra).arg(&path).output().expect("run rumdl check --fix");
     fs::read_to_string(&path).unwrap()
+}
+
+/// Run one rule over all fixtures and read each fixed document in fixture order.
+fn fix_batch(contents: &[&str], rule: &str) -> Vec<String> {
+    let dir = tempdir().unwrap();
+    let names: Vec<_> = (0..contents.len()).map(|index| format!("doc-{index}.md")).collect();
+    for (name, content) in names.iter().zip(contents) {
+        fs::write(dir.path().join(name), content).unwrap();
+    }
+    let output = fix_command(&["--enable", rule])
+        .current_dir(dir.path())
+        .args(&names)
+        .output()
+        .expect("run rumdl check --fix on the fixture batch");
+    // Diagnostics can remain after fixes. Any other exit status is a CLI failure.
+    assert!(matches!(output.status.code(), Some(0 | 1)), "{rule}: {output:?}");
+    names
+        .iter()
+        .map(|name| fs::read_to_string(dir.path().join(name)).unwrap())
+        .collect()
 }
 
 const STRICT: &[&str] = &["--enable", "MD022,MD023"];
@@ -346,9 +367,10 @@ fn each_heading_rule_alone_keeps_a_marker_line_heading_in_its_item() {
         "MD001", "MD003", "MD018", "MD019", "MD020", "MD021", "MD022", "MD023", "MD024", "MD025", "MD026", "MD036",
         "MD041", "MD043", "MD063", "MD065", "MD066", "MD069", "MD077",
     ] {
-        for content in MARKER_LINE_CORPUS {
+        let fixed = fix_batch(MARKER_LINE_CORPUS, rule);
+        for (content, fixed) in MARKER_LINE_CORPUS.iter().zip(fixed) {
             let before = structure(content);
-            let after = structure(&fix(content, &["--enable", rule]));
+            let after = structure(&fixed);
             if matches!(rule, "MD001" | "MD025" | "MD063") {
                 assert_eq!(before.shape(), after.shape(), "{rule} {content:?}");
             } else if rule == "MD069" || rule == "MD077" {
