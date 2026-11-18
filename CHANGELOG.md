@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5](https://github.com/rvben/rumdl/compare/v0.3.4...v0.3.5) - 2026-11-18
+
 ### Changed
 
 - The MSRV policy is now a rolling window: rumdl supports at least the three
@@ -24,6 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MD076 preserves loose-list spacing when blank-separated blocks inside an item
   or required structural separators keep the list loose, preventing repeated
   formatting changes when used with Prettier (#989).
+
+- **MD013**: leave lines exempted from other rules out of reflow (#1007) ([f0d9004](https://github.com/rvben/rumdl/commit/f0d9004954276eec1905009d62c40df191519464))
+- **docs**: readable prose measure and literal CLI flags on the docs site ([853837f](https://github.com/rvben/rumdl/commit/853837f5b98cb2dc0b92504c5c3a9f64c7e913f5))
+- **build**: make the CLI allocators optional for library consumers (#1004) ([0f735c2](https://github.com/rvben/rumdl/commit/0f735c2b59e06c045750a1dc2ddbf5a0c279c80a))
+- **ci**: refer dependency updates to the current MSRV policy ([9b554e4](https://github.com/rvben/rumdl/commit/9b554e4770e6ea932ca97015e4934e32f423065b))
+- **ci**: make dependency refresh complete and reviewable ([a05042c](https://github.com/rvben/rumdl/commit/a05042cfa2901552a90b25321dc73200279bedd5))
+- harden frontmatter handling and reference checks ([3ac13d5](https://github.com/rvben/rumdl/commit/3ac13d5a393d558ada6ab142a11123fec4605bea))
+- **yaml**: preserve scalar compatibility when parsing YAML ([fb181e6](https://github.com/rvben/rumdl/commit/fb181e6cb830ca4bd13d46c8bc7fe1327d987e12))
+- **MD013**: make frontmatter configuration consistent ([73aa9d9](https://github.com/rvben/rumdl/commit/73aa9d9603e0370877fcd55e4a7f4586a6327d36))
+
+### Added
+
+- **MD029**: add the explicit `zero` list style ([b16df44](https://github.com/rvben/rumdl/commit/b16df442a7b00f765d1b30b928b2631e70a58e83))
+- **schema**: describe rule options from the config structs (#1000) ([2237c7a](https://github.com/rvben/rumdl/commit/2237c7adf193dcc55cad76cf985d7fd3a50d574a))
 
 ## [0.3.4](https://github.com/rvben/rumdl/compare/v0.3.3...v0.3.4) - 2026-11-12
 
