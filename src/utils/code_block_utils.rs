@@ -963,6 +963,19 @@ impl CodeBlockUtils {
         idx > 0 && pos < blocks[idx - 1].1
     }
 
+    /// Whether a range of the sorted, non-overlapping `ranges` opened before `pos`
+    /// and is still open at it: `start < pos < end`.
+    ///
+    /// [`Self::is_in_code_block`] counts a range that opens exactly at `pos`, the
+    /// right answer for "is this element inside a range". This is the answer for
+    /// "was `pos` reached with the range already open", such as whether a line
+    /// begins inside a code span opened on an earlier line. A line whose first
+    /// byte is the opening backtick of its own span does not.
+    pub(crate) fn is_strictly_inside(ranges: &[(usize, usize)], pos: usize) -> bool {
+        let idx = ranges.partition_point(|&(start, _)| start < pos);
+        idx > 0 && pos < ranges[idx - 1].1
+    }
+
     /// Analyze code block context relative to list parsing
     /// This is the core function implementing Design #3's three-tier classification
     pub fn analyze_code_block_context(
@@ -1367,6 +1380,25 @@ mod tests {
         // Should NOT detect inline spans
         assert!(!blocks.iter().any(|(s, e)| &content[*s..*e] == "`span1`"));
         assert!(!blocks.iter().any(|(s, e)| &content[*s..*e] == "`span2`"));
+    }
+
+    #[test]
+    fn is_strictly_inside_excludes_a_range_that_opens_at_the_position() {
+        let ranges = [(10, 20), (30, 40)];
+        // The range opens here: reached by the position, not open before it.
+        assert!(!CodeBlockUtils::is_strictly_inside(&ranges, 10));
+        assert!(!CodeBlockUtils::is_strictly_inside(&ranges, 30));
+        assert!(CodeBlockUtils::is_strictly_inside(&ranges, 11));
+        assert!(CodeBlockUtils::is_strictly_inside(&ranges, 19));
+        // The end is exclusive, as it is for the inclusive query.
+        assert!(!CodeBlockUtils::is_strictly_inside(&ranges, 20));
+        assert!(!CodeBlockUtils::is_strictly_inside(&ranges, 25));
+        assert!(!CodeBlockUtils::is_strictly_inside(&ranges, 5));
+        assert!(!CodeBlockUtils::is_strictly_inside(&ranges, 0));
+        assert!(CodeBlockUtils::is_strictly_inside(&ranges, 39));
+        assert!(!CodeBlockUtils::is_strictly_inside(&[], 7));
+        // The inclusive query differs exactly at the opening byte.
+        assert!(CodeBlockUtils::is_in_code_block(&ranges, 10));
     }
 
     #[test]

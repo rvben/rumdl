@@ -4,6 +4,8 @@
 //! table/list membership flags are settled by completion and are not inputs
 //! of the native continuation algorithm.
 
+use crate::utils::code_block_utils::CodeBlockUtils;
+
 use super::{CodeBlockDetail, InlineConfig, LineInfo, LintContext, ListBlock, MarkdownFlavor, OnceLock};
 
 pub(crate) struct NativePreparedStructure<'a> {
@@ -180,12 +182,31 @@ impl NativeListSource<'_, '_> {
         self.inline_config.is_rule_disabled(name, line)
     }
 
-    pub(crate) fn is_byte_offset_in_code_span(&self, pos: usize) -> bool {
-        LintContext::binary_search_ranges(self.inline_code_ranges, pos)
+    pub(crate) fn is_in_code_span_byte_with_or_without_math(&self, pos: usize) -> bool {
+        self.in_code_span_reading(|ranges| LintContext::binary_search_ranges(ranges, pos))
     }
 
-    pub(crate) fn is_in_code_span_byte_with_or_without_math(&self, pos: usize) -> bool {
-        let in_primary = LintContext::binary_search_ranges(self.code_span_ranges, pos);
+    /// Whether `line` begins inside a code span opened on an earlier line, as
+    /// rumdl reads the document, as a reader without math does, or as a
+    /// supplemental MkDocs or MDX scan finds the spans. A span that opens at the
+    /// first byte of the line does not count: the line starts the span rather
+    /// than continuing one. A rewrite of the line's leading whitespace must leave
+    /// it alone when this is true, since the whitespace is then code.
+    pub(crate) fn line_starts_inside_code_span(&self, line: &LineInfo) -> bool {
+        CodeBlockUtils::is_strictly_inside(self.inline_code_ranges, line.byte_offset)
+            || self.line_starts_inside_code_span_with_or_without_math(line)
+    }
+
+    /// [`Self::line_starts_inside_code_span`] for the primary spans and the
+    /// without-math reading only.
+    pub(crate) fn line_starts_inside_code_span_with_or_without_math(&self, line: &LineInfo) -> bool {
+        self.in_code_span_reading(|ranges| CodeBlockUtils::is_strictly_inside(ranges, line.byte_offset))
+    }
+
+    /// Whether `matches` holds for the primary code spans or, in a document
+    /// with math, for the spans a reader without math finds.
+    fn in_code_span_reading(&self, matches: impl Fn(&[(usize, usize)]) -> bool) -> bool {
+        let in_primary = matches(self.code_span_ranges);
         // This is the native alternate reading, shared by the full context and
         // the early list view. MDX can supply different primary code spans.
 
@@ -199,7 +220,7 @@ impl NativeListSource<'_, '_> {
                 Vec::new()
             }
         });
-        in_primary || LintContext::binary_search_ranges(without_math, pos)
+        in_primary || matches(without_math)
     }
 }
 

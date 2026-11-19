@@ -114,3 +114,77 @@ fn the_oracle_sees_a_paragraph_become_code() {
     assert_eq!(before.last().unwrap().0, "p");
     assert_eq!(after.last().unwrap().0, "code");
 }
+
+/// Tight continuation lines whose first byte opens a code span sit at the
+/// margin. The line is the item's own paragraph text, so it is aligned like
+/// any other text; a span opening on the line's first byte is not a span the
+/// line begins inside.
+const CODE_SPAN_AT_THE_MARGIN: &[&str] = &[
+    "- Lorem ipsum dolor sit amet.\n`Sed` do eiusmod tempor.\n  Ut enim ad minim.\n",
+    "- Lorem ipsum\n``Sed`` do\n  Ut enim\n",
+    "- Lorem ipsum\n`Sed` do\n `Ut` enim\n  `Duis` aute\n   `Excepteur` sint\n",
+    "1. Lorem ipsum\n`Sed` do\n",
+    "- a\n  - b\n`Sed` do\n",
+    "- A $x$ b\n`Sed` $y$ do\n",
+];
+
+#[test]
+fn a_code_span_at_the_margin_is_aligned_and_keeps_the_document_structure() {
+    for flavor in FLAVORS {
+        for content in CODE_SPAN_AT_THE_MARGIN {
+            let once = fix_once(content, flavor);
+            assert_ne!(&once, content, "{flavor}: {content:?} was left unaligned");
+            assert_eq!(
+                structure(content),
+                structure(&once),
+                "{flavor}: {content:?} became {once:?}"
+            );
+            assert_eq!(fix_once(&once, flavor), once, "{flavor}: {content:?} is not idempotent");
+        }
+    }
+}
+
+/// The aligned text of a line opening with a code span is the aligned text of
+/// the same line opening with a plain word: only the first token differs. A
+/// blockquoted item is one the rule leaves alone, for either spelling.
+#[test]
+fn a_code_span_at_the_margin_is_aligned_exactly_like_plain_text() {
+    for flavor in FLAVORS {
+        for content in CODE_SPAN_AT_THE_MARGIN.iter().chain(&["> - a\n> `Sed` do\n"]) {
+            let plain = content.replace('`', "");
+            let from_plain = fix_once(&plain, flavor);
+            let from_code = fix_once(content, flavor);
+            assert_eq!(from_code.replace('`', ""), from_plain, "{flavor}: {content:?}");
+        }
+    }
+}
+
+#[test]
+fn the_issue_document_is_aligned_to_the_exact_expected_text() {
+    let content = "- Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n`Sed` do eiusmod tempor incididunt ut labore.\n  Ut enim ad minim veniam.\n";
+    assert_eq!(
+        fix_once(content, "standard"),
+        "- Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n  `Sed` do eiusmod tempor incididunt ut labore.\n  Ut enim ad minim veniam.\n"
+    );
+    assert_eq!(
+        fix_once(content, "mkdocs"),
+        "- Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n    `Sed` do eiusmod tempor incididunt ut labore.\n    Ut enim ad minim veniam.\n"
+    );
+}
+
+/// A line that begins inside a span opened earlier keeps its whitespace, under
+/// the reading with math and the one without it. Negative control: the same
+/// text without the span's backtick is aligned.
+#[test]
+fn a_line_that_begins_inside_a_code_span_is_still_left_alone() {
+    for flavor in FLAVORS {
+        for content in ["- A $x `y$\nand z` end.\n", "- A `y\nand z` end.\n"] {
+            assert_eq!(&fix_once(content, flavor), content, "{flavor}: {content:?}");
+        }
+        assert_ne!(
+            fix_once("- A $x y$\nand z end.\n", flavor),
+            "- A $x y$\nand z end.\n",
+            "{flavor}"
+        );
+    }
+}

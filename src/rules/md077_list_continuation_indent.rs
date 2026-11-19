@@ -542,6 +542,21 @@ impl MD077ListContinuationIndent {
                 if info.is_blank || info.list_item.is_some() {
                     return false;
                 }
+                // A JSX flavor reads `<tag>` on a line as paragraph text, while
+                // its code spans come from a parse that reads the same line as
+                // an HTML block opener. Aligning a line above a span can move
+                // the span's opening into that block and dissolve the span, so
+                // a line that begins inside one is aligned by a second pass
+                // only. Without a `<` above the line no such block can open.
+                if ctx.flavor.supports_jsx()
+                    && ctx.line_starts_inside_code_span(info)
+                    && (item_line..line_num).any(|above| {
+                        ctx.line_info(above)
+                            .is_some_and(|line| line.content(ctx.content).contains('<'))
+                    })
+                {
+                    return true;
+                }
                 let trimmed = info.content(ctx.content).trim_start();
                 !Self::should_skip_line(ctx, info, trimmed)
                     && (Self::starts_with_list_marker(trimmed)
@@ -878,10 +893,7 @@ impl MD077ListContinuationIndent {
                 || info.in_mkdocs_html_markdown
                 || info.in_kramdown_extension_block
         };
-        let protected = || {
-            ctx.is_byte_offset_in_code_span(info.byte_offset)
-                || ctx.is_in_code_span_byte_with_or_without_math(info.byte_offset)
-        };
+        let protected = || ctx.line_starts_inside_code_span(info);
         // The structural flags settle opaque lines without source-range queries.
         // The alternate reading remains mandatory for every eligible line.
 
@@ -4818,5 +4830,175 @@ mod tests {
         assert_untouched("- x\n\n  `a\n      b`\n");
         // A span closed on the previous line does not shield the next line.
         assert_fixed("- x\n\n  `a`\n     b\n", "- x\n\n  `a`\n  b\n");
+        // A span opened on the last byte of the previous line is still open at
+        // the start of this one.
+        assert_untouched("- x `\n\t`\n");
+        assert_untouched("- x `\n`y` z`\n");
+    }
+
+    #[test]
+    fn whitespace_inside_a_span_the_mdx_jsx_scan_finds_is_kept() {
+        // The trailing `{` makes the MDX parse recover, and the span inside the
+        // JSX body is then found only by the supplemental JSX scan.
+        let content = "- item\n\n  <Box>\n  text `a\n       b` more\n  </Box>\n\n{\n";
+        assert_eq!(fix_aligned_flavor(content, MarkdownFlavor::MDX), content);
+    }
+
+    #[test]
+    fn an_mdx_item_with_a_line_inside_a_code_span_is_fixed_in_one_pass_or_not_at_all() {
+        // Under MDX the item's marker line is paragraph text, while the code
+        // spans come from a parse that reads `<?` and `<Box>` as HTML block
+        // openers. Aligning the line that opens the span moves it into that
+        // block and dissolves the span, so the line the span shielded would be
+        // aligned by a second pass only.
+        for content in [
+            "- <?\n![](<`)\n` `\n> ",
+            "- <?\nx `y\nand z` end\n",
+            "- <Box>\nx `y\nand z` end\n",
+            "# \n1. <?\n*`*\n` `",
+        ] {
+            let once = fix_aligned_flavor(content, MarkdownFlavor::MDX);
+            let twice = fix_aligned_flavor(&once, MarkdownFlavor::MDX);
+            assert_eq!(once, twice, "{content:?}");
+        }
+        // Without a line inside a span the item is aligned as before.
+        assert_eq!(
+            fix_aligned_flavor("- <Box>\nplain\nmore\n", MarkdownFlavor::MDX),
+            "- <Box>\n  plain\n  more\n"
+        );
+        // With no `<` above the span no HTML block can open, so the prose is
+        // aligned and the line inside the span is kept.
+        assert_eq!(
+            fix_aligned_flavor("- Ordinary item\nprose\n  aligned `a\n  b` end\n", MarkdownFlavor::MDX),
+            "- Ordinary item\n  prose\n  aligned `a\n  b` end\n"
+        );
+        assert_eq!(
+            fix_aligned_flavor("- A\nb `y\nand z` end\n", MarkdownFlavor::MDX),
+            "- A\n  b `y\nand z` end\n"
+        );
+        // Other flavors read spans and blocks from one parse: the line that
+        // opens the span is aligned and the line inside it is kept.
+        assert_eq!(
+            fix_aligned_flavor("- A\nb `y\nand z` end\n", MarkdownFlavor::Standard),
+            "- A\n  b `y\nand z` end\n"
+        );
+    }
+
+    /// The warnings of `content` under the aligned style as (line, message).
+    fn aligned_findings(content: &str) -> Vec<(usize, String)> {
+        check_aligned(content)
+            .into_iter()
+            .map(|w| (w.line, w.message))
+            .collect()
+    }
+
+    #[test]
+    fn a_continuation_line_that_opens_with_a_code_span_is_aligned_like_any_text() {
+        let content = "- Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n`Sed` do eiusmod tempor incididunt.\n  Ut enim ad minim veniam.\n";
+        assert_eq!(
+            aligned_findings(content),
+            vec![(2, "Continuation line under-indented (expected 2, found 0)".to_string())]
+        );
+        let fixed = "- Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n  `Sed` do eiusmod tempor incididunt.\n  Ut enim ad minim veniam.\n";
+        assert_eq!(fix_aligned(content), fixed);
+        assert_eq!(fix_aligned(fixed), fixed, "not idempotent");
+        assert!(check_aligned(fixed).is_empty());
+    }
+
+    #[test]
+    fn code_span_continuation_lines_at_every_indent_are_judged_by_their_indent() {
+        let content = "- Lorem ipsum\n`Sed` do\n `Ut` enim\n  `Duis` aute\n   `Excepteur` sint\n";
+        let lines: Vec<usize> = aligned_findings(content).into_iter().map(|(line, _)| line).collect();
+        assert_eq!(lines, vec![2, 3, 5]);
+        assert_eq!(
+            fix_aligned(content),
+            "- Lorem ipsum\n  `Sed` do\n  `Ut` enim\n  `Duis` aute\n  `Excepteur` sint\n"
+        );
+    }
+
+    #[test]
+    fn a_double_backtick_span_at_the_margin_is_aligned() {
+        assert_eq!(fix_aligned("- Lorem\n``a`b`` do\n"), "- Lorem\n  ``a`b`` do\n");
+    }
+
+    #[test]
+    fn the_any_style_leaves_a_margin_code_span_line_alone() {
+        assert_untouched_by_any("- Lorem\n`Sed` do\n  tail\n");
+        assert_untouched_by_any("- Lorem\nSed do\n  tail\n");
+    }
+
+    fn assert_untouched_by_any(content: &str) {
+        assert!(check(content).is_empty(), "{content:?}: {:?}", check(content));
+        assert_eq!(fix(content), content);
+    }
+
+    /// Every spelling of a line's first token, under a two-column item. Each is
+    /// one inline construct; none may change how the line's indentation is read.
+    const LINE_OPENERS: [(&str, &str); 9] = [
+        ("plain", "Sed do eiusmod"),
+        ("emphasis", "*Sed* do eiusmod"),
+        ("link", "[Sed](x) do eiusmod"),
+        ("html", "<b>Sed</b> do eiusmod"),
+        ("code span", "`Sed` do eiusmod"),
+        ("double backtick span", "``Sed`` do eiusmod"),
+        ("math", "$x$ do eiusmod"),
+        ("image", "![Sed](x) do eiusmod"),
+        ("autolink", "<https://example.com> do eiusmod"),
+    ];
+
+    #[test]
+    fn what_a_continuation_line_opens_with_never_changes_how_its_indent_is_read() {
+        for indent in 0..=3 {
+            let pad = " ".repeat(indent);
+            let document = |text: &str| format!("- Lorem ipsum\n{pad}{text}\n  tail\n");
+            let (_, plain_text) = LINE_OPENERS[0];
+            let plain = document(plain_text);
+            let plain_findings = aligned_findings(&plain);
+            // Positive control: the plain row is flagged unless the indent is the item's own.
+            assert_eq!(plain_findings.is_empty(), indent == 2, "plain at indent {indent}");
+            for (name, text) in LINE_OPENERS {
+                let content = document(text);
+                assert_eq!(
+                    aligned_findings(&content),
+                    plain_findings,
+                    "{name} at indent {indent}: {content:?}"
+                );
+                let expected = format!("- Lorem ipsum\n  {text}\n  tail\n");
+                assert_eq!(fix_aligned(&content), expected, "{name} at indent {indent}");
+                assert_eq!(
+                    fix_aligned(&expected),
+                    expected,
+                    "{name} at indent {indent}: not idempotent"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_margin_line_that_opens_a_table_row_with_a_code_span_is_latent_structure() {
+        // `plain` would be flagged on its own. With a table-shaped line below it
+        // that may pull the lines into a table, the rule leaves both alone, and a
+        // code span at the start of that line does not hide it.
+        for content in ["- item\nplain\nx | b |\n", "- item\nplain\n`a` | b |\n"] {
+            assert!(
+                check_aligned(content).is_empty(),
+                "{content:?}: {:?}",
+                check_aligned(content)
+            );
+            assert_eq!(fix_aligned(content), content, "{content:?}");
+        }
+        assert_eq!(aligned_findings("- item\nplain\n").len(), 1);
+    }
+
+    #[test]
+    fn the_without_math_reading_still_protects_a_line_inside_a_span() {
+        // Read with `$x `y$` as math, the backtick before `y` is text and the
+        // span opens later; read without math it opens at that backtick and runs
+        // into line 2, whose indentation then belongs to the code.
+        let inside = "- A $x `y$\nand z` end.\n";
+        assert_untouched(inside);
+        // The same text without the backtick has no span, so the line is flagged.
+        let outside = "- A $x y$\nand z end.\n";
+        assert_eq!(aligned_findings(outside).len(), 1, "{:?}", aligned_findings(outside));
     }
 }
