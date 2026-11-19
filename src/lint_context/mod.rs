@@ -2052,6 +2052,16 @@ impl<'a> LintContext<'a> {
         self.native_list_source().is_in_code_span_byte_with_or_without_math(pos)
     }
 
+    /// Whether `line` begins inside a code span opened on an earlier line, under
+    /// rumdl's reading of the primary spans or a reader's without math. A span
+    /// opening at the first byte of the line does not count. Ask this, not
+    /// [`Self::is_in_code_span_byte_with_or_without_math`] with the line's
+    /// offset, which also answers yes for a line that opens its own span.
+    pub fn line_starts_inside_code_span_with_or_without_math(&self, line: &LineInfo) -> bool {
+        self.native_list_source()
+            .line_starts_inside_code_span_with_or_without_math(line)
+    }
+
     /// Whether the byte at `pos` is part of a code span's text under any reading
     /// of the document: the spans [`Self::code_spans`] lists (parser spans plus
     /// the MkDocs-container and MDX-JSX supplements) or the spans a reader

@@ -164,7 +164,7 @@ fn continuation_indent_to_strip(
     indent: usize,
     content_col: usize,
 ) -> usize {
-    if ctx.is_in_code_span_byte_with_or_without_math(ctx.lines[idx].byte_offset) {
+    if ctx.line_starts_inside_code_span_with_or_without_math(&ctx.lines[idx]) {
         indent.min(content_col)
     } else {
         indent
@@ -236,7 +236,7 @@ fn blockquote_continuation_line(
     content_col: usize,
 ) -> String {
     let mut text = trim_preserving_hard_break(&bq.content);
-    if ctx.is_in_code_span_byte_with_or_without_math(ctx.lines[idx].byte_offset) {
+    if ctx.line_starts_inside_code_span_with_or_without_math(&ctx.lines[idx]) {
         let indent = &bq.prefix[blockquote_content_start(&bq.prefix)..];
         text.insert_str(0, &indent[content_col.min(indent.len())..]);
     }
@@ -2493,7 +2493,7 @@ impl MD013LineLength {
                     // keeps the indentation past the footnote's own, which leaves
                     // the footnote as written; a lazy line has none taken off. A
                     // hard break at the end stays, so the paragraph keeps it.
-                    let text = if !ctx.is_in_code_span_byte_with_or_without_math(ctx.lines[i].byte_offset) {
+                    let text = if !ctx.line_starts_inside_code_span_with_or_without_math(&ctx.lines[i]) {
                         trim_preserving_hard_break(next.trim_start())
                     } else if indent >= FN_INDENT {
                         trim_preserving_hard_break(&strip_fn_indent(next))
