@@ -361,3 +361,12 @@ fn a_comment_or_fence_after_a_lazy_line_ends_the_item() {
         assert_eq!(md056_lines(&content), vec![row], "{content}");
     }
 }
+
+/// The same after-a-table line, written as a code span: it opens with a
+/// backtick, which is still paragraph text and not the start of a table.
+#[test]
+fn a_code_span_line_after_a_list_table_ends_the_item() {
+    let content = "- | a | b |\n  | - | - |\n`outside`\n\n  | a | b |\n  | - | - |\n| 1 | 2 | 3 |\n";
+    assert!(parser_reads_a_table(content));
+    assert_eq!(md056_lines(content), vec![7], "{content}");
+}

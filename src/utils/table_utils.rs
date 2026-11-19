@@ -428,12 +428,10 @@ impl TableUtils {
             {
                 list_indent_stack.truncate(ended);
             }
-            let in_code =
-                crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block_or_span(code_blocks, line_start) || {
-                    // Binary search on sorted code spans
-                    let idx = code_spans.partition_point(|span| span.0 <= line_start);
-                    idx > 0 && line_start < code_spans[idx - 1].1
-                };
+            let in_code = crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block_or_span(code_blocks, line_start)
+                    // A span that opens on this line's first byte leaves the line a candidate
+                    // header; only a span opened on an earlier line makes it code.
+                    || crate::utils::code_block_utils::CodeBlockUtils::is_strictly_inside(code_spans, line_start);
             let in_html_comment = {
                 // Binary search on sorted HTML comment ranges
                 let idx = html_comment_ranges.partition_point(|range| range.start <= line_start);
@@ -2010,6 +2008,34 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(TableUtils::find_table_blocks("text\n\n", &ctx).is_empty());
         assert_eq!(TableUtils::find_table_blocks(content, &ctx).len(), 1);
+    }
+
+    #[test]
+    fn a_header_row_that_opens_with_a_code_span_starts_a_table() {
+        for content in [
+            "intro\n\n`a` | b\n--- | ---\n1 | 2 | 3\n",
+            "intro\n\n``a`` | b\n--- | ---\n1 | 2\n",
+            "`a` | b\n--- | ---\n1 | 2\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let header = content.lines().position(|line| line.contains("| b")).unwrap();
+            let found = TableUtils::find_table_blocks(content, &ctx);
+            assert_eq!(found.len(), 1, "{content:?}");
+            assert_eq!(found[0].header_line, header, "{content:?}");
+            assert_eq!(found[0].delimiter_line, header + 1, "{content:?}");
+            // The detection built into context construction agrees.
+            assert_eq!(ctx.table_blocks.len(), 1, "{content:?}");
+            assert_eq!(ctx.table_blocks[0].header_line, header, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_that_begins_inside_a_code_span_is_not_a_table_header() {
+        // The span opens on the line above, so this line is code, not a header.
+        let content = "`x\na | b\n--- | ---\n1 | 2`\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(TableUtils::find_table_blocks(content, &ctx).is_empty());
+        assert!(ctx.table_blocks.is_empty());
     }
 
     #[test]

@@ -933,4 +933,16 @@ Cell 1     Cell 2     Cell 3
             "MD056 already-valid table with caption should have no warnings under Standard: {result_std:?}"
         );
     }
+
+    #[test]
+    fn a_header_row_opening_with_a_code_span_is_checked_like_any_other() {
+        let rule = MD056TableColumnCount;
+        for header in ["`a` | b", "x | b"] {
+            let content = format!("intro\n\n{header}\n--- | ---\n1 | 2 | 3\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(result.len(), 1, "{header:?}: {result:?}");
+            assert_eq!(result[0].line, 5, "{header:?}");
+        }
+    }
 }
