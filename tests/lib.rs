@@ -1,5 +1,6 @@
 mod character_ranges;
 mod cli;
+mod code_span_line_start;
 mod config;
 mod formats;
 mod git_command;
