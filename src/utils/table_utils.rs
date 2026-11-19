@@ -339,7 +339,9 @@ impl TableUtils {
     /// Find all table blocks in the content with optimized detection
     /// This version accepts code_blocks and code_spans directly for use during LintContext construction.
     /// `lazy_text` has one entry per line (or none): the line is indented text that
-    /// a running paragraph continues, which cannot be a table row.
+    /// a running paragraph continues, which cannot be a table row. The wrapper
+    /// without context cannot know which lines continue a paragraph, so a line
+    /// short of an item's indent ends the item there.
     pub fn find_table_blocks_with_code_info(
         content: &str,
         code_blocks: &[(usize, usize)],
@@ -402,11 +404,30 @@ impl TableUtils {
         // Stack of active list content indents for continuation table tracking.
         // Supports nested lists: when a child list is seen, we push; when we
         // dedent past a level, we pop back to the enclosing list.
-        let mut list_indent_stack: Vec<(usize, bool)> = Vec::new();
+        //
+        // Each level also records where the parser's list item for it ends, or 0
+        // when the parser opened none (a marker that cannot start a list there).
+        // A level is closed once its item has ended, and not before: a line short
+        // of a level's indent still belongs to the item while the parser holds it
+        // open (a paragraph that continues without the item's indent, a lazy
+        // continuation, does not end the item). A level with no parser item (0)
+        // is closed by indent alone.
+        let mut list_indent_stack: Vec<(usize, bool, usize)> = Vec::new();
 
         while i < lines.len() {
             // Skip lines in code blocks, code spans, or HTML comments
             let line_start = line_positions[i];
+            // A level whose parser item ended before this line is closed, whatever
+            // kind of line this is: a fence or a comment that ends the item is
+            // skipped below, and must not leave its level for a later table. Levels
+            // above an ended item sit inside it, so they close with it, including
+            // a level the parser never opened (paragraph text that looks like a marker).
+            if let Some(ended) = list_indent_stack
+                .iter()
+                .position(|&(_, _, item_end)| item_end != 0 && item_end <= line_start)
+            {
+                list_indent_stack.truncate(ended);
+            }
             let in_code =
                 crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block_or_span(code_blocks, line_start) || {
                     // Binary search on sorted code spans
@@ -432,8 +453,10 @@ impl TableUtils {
                 Self::extract_nested_list_prefix(line_content);
             let line_is_quoted = line_content.len() != lines[i].len();
             if !line_is_quoted {
-                // A line outside any blockquote ends the quote, and the lists opened in it.
-                list_indent_stack.retain(|&(_, opened_quoted)| !opened_quoted);
+                // A line outside any blockquote ends the quote, and the lists opened in
+                // it, unless the parser holds the item open (a lazy line may omit the
+                // quote marker as well as the indent).
+                list_indent_stack.retain(|&(_, opened_quoted, item_end)| !opened_quoted || item_end != 0);
             }
             // The columns in front of a blockquote marker indented under an item count
             // towards that item's indent, so it stays open. A list opened inside a quote
@@ -458,16 +481,28 @@ impl TableUtils {
                 // level the line opens.
                 while list_indent_stack
                     .last()
-                    .is_some_and(|&(top, opened_quoted)| top > indent_for(opened_quoted))
+                    .is_some_and(|&(top, opened_quoted, _)| top > indent_for(opened_quoted))
                 {
                     list_indent_stack.pop();
                 }
-                list_indent_stack.extend(opened_levels.into_iter().map(|level| (level, line_is_quoted)));
+                // The parser's items that start on this line, outermost first.
+                let first_item = list_items.partition_point(|&(start, _, _)| start < line_start);
+                let line_end = line_start + lines[i].len();
+                let mut item_ends = list_items[first_item..]
+                    .iter()
+                    .take_while(|&&(start, _, _)| start <= line_end)
+                    .map(|&(_, end, _)| end);
+                list_indent_stack.extend(
+                    opened_levels
+                        .into_iter()
+                        .map(|level| (level, line_is_quoted, item_ends.next().unwrap_or(0))),
+                );
             } else if !line_content.trim().is_empty() {
-                // Non-blank line without a marker: pop any levels we've dedented past.
+                // Non-blank line without a marker: pop any levels we've dedented past
+                // that have no parser item (the others close when their item ends).
                 while list_indent_stack
                     .last()
-                    .is_some_and(|&(top, opened_quoted)| indent_for(opened_quoted) < top)
+                    .is_some_and(|&(top, opened_quoted, item_end)| indent_for(opened_quoted) < top && item_end == 0)
                 {
                     list_indent_stack.pop();
                 }
@@ -493,9 +528,9 @@ impl TableUtils {
                     .rev()
                     // A quoted row is measured against the columns after its quote
                     // marker, which an item opened outside the quote does not share.
-                    .filter(|&&(_, opened_quoted)| opened_quoted || !line_is_quoted)
-                    .find(|&&(indent, _)| leading >= indent)
-                    .map(|&(indent, _)| indent)
+                    .filter(|&&(_, opened_quoted, _)| opened_quoted || !line_is_quoted)
+                    .find(|&&(indent, _, _)| leading >= indent)
+                    .map(|&(indent, _, _)| indent)
             } else {
                 None
             };
@@ -755,9 +790,15 @@ impl TableUtils {
         &line[byte_count..]
     }
 
-    /// Find all table blocks in the content with optimized detection
-    /// This is a backward-compatible wrapper that accepts LintContext
+    /// The table blocks of `content`, read with `ctx`'s code blocks, spans and
+    /// flavor. When `content` is the document `ctx` was built from, this is the
+    /// result the context found while it was constructed, with facts only
+    /// construction has (where each parser list item ends). For any other text
+    /// the lookup scans `content` itself, without those facts.
     pub fn find_table_blocks(content: &str, ctx: &crate::lint_context::LintContext) -> Vec<TableBlock> {
+        if content == ctx.content {
+            return ctx.table_blocks.clone();
+        }
         Self::find_table_blocks_with_code_info(
             content,
             &ctx.code_blocks,
@@ -1887,6 +1928,88 @@ mod tests {
         assert_eq!(table.header_line, 0);
         assert_eq!(table.delimiter_line, 1);
         assert_eq!(table.content_lines, vec![2, 3]);
+    }
+
+    #[test]
+    fn a_lazy_continuation_line_keeps_the_list_item_open_for_a_table() {
+        for content in [
+            "- Item\nlazy\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\n",
+            "- Item\n`code`\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\n",
+            "- Item\nlazy one\nlazy two\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(ctx.table_blocks.len(), 1, "{content:?}");
+            let list = ctx.table_blocks[0].list_context.as_ref();
+            assert_eq!(list.map(|l| l.content_indent), Some(2), "{content:?}");
+        }
+        // A paragraph after a blank line ends the item: the table is not its.
+        let content = "- Item\n\ntext\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), 1);
+        assert!(ctx.table_blocks[0].list_context.is_none());
+    }
+
+    #[test]
+    fn a_line_after_a_list_table_is_not_a_lazy_continuation() {
+        // `outside` follows the item's table, so it ends the item: the table
+        // below it is the document's, and the row at the margin is its own.
+        let content = "- | a | b |\n  | - | - |\noutside\n\n  | a | b |\n  | - | - |\n| 1 | 2 | 3 |\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), 2, "{content:?}");
+        assert!(ctx.table_blocks[0].list_context.is_some());
+        assert!(ctx.table_blocks[1].list_context.is_none());
+        assert_eq!(ctx.table_blocks[1].content_lines, vec![6]);
+    }
+
+    #[test]
+    fn a_comment_after_a_lazy_line_ends_the_item_for_a_table() {
+        let content = "- item\nlazy\n\n<!-- hi -->\n\n  | a | b |\n  | - | - |\n| 1 | 2 | 3 |\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), 1, "{content:?}");
+        assert!(ctx.table_blocks[0].list_context.is_none(), "{content:?}");
+        assert_eq!(ctx.table_blocks[0].content_lines, vec![7]);
+    }
+
+    #[test]
+    fn a_comment_ends_an_item_hidden_under_paragraph_text_that_looks_like_a_marker() {
+        // `2. fake` is paragraph text, so the scanner holds a level the parser never
+        // opened above the real item; the comment ends the real item and both levels.
+        let content = "- Item\nlazy\n  2. fake\n\n<!-- end -->\n\n  | a | b |\n  | - | - |\n| 1 | 2 | 3 |\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), 1, "{content:?}");
+        assert!(ctx.table_blocks[0].list_context.is_none(), "{content:?}");
+        assert_eq!(ctx.table_blocks[0].content_lines, vec![8]);
+    }
+
+    #[test]
+    fn the_table_lookup_with_a_context_returns_the_contexts_tables() {
+        let content = "- Item\nlazy\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let found = TableUtils::find_table_blocks(content, &ctx);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].list_context.as_ref().map(|l| l.content_indent), Some(2));
+        assert_eq!(found[0].start_line, ctx.table_blocks[0].start_line);
+    }
+
+    #[test]
+    fn a_line_after_an_html_block_does_not_continue_the_item_for_a_table() {
+        // The HTML block ends the item's paragraph, so the unindented line is not
+        // lazy continuation: it ends the list, and the table below is not the
+        // list's.
+        let content = "- <div>\nlazy\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), 1, "{content:?}");
+        assert!(ctx.table_blocks[0].list_context.is_none(), "{content:?}");
+    }
+
+    #[test]
+    fn the_table_lookup_scans_other_text_than_the_contexts() {
+        // A prefix of the document that ends before the table holds none, and
+        // the lookup says so; the whole document holds one.
+        let content = "text\n\n| a | b |\n| - | - |\n| 1 | 2 |\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(TableUtils::find_table_blocks("text\n\n", &ctx).is_empty());
+        assert_eq!(TableUtils::find_table_blocks(content, &ctx).len(), 1);
     }
 
     #[test]
