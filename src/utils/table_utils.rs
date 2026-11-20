@@ -380,12 +380,26 @@ impl TableUtils {
             flavor,
             lazy_text,
             &[],
+            &match flavor {
+                // Which lines a MkDocs container holds is read from
+                // `content` itself, as the context of that text reads it.
+                MarkdownFlavor::MkDocs => crate::lint_context::LintContext::new(content, flavor, None)
+                    .lines
+                    .iter()
+                    .map(crate::lint_context::LineInfo::in_mkdocs_container)
+                    .collect(),
+                MarkdownFlavor::MDG => lines.iter().map(|line| crate::utils::mdg::is_table_row(line)).collect(),
+                _ => Vec::new(),
+            },
         )
     }
 
     /// Context construction already has these source lines and byte offsets.
     /// Share them rather than splitting and walking the source again. The public
     /// entry point above retains the same behavior for independent callers.
+    /// `flavor_row_lines` has one entry per line (or none): the flavor reads
+    /// the line as a table row whatever code spans the parser found, inside a
+    /// MkDocs container or as a Gherkin row.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn find_table_blocks_with_layout(
         lines: &[&str],
@@ -396,6 +410,7 @@ impl TableUtils {
         flavor: crate::config::MarkdownFlavor,
         lazy_text: &[bool],
         list_items: &[(usize, usize, usize)],
+        flavor_row_lines: &[bool],
     ) -> Vec<TableBlock> {
         let is_lazy_text = |line: usize| lazy_text.get(line).copied().unwrap_or(false);
         let mut tables = Vec::new();
@@ -589,7 +604,19 @@ impl TableUtils {
                 // For list tables, only accept if delimiter has valid indentation
                 let effective_is_list_table = is_any_list_table && delimiter_has_valid_indent;
 
-                if i + 1 < lines.len() && Self::is_delimiter_row(next_line_content) {
+                // A delimiter row that begins inside a code span opened above it is
+                // that span's text. The parser reads cells before spans, so a span
+                // reaches across the row only where it read no table. Where the
+                // flavor reads rows its own way, the spans were read without its
+                // tables, and one across the row says nothing about the table.
+                let delimiter_is_code = i + 1 < lines.len()
+                    && !flavor_row_lines.get(i + 1).copied().unwrap_or(false)
+                    && crate::utils::code_block_utils::CodeBlockUtils::is_strictly_inside(
+                        code_spans,
+                        line_positions[i + 1],
+                    );
+
+                if i + 1 < lines.len() && !delimiter_is_code && Self::is_delimiter_row(next_line_content) {
                     // Found a table! Find its end
                     let table_start = i;
                     let header_line = i;
@@ -2702,5 +2729,39 @@ But no delimiter row
             ctx.table_blocks.is_empty(),
             "Table inside HTML comment should not be detected"
         );
+    }
+
+    #[test]
+    fn the_scan_without_a_context_keeps_a_mkdocs_container_table() {
+        // A code span across the delimiter row leaves the table on the lines
+        // a MkDocs container holds, and only there, as the scan the context
+        // runs finds.
+        let scan = |content: &str, flavor: MarkdownFlavor| {
+            let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+            TableUtils::find_table_blocks_with_code_info(
+                content,
+                &ctx.code_blocks,
+                &ctx.code_spans(),
+                ctx.html_comment_ranges(),
+                flavor,
+                &[],
+            )
+            .len()
+        };
+        let container = "!!! note\n\n    x | `b\n    --- | ---\n    1 | 2` | 3\n";
+        let ctx = crate::lint_context::LintContext::new(container, MarkdownFlavor::MkDocs, None);
+        assert_eq!(ctx.table_blocks.len(), 1);
+        assert_eq!(scan(container, MarkdownFlavor::MkDocs), 1);
+        let top_level = "x | `b\n--- | --- | ---\n1 | 2`\n";
+        let ctx = crate::lint_context::LintContext::new(top_level, MarkdownFlavor::MkDocs, None);
+        assert_eq!(ctx.table_blocks.len(), 0);
+        assert_eq!(scan(top_level, MarkdownFlavor::MkDocs), 0);
+        assert_eq!(scan(&format!("{top_level}\n{container}"), MarkdownFlavor::MkDocs), 1);
+        let gherkin = "* Given\n\n  | a `x | b |\n  | --- | --- | --- |\n  | 1 | 2` |\n";
+        let ctx = crate::lint_context::LintContext::new(gherkin, MarkdownFlavor::MDG, None);
+        assert_eq!(ctx.table_blocks.len(), 1);
+        assert_eq!(scan(gherkin, MarkdownFlavor::MDG), 1);
+        // Where the parser's reading holds, the span is proof against the table.
+        assert_eq!(scan("x | `b\n--- | --- | ---\n1 | 2`\n", MarkdownFlavor::Standard), 0);
     }
 }

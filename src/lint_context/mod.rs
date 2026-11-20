@@ -1626,6 +1626,19 @@ impl<'a> LintContext<'a> {
                 }
             }
 
+            // The parser reads the body of a MkDocs container as a paragraph's lazy
+            // lines or as indented code, and a Gherkin row as paragraph text, so
+            // the code spans there come from a reading without the flavor's tables.
+            let flavor_row_lines: Vec<bool> = match flavor {
+                _ if char_frequency.pipe_count == 0 => Vec::new(),
+                MarkdownFlavor::MkDocs => lines.iter().map(LineInfo::in_mkdocs_container).collect(),
+                MarkdownFlavor::MDG => content_lines
+                    .iter()
+                    .map(|line| crate::utils::mdg::is_table_row(line))
+                    .collect(),
+                _ => Vec::new(),
+            };
+
             // Pre-compute table blocks for rules that need them (MD013, MD055, MD056, MD058, MD060)
             let table_blocks = profile_section!(
                 "Table blocks",
@@ -1642,6 +1655,7 @@ impl<'a> LintContext<'a> {
                         flavor,
                         &lazy_text,
                         &list_items,
+                        &flavor_row_lines,
                     )
                 }
             );

@@ -25,6 +25,11 @@ fn parser_reads_a_table(content: &str) -> bool {
 
 /// The lines MD056 flags in `content`.
 fn md056_lines(content: &str) -> Vec<usize> {
+    md056_lines_with(content, &[])
+}
+
+/// `md056_lines` with more command-line arguments.
+fn md056_lines_with(content: &str, extra: &[&str]) -> Vec<usize> {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("doc.md");
     fs::write(&path, content).unwrap();
@@ -38,8 +43,9 @@ fn md056_lines(content: &str) -> Vec<usize> {
             "MD041",
             "--enable",
             "MD056",
-            "doc.md",
         ])
+        .args(extra)
+        .arg("doc.md")
         .output()
         .expect("run rumdl check");
     // 0 is a clean run and 1 reports findings; anything else (a panic, a usage
@@ -369,4 +375,90 @@ fn a_code_span_line_after_a_list_table_ends_the_item() {
     let content = "- | a | b |\n  | - | - |\n`outside`\n\n  | a | b |\n  | - | - |\n| 1 | 2 | 3 |\n";
     assert!(parser_reads_a_table(content));
     assert_eq!(md056_lines(content), vec![7], "{content}");
+}
+
+/// Documents whose would-be delimiter row lies inside a code span that opened
+/// on the row above it. The header and delimiter differ in cell count, so the
+/// parser reads a paragraph holding the span, and the "delimiter" is code.
+const DELIMITER_INSIDE_A_CODE_SPAN: &[&str] = &[
+    "`a` | `b\n--- | --- | ---\n1 | 2`\n",
+    "x | `b\n--- | --- | ---\n1 | 2`\n",
+    "| x | `b\n| --- | --- | --- |\n| 1 | 2` |\n",
+    "- x | `b\n  --- | --- | ---\n  1 | 2`\n",
+    "> x | `b\n> --- | --- | ---\n> 1 | 2`\n",
+];
+
+#[test]
+fn a_delimiter_row_inside_a_code_span_is_code_and_not_a_table() {
+    for content in DELIMITER_INSIDE_A_CODE_SPAN {
+        assert!(!parser_reads_a_table(content), "{content:?}");
+        assert_eq!(md056_lines(content), Vec::<usize>::new(), "{content:?}");
+        assert_eq!(&format_tables(content), content, "{content:?}");
+    }
+}
+
+/// Controls for the test above: the same rows are a table once the cell counts
+/// match (the parser reads one, so no span crosses the delimiter), and a
+/// mismatched delimiter outside any span is still reported.
+#[test]
+fn a_delimiter_row_outside_any_code_span_still_makes_a_table() {
+    for (content, flagged) in [
+        ("`a` | `b\n--- | ---\n1 | 2` | 3\n", vec![3]),
+        ("x | `b\n--- | ---\n1 | 2` | 3\n", vec![3]),
+        ("`a` | `b`\n--- | ---\n1 | 2 | 3\n", vec![3]),
+    ] {
+        assert!(parser_reads_a_table(content), "{content:?}");
+        assert_eq!(md056_lines(content), flagged, "{content:?}");
+    }
+    assert_eq!(md056_lines("a | b\n--- | --- | ---\n1 | 2\n"), vec![2]);
+    assert_eq!(md056_lines("`a` | `b`\n--- | --- | ---\n1 | 2\n"), vec![2]);
+}
+
+/// The body of a MkDocs container is a table to MkDocs where the parser
+/// reads a paragraph's lazy lines or indented code, so a code span found
+/// across its delimiter row comes from a reading without tables and does not
+/// unmake the table.
+#[test]
+fn a_code_span_across_a_delimiter_row_in_a_mkdocs_container_leaves_the_table() {
+    for (content, flagged) in [
+        ("!!! note\n    x | `b\n    --- | ---\n    1 | 2` | 3\n", vec![4]),
+        ("!!! note\n\n    x | `b\n    --- | ---\n    1 | 2` | 3\n", vec![5]),
+        ("=== \"Tab\"\n\n    x | `b\n    --- | ---\n    1 | 2` | 3\n", vec![5]),
+        ("!!! note\n\n    x | `b\n    --- | --- | ---\n    1 | 2`\n", vec![4]),
+    ] {
+        assert_eq!(
+            md056_lines_with(content, &["--flavor", "mkdocs"]),
+            flagged,
+            "{content:?}"
+        );
+    }
+    // Outside a container the flavor reads the rows as the parser does.
+    for content in DELIMITER_INSIDE_A_CODE_SPAN {
+        assert_eq!(
+            md056_lines_with(content, &["--flavor", "mkdocs"]),
+            Vec::<usize>::new(),
+            "{content:?}"
+        );
+    }
+}
+
+/// Gherkin reads a row by its indentation and leading pipe, line by line, so
+/// a code span the parser finds across the delimiter row of a Gherkin table
+/// does not unmake the table.
+#[test]
+fn a_code_span_across_a_delimiter_row_leaves_a_gherkin_table() {
+    let mdg = ["--flavor", "mdg"];
+    let rows = "* Given these items\n\n  | a `x | b |\n  | --- | --- | --- |\n  | 1 | 2` |\n";
+    assert_eq!(md056_lines_with(rows, &mdg), vec![4]);
+    assert_eq!(
+        md056_lines_with(
+            "* Given these items\n\n  | a | b |\n  | --- | --- | --- |\n  | 1 | 2 |\n",
+            &mdg
+        ),
+        vec![4]
+    );
+    // A row Gherkin does not read is read as the parser reads it.
+    for content in DELIMITER_INSIDE_A_CODE_SPAN {
+        assert_eq!(md056_lines_with(content, &mdg), Vec::<usize>::new(), "{content:?}");
+    }
 }
