@@ -4,7 +4,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes, protect_literal_code};
 use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub mod md007_config;
 use md007_config::MD007Config;
@@ -12,6 +12,33 @@ use md007_config::MD007Config;
 #[derive(Debug, Clone, Default)]
 pub struct MD007ULIndent {
     config: MD007Config,
+}
+
+/// An open list item on the nesting stack.
+struct OpenItem {
+    /// Visual column of the marker, as written.
+    marker_col: usize,
+    ordered: bool,
+    marker: Option<char>,
+    /// Content column the item will have after its indent is fixed; expectation
+    /// math for its children builds on it.
+    content_col: usize,
+    bq_depth: usize,
+    /// An unordered item that inherited the ordered-ancestor exemption or was
+    /// checked under the fixed-style clamp.
+    chain: bool,
+    /// Content column as written; containment is judged against it.
+    source_content_col: usize,
+    /// The marker is followed by one to four spaces and then content, so the
+    /// written content column is the one CommonMark uses.
+    regular: bool,
+    /// The item or one of its ancestors is anchored to the written layout.
+    unresolved: bool,
+    /// Starts or continues an unordered list after leaving an ordered item.
+    separate: bool,
+    /// Marker column of the first bullet of this item's list when the item was
+    /// aligned with it, otherwise the item's own marker column.
+    list_col: usize,
 }
 
 impl MD007ULIndent {
@@ -116,13 +143,77 @@ impl MD007ULIndent {
         Self::char_pos_to_visual_column(content_after_prefix, ws_chars)
     }
 
+    /// Present dependent edits as one action. Moving one list or item alone
+    /// can change the ownership of a child or of the next marker.
+    fn bundle_ordered_list_fixes(
+        ctx: &crate::lint_context::LintContext,
+        markers: HashSet<usize>,
+        warnings: &mut [LintWarning],
+    ) {
+        if markers.is_empty() || warnings.iter().all(|warning| warning.fix.is_none()) {
+            return;
+        }
+
+        debug_assert!(warnings.windows(2).all(|pair| pair[0].line <= pair[1].line));
+        let moving_lines = warnings
+            .iter()
+            .filter(|warning| warning.fix.is_some())
+            .map(|warning| warning.line - 1)
+            .collect();
+        let scopes = ctx.list_guard_parse().affected_list_runs(ctx, markers, &moving_lines);
+        let mut scopes = scopes.into_iter().peekable();
+        let mut bundle: Option<(usize, crate::rule::Fix)> = None;
+        for index in 0..warnings.len() {
+            let line = warnings[index].line - 1;
+            while scopes.peek().is_some_and(|scope| scope.end <= line) {
+                scopes.next();
+                if let Some((first, fix)) = bundle.take() {
+                    warnings[first].fix = Some(fix);
+                }
+            }
+            if scopes.peek().is_some_and(|scope| scope.contains(&line))
+                && let Some(mut fix) = warnings[index].fix.take()
+            {
+                if let Some((_, combined)) = &mut bundle {
+                    let owned = std::mem::take(&mut fix.additional_edits);
+                    combined.additional_edits.push(fix);
+                    combined.additional_edits.extend(owned);
+                } else {
+                    bundle = Some((index, fix));
+                }
+            }
+        }
+        if let Some((first, fix)) = bundle {
+            warnings[first].fix = Some(fix);
+        }
+    }
+
+    /// Whether the item's marker is preceded by no tab and followed by one to
+    /// four spaces and then content, so the written marker and content columns
+    /// equal the ones CommonMark uses to decide what the item contains (tabs,
+    /// wider padding, a bare marker and a blank-start item do not qualify).
+    fn is_regular_item(line: &str, item: crate::lint_context::ParsedListItem<'_>) -> bool {
+        let marker_end = item.marker_column() + item.marker().chars().count();
+        let spacing = item.content_column().saturating_sub(marker_end);
+        let mut after_marker = line.chars().skip(marker_end);
+        (1..=4).contains(&spacing)
+            && line.chars().take(item.marker_column()).all(|c| c != '\t')
+            && after_marker.by_ref().take(spacing).all(|c| c == ' ')
+            && after_marker.any(|c| !c.is_whitespace())
+    }
+
     fn terminate_closed_items(
         ctx: &crate::lint_context::LintContext,
         line_info: &crate::lint_context::LineInfo,
-        list_stack: &mut Vec<(usize, usize, bool, usize, usize, bool, usize)>,
+        list_stack: &mut Vec<OpenItem>,
         line_bq_depth: usize,
     ) {
-        while let Some(&(_, _, _, content_col, item_bq_depth, _, _)) = list_stack.last() {
+        while let Some(&OpenItem {
+            content_col,
+            bq_depth: item_bq_depth,
+            ..
+        }) = list_stack.last()
+        {
             let closed = match item_bq_depth.cmp(&line_bq_depth) {
                 // The line has exited a deeper blockquote the item lived in.
                 std::cmp::Ordering::Greater => true,
@@ -242,10 +333,12 @@ impl Rule for MD007ULIndent {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
-        let mut list_stack: Vec<(usize, usize, bool, usize, usize, bool, usize)> = Vec::new(); // Stack of (marker_visual_col, line_num, is_ordered, content_visual_col, blockquote_depth, chain, source_content_visual_col) for tracking nesting. `chain` marks an unordered item that inherited the ordered-ancestor MD007 exemption or was checked under the fixed-style clamp. `content_visual_col` is the corrected (post-fix) column that expectation math builds on; `source_content_visual_col` is the column as written, which containment is judged against.
+        let mut list_stack: Vec<OpenItem> = Vec::new();
 
         // Line of each re-indented item -> (its warning, how far its content moves).
         let mut moves = HashMap::new();
+        let mut affected_list_markers = HashSet::new();
+        let mut separate_moves = HashMap::new();
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let parsed_list_item = ctx.list_item_on_line(line_idx + 1);
@@ -370,8 +463,16 @@ impl Rule for MD007ULIndent {
 
                 // Clean up stack - remove items at same or deeper indentation,
                 // but only consider items at the same blockquote depth
-                while let Some(&(indent, _, _, _, item_bq_depth, _, _)) = list_stack.last() {
+                // Column of the first bullet of the list the item left last belongs to,
+                // when that item is a sibling bullet reported without a fix: this
+                // bullet then continues its list.
+                let marker = list_item.marker_char();
+                let mut unfixed_sibling_col = None;
+                while let Some(top) = list_stack.last() {
+                    let (indent, item_bq_depth) = (top.marker_col, top.bq_depth);
                     if item_bq_depth == bq_depth && indent >= visual_marker_for_nesting {
+                        unfixed_sibling_col =
+                            (top.unresolved && top.separate && top.marker == marker).then_some(top.list_col);
                         list_stack.pop();
                     } else if item_bq_depth > bq_depth {
                         // Pop items from deeper blockquote contexts that we've left
@@ -393,9 +494,9 @@ impl Rule for MD007ULIndent {
                 // A deeper quote indented into the ancestor's content is part of that
                 // item and keeps it open. Same-depth nesting and items already inside a
                 // blockquote are left to the loop above and the exemption check below.
-                while let Some(&(_, _, _, content_col, item_bq_depth, _, _)) = list_stack.last() {
-                    if item_bq_depth < bq_depth
-                        && content_col > Self::indent_relative_to_depth(ctx, line_info, item_bq_depth)
+                while let Some(top) = list_stack.last() {
+                    if top.bq_depth < bq_depth
+                        && top.content_col > Self::indent_relative_to_depth(ctx, line_info, top.bq_depth)
                     {
                         list_stack.pop();
                     } else {
@@ -407,15 +508,19 @@ impl Rule for MD007ULIndent {
                 if list_item.is_ordered() {
                     // For ordered lists, we don't check indentation but we need to track for text-aligned children
                     // Use the actual positions since we don't enforce indentation for ordered lists
-                    list_stack.push((
-                        visual_marker_column,
-                        line_idx,
-                        true,
-                        visual_content_column,
+                    list_stack.push(OpenItem {
+                        marker_col: visual_marker_column,
+                        ordered: true,
+                        marker,
+                        content_col: visual_content_column,
                         bq_depth,
-                        false,
-                        visual_content_column,
-                    ));
+                        chain: false,
+                        source_content_col: visual_content_column,
+                        regular: Self::is_regular_item(line_info.content(ctx.content), list_item),
+                        unresolved: false,
+                        separate: false,
+                        list_col: visual_marker_column,
+                    });
                     continue;
                 }
 
@@ -444,24 +549,38 @@ impl Rule for MD007ULIndent {
                 // (insufficient indent there is a real rendering bug, not a style nit).
                 let threshold_ok = list_stack
                     .iter()
-                    .any(|item| item.4 == bq_depth && item.2 && item.3 <= visual_marker_column);
+                    .any(|item| item.bq_depth == bq_depth && item.ordered && item.content_col <= visual_marker_column);
                 // The marker-based cleanup above keeps a list item whose marker sits
                 // between the previous item's marker and its content column, even
                 // though per CommonMark such an item is the previous one's sibling,
-                // not its child. Harmless under the exemption, but the clamp would
-                // then resolve against the too-deep parent and its fix would rewrite
-                // the sibling into a child (and contradict MD005). Before judging the
-                // chain, pop every trailing item whose source content column this
-                // marker sits left of, ordered ones included: with nested ordered
-                // lists, threshold_ok can hold via an outer ordered ancestor while
-                // the innermost ordered item does not contain the marker at all.
-                if ctx.flavor != crate::config::MarkdownFlavor::MkDocs
-                    && threshold_ok
-                    && self.config.style_explicit
-                    && self.config.style == md007_config::IndentStyle::Fixed
-                {
-                    while let Some(&(_, _, _, _, item_bq_depth, _, source_content_col)) = list_stack.last() {
-                        if item_bq_depth == bq_depth && source_content_col > visual_marker_column {
+                // not its child. Pop every trailing item whose source content column
+                // this marker sits left of, so the bullet is judged against the list
+                // it actually belongs to. Ordered items qualify only when both they
+                // and the bullet are regular, i.e. their written content column is
+                // the one CommonMark uses. Under an explicit fixed style, any item
+                // qualifies once some ordered ancestor contains the bullet, which
+                // keeps the clamp from resolving against a parent that is too deep.
+                let explicit_fixed =
+                    self.config.style_explicit && self.config.style == md007_config::IndentStyle::Fixed;
+                let bullet_regular = Self::is_regular_item(line_info.content(ctx.content), list_item);
+                // Content column of the nearest ordered item this bullet sits left of.
+                let mut popped_ordered_content_col = None;
+                if ctx.flavor != crate::config::MarkdownFlavor::MkDocs {
+                    while let Some(top) = list_stack.last() {
+                        // Once an ordered item has been left, a regular ancestor whose
+                        // content also starts right of the bullet does not contain it either.
+                        let sibling_of_ordered = bullet_regular
+                            && top.regular
+                            && (top.ordered || top.unresolved || top.separate || popped_ordered_content_col.is_some());
+                        if top.bq_depth == bq_depth
+                            && top.source_content_col > visual_marker_column
+                            && (sibling_of_ordered || (threshold_ok && explicit_fixed))
+                        {
+                            if sibling_of_ordered && top.ordered && popped_ordered_content_col.is_none() {
+                                popped_ordered_content_col = Some(top.source_content_col);
+                            }
+                            unfixed_sibling_col =
+                                (top.unresolved && top.separate && top.marker == marker).then_some(top.list_col);
                             list_stack.pop();
                         } else {
                             break;
@@ -471,53 +590,82 @@ impl Rule for MD007ULIndent {
                 let chain_ok = list_stack
                     .iter()
                     .rev()
-                    .find(|item| item.4 == bq_depth)
-                    .is_some_and(|item| item.2 || item.5);
+                    .find(|item| item.bq_depth == bq_depth)
+                    .is_some_and(|item| item.ordered || item.chain);
                 let ordered_chain = ctx.flavor != crate::config::MarkdownFlavor::MkDocs && threshold_ok && chain_ok;
                 // An explicit style = "fixed" opts out of the exemption: the item is
                 // checked against the fixed expectation, clamped below to the parent's
                 // content column. The clamp is what makes checking safe here: a bullet
                 // left of its parent's content column leaves the item, so an unclamped
                 // fixed expectation would let the fix restructure the document.
-                let clamp_to_parent = ordered_chain
-                    && self.config.style_explicit
-                    && self.config.style == md007_config::IndentStyle::Fixed;
+                let clamp_to_parent = ordered_chain && explicit_fixed;
                 if ordered_chain && !clamp_to_parent {
-                    list_stack.push((
-                        visual_marker_column,
-                        line_idx,
-                        false,
-                        visual_content_column,
+                    list_stack.push(OpenItem {
+                        marker_col: visual_marker_column,
+                        ordered: false,
+                        marker,
+                        content_col: visual_content_column,
                         bq_depth,
-                        true,
-                        visual_content_column,
-                    ));
+                        chain: true,
+                        source_content_col: visual_content_column,
+                        regular: bullet_regular,
+                        unresolved: false,
+                        separate: false,
+                        list_col: visual_marker_column,
+                    });
                     continue;
                 }
 
+                let disabled = ctx.is_rule_disabled(self.name(), line_idx + 1);
+                if popped_ordered_content_col.is_some() || clamp_to_parent || disabled {
+                    affected_list_markers.insert(line_idx);
+                }
+
                 // Count only items at the same blockquote depth for nesting level
-                let nesting_level = list_stack.iter().filter(|item| item.4 == bq_depth).count();
+                let nesting_level = list_stack.iter().filter(|item| item.bq_depth == bq_depth).count();
 
                 // Get parent info for per-parent calculation (only from same blockquote depth)
-                let parent_info = list_stack
-                    .iter()
-                    .rev()
-                    .find(|item| item.4 == bq_depth)
-                    .map(|&(_, _, is_ordered, content_col, _, _, _)| (is_ordered, content_col));
+                let parent = list_stack.iter().rev().find(|item| item.bq_depth == bq_depth);
+                let parent_info = parent.map(|item| (item.ordered, item.content_col));
+                let parent_unresolved = parent.is_some_and(|item| item.unresolved);
+                // Where the parent's marker stands once its own indent is fixed.
+                let parent_marker_col = parent.map_or(0, |item| {
+                    item.content_col
+                        .saturating_sub(item.source_content_col.saturating_sub(item.marker_col))
+                });
 
                 // MD007 only indents unordered roots. An ordered root owns its own
                 // position, so its descendants must not receive the bullet-root offset.
                 let ordered_root = list_stack
                     .iter()
-                    .find(|item| item.4 == bq_depth)
-                    .is_some_and(|item| item.2);
+                    .find(|item| item.bq_depth == bq_depth)
+                    .is_some_and(|item| item.ordered);
                 let start_indent = if self.config.start_indented && !ordered_root {
                     self.config.start_indent.get() as usize
                 } else {
                     0
                 };
+                // Where a child of the ordered item just left would start: the ordered
+                // item was a root when nothing remains open, so no start indent applies.
+                let child_start = if list_stack.iter().any(|item| item.bq_depth == bq_depth) {
+                    start_indent
+                } else {
+                    0
+                };
                 // Text-aligned expectations already inherit the parent's offset.
                 let mut expected_indent = self.calculate_expected_indent(nesting_level, parent_info, start_indent);
+
+                // A sibling reported without a fix stays where it was written, so its
+                // children are judged against that column rather than a fixed grid:
+                // one configured indent step right of its marker when `indent` is set
+                // without a style, otherwise aligned with its content.
+                if parent_unresolved && let Some((_, parent_content_col)) = parent_info {
+                    expected_indent = if self.config.indent_explicit && !self.config.style_explicit {
+                        (parent_marker_col + self.config.indent.get() as usize).max(parent_content_col)
+                    } else {
+                        parent_content_col
+                    };
+                }
 
                 // Clamp the fixed expectation to the parent's content column. The
                 // floor cascades: a fixed child stores its corrected content column
@@ -527,12 +675,26 @@ impl Rule for MD007ULIndent {
                     expected_indent = expected_indent.max(parent_content_col);
                 }
 
+                // A later bullet of a list whose first bullet was reported without a
+                // fix: that list stays where it was written, so anything but the
+                // separate-list column is aligned with the first bullet. Moving this
+                // bullet alone would leave the list ragged.
+                let sibling_col = unfixed_sibling_col.filter(|_| {
+                    popped_ordered_content_col.is_none()
+                        && (explicit_fixed || visual_marker_column != expected_indent)
+                        && parent.is_none_or(|item| item.source_content_col <= visual_marker_column)
+                });
+                if let Some(col) = sibling_col {
+                    expected_indent = col;
+                }
+
                 // When indent is explicitly set and parent is ordered, also accept
                 // the fixed indent value (start_indent + nesting_level * indent). This lets users
                 // choose either text-aligned or their configured indent under ordered lists.
                 // Not under the clamp: there the fixed value can sit left of the
                 // parent's content column, and suggesting it would detach the item.
                 let also_acceptable = if !clamp_to_parent
+                    && sibling_col.is_none()
                     && self.config.indent_explicit
                     && parent_info.is_some_and(|(is_ordered, _)| is_ordered)
                 {
@@ -545,11 +707,76 @@ impl Rule for MD007ULIndent {
                 // Under an ordered list item, Python-Markdown requires at least
                 // marker_column + 4 spaces for continuation content to be recognized.
                 if ctx.flavor == crate::config::MarkdownFlavor::MkDocs
-                    && let Some(&(parent_marker_col, _, true, _, _, _, _)) =
-                        list_stack.iter().rev().find(|item| item.4 == bq_depth && item.2)
+                    && let Some(ordered_parent) = list_stack
+                        .iter()
+                        .rev()
+                        .find(|item| item.bq_depth == bq_depth && item.ordered)
                 {
-                    expected_indent = expected_indent.max(parent_marker_col + 4);
+                    expected_indent = expected_indent.max(ordered_parent.marker_col + 4);
                 }
+
+                // A bullet left of the content column of the ordered item before it
+                // starts a separate list, and moving it to the item's content column
+                // would turn it into a child instead. Which of the two the author
+                // meant is not knowable, so report both targets and offer no fix.
+                if let Some(nest_col) = popped_ordered_content_col
+                    && !explicit_fixed
+                    && visual_marker_column != expected_indent
+                {
+                    let parent_content_col = parent_info.map_or(0, |(_, content_col)| content_col);
+                    let separate_list_fits = expected_indent < nest_col
+                        && expected_indent >= parent_content_col
+                        && expected_indent - parent_content_col <= 3;
+                    let message = if separate_list_fits {
+                        format!(
+                            "Expected {expected_indent} spaces for a separate list at indent depth {nesting_level}, or {nest_col} spaces to nest under the preceding ordered item, found {visual_marker_column}"
+                        )
+                    } else {
+                        format!(
+                            "Expected {nest_col} spaces to nest under the preceding ordered item, found {visual_marker_column}"
+                        )
+                    };
+                    list_stack.push(OpenItem {
+                        marker_col: visual_marker_column,
+                        ordered: false,
+                        marker,
+                        content_col: visual_content_column,
+                        bq_depth,
+                        chain: false,
+                        source_content_col: visual_content_column,
+                        regular: bullet_regular,
+                        unresolved: true,
+                        separate: true,
+                        list_col: visual_marker_column,
+                    });
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        message,
+                        line: line_idx + 1,
+                        column: 1,
+                        end_line: line_idx + 1,
+                        end_column: visual_marker_column + 1,
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
+                    continue;
+                }
+
+                // A separate list must fit in the three columns after its parent's
+                // content column and remain left of the preceding ordered item's content.
+                let parent_content_col = parent_info.map_or(0, |(_, content_col)| content_col);
+                let nest_only_target = popped_ordered_content_col
+                    .filter(|&nest_col| {
+                        explicit_fixed
+                            && (expected_indent >= nest_col
+                                || expected_indent < parent_content_col
+                                || expected_indent - parent_content_col > 3)
+                    })
+                    .map(|nest_col| {
+                        let target = self.fixed_indent(nesting_level + 1, child_start).max(nest_col);
+                        (target - nest_col <= 3).then_some(target)
+                    });
+                let stays_written = nest_only_target.is_some() || disabled;
 
                 // Add current item to stack
                 // Use actual marker position for cleanup logic
@@ -571,20 +798,28 @@ impl Rule for MD007ULIndent {
                 // sibling. For the common single-space marker the width is 2, so the
                 // stored value is unchanged.
                 let marker_width = visual_content_column.saturating_sub(visual_marker_column);
-                let expected_content_visual_col = accepted_indent + marker_width;
+                let expected_content_visual_col = if stays_written {
+                    visual_content_column
+                } else {
+                    accepted_indent + marker_width
+                };
                 // A clamped item stays part of the ordered-rooted chain: its own
                 // descendants must resolve through the chain flag exactly as they
                 // would have through an exempt ancestor, or they would fall back to
                 // the unclamped fixed expectation and detach.
-                list_stack.push((
-                    visual_marker_column,
-                    line_idx,
-                    false,
-                    expected_content_visual_col,
+                list_stack.push(OpenItem {
+                    marker_col: visual_marker_column,
+                    ordered: false,
+                    marker,
+                    content_col: expected_content_visual_col,
                     bq_depth,
-                    clamp_to_parent,
-                    visual_content_column,
-                ));
+                    chain: clamp_to_parent,
+                    source_content_col: visual_content_column,
+                    regular: bullet_regular,
+                    unresolved: stays_written || parent_unresolved || sibling_col.is_some(),
+                    separate: popped_ordered_content_col.is_some() || sibling_col.is_some(),
+                    list_col: sibling_col.unwrap_or(visual_marker_column),
+                });
 
                 // A top-level item (depth 0) is expected at column 0 when start_indented
                 // is false. Column 0 is already correct, so skip it; any other column
@@ -601,7 +836,9 @@ impl Rule for MD007ULIndent {
                         expected_indent = alt;
                     }
                     // Generate fix for this list item
-                    let fix = {
+                    let fix = if stays_written {
+                        None
+                    } else {
                         let correct_indent = " ".repeat(expected_indent);
 
                         // Build the replacement string - need to preserve everything before the list marker
@@ -651,9 +888,17 @@ impl Rule for MD007ULIndent {
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
-                        message: format!(
-                            "Expected {expected_indent} spaces for indent depth {nesting_level}, found {visual_marker_column}"
-                        ),
+                        message: match nest_only_target {
+                            Some(Some(target)) => format!(
+                                "Expected {target} spaces to nest under the preceding ordered item, found {visual_marker_column}"
+                            ),
+                            Some(None) => format!(
+                                "The MD007 configuration has no valid indent for this separate list or a nested bullet, found {visual_marker_column} spaces"
+                            ),
+                            None => format!(
+                                "Expected {expected_indent} spaces for indent depth {nesting_level}, found {visual_marker_column}"
+                            ),
+                        },
                         line: line_idx + 1, // Convert to 1-indexed
                         column: 1,          // Start of line
                         end_line: line_idx + 1,
@@ -661,13 +906,18 @@ impl Rule for MD007ULIndent {
                         severity: Severity::Warning,
                         fix,
                     });
-                    moves.insert(
-                        line_idx,
-                        (
-                            warnings.len() - 1,
-                            expected_indent as isize - visual_marker_column as isize,
-                        ),
-                    );
+                    if !stays_written {
+                        if popped_ordered_content_col.is_some() && explicit_fixed {
+                            separate_moves.insert(line_idx + 1, expected_indent);
+                        }
+                        moves.insert(
+                            line_idx,
+                            (
+                                warnings.len() - 1,
+                                expected_indent as isize - visual_marker_column as isize,
+                            ),
+                        );
+                    }
                 }
             } else if !line_info.is_blank {
                 // A non-blank, non-list content line that breaks out of the open
@@ -763,7 +1013,25 @@ impl Rule for MD007ULIndent {
         // so nested markers are left to their own warnings.
         move_owned_lines(ctx, &moves, Nesting::Absolute, &mut warnings);
         protect_literal_code(ctx, &mut warnings);
+        Self::bundle_ordered_list_fixes(ctx, affected_list_markers, &mut warnings);
         drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
+        if !separate_moves.is_empty() {
+            let edited: HashSet<_> = warnings
+                .iter()
+                .filter_map(|warning| warning.fix.as_ref())
+                .flat_map(|fix| std::iter::once(fix).chain(&fix.additional_edits))
+                .map(|edit| edit.range.start)
+                .collect();
+            for warning in &mut warnings {
+                if let Some(target) = separate_moves.get(&warning.line)
+                    && !edited.contains(&ctx.lines[warning.line - 1].byte_offset)
+                {
+                    warning.message = format!(
+                        "Moving this separate list to column {target} would require other edits to preserve its structure"
+                    );
+                }
+            }
+        }
         Ok(warnings)
     }
 
@@ -1496,17 +1764,18 @@ tags:
   - Wrong: only 2 spaces";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Should flag incorrect indentation
+        // Two spaces is left of the ordered content column (3): a separate list.
         assert_eq!(
             result.len(),
             1,
             "Expected warning for incorrect indentation under numbered items"
         );
-        assert!(
-            result
-                .iter()
-                .any(|w| w.line == 2 && w.message.contains("Expected 3 spaces"))
+        assert_eq!(result[0].line, 2);
+        assert_eq!(
+            result[0].message,
+            "Expected 0 spaces for a separate list at indent depth 0, or 3 spaces to nest under the preceding ordered item, found 2"
         );
+        assert!(result[0].fix.is_none(), "the intent (separate or nested) is ambiguous");
     }
 
     #[test]
@@ -2520,8 +2789,8 @@ items:
 
     #[test]
     fn test_indent2_explicit_with_ordered_parent() {
-        // When indent=2 is explicit and parent is "1. " (text-aligned=3),
-        // both 2 (fixed) and 3 (text-aligned) should be accepted
+        // When indent=2 is explicit and parent is "1. " (text-aligned=3), 3 is
+        // accepted; 2 is a separate list, not a child.
         let config = MD007Config {
             indent: crate::types::IndentSize::from_const(2),
             start_indented: false,
@@ -2541,14 +2810,17 @@ items:
             "indent=2 under '1.' should accept text-aligned (3 spaces): {result:?}"
         );
 
-        // 2-space indent should also pass (matches configured fixed indent)
+        // 2-space indent is left of the ordered content column (3): a separate
+        // list, reported like the unset default, with no fix.
         let content_2 = "1. Ordered\n  * Bullet at 2 spaces";
         let ctx = LintContext::new(content_2, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "indent=2 under '1.' should accept fixed indent (2 spaces): {result:?}"
+        assert_eq!(result.len(), 1, "{result:?}");
+        assert_eq!(
+            result[0].message,
+            "Expected 0 spaces for a separate list at indent depth 0, or 3 spaces to nest under the preceding ordered item, found 2"
         );
+        assert!(result[0].fix.is_none());
     }
 
     // Issue #638: MD007 must not fire on unordered items nested under an ordered
@@ -2845,18 +3117,19 @@ items:
     }
 
     #[test]
-    fn test_fixed_style_clamp_leaves_sibling_bullet_left_of_content_column() {
+    fn test_fixed_style_sibling_bullet_left_of_content_column_moves_to_column_zero() {
         // A bullet left of the ordered content column is a sibling list, not a
-        // sublist. The plain fixed expectation applies, 2 matches it, and no
-        // fix ever moves a sibling right into the item (the #638 failure mode).
+        // sublist. It is judged as a top-level bullet (expected 0), and no fix
+        // ever moves a sibling right into the item.
         let rule = fixed_style_rule(2);
         let content = "1. Some text\n  - two spaces\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "sibling bullet at the fixed indent stays silent: {result:?}"
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, "Expected 0 spaces for indent depth 0, found 2".to_string(), true)]
         );
+        assert_eq!(rule.fix(&ctx).unwrap(), "1. Some text\n- two spaces\n");
     }
 
     #[test]
@@ -3089,17 +3362,31 @@ items:
         // bullet indented only 3 spaces is left of that content column, so it is NOT
         // nested under the ordered item but a new top-level list. The ordered-ancestor
         // exemption must not leak through this non-nested bullet to its child: with
-        // the ordered item no longer a genuine ancestor, the misindented child must
-        // still be checked. markdownlint-cli2 flags both the parent (Expected: 0) and
-        // the child (Expected: 2). The exemption must not suppress the child, and the
-        // fix must not flatten the child into a sibling of the parent.
+        // the ordered item no longer a genuine ancestor, a child that is not aligned
+        // to its (as written) parent is still checked, reported and fixed against
+        // that parent, never flattened into a sibling.
         let rule = MD007ULIndent::new(2);
-        let content = "100. ordered\n   - parent\n     - child\n";
+        let content = "100. ordered\n   - parent\n      - child\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.iter().any(|w| w.line == 3),
-            "the child of a non-nested bullet must still be checked, not exempted; got: {result:?}"
+        assert_eq!(
+            line_messages(&result),
+            vec![
+                (2, separate_list_message(0, 0, 5, 3), false),
+                (3, "Expected 5 spaces for indent depth 1, found 6".to_string(), true),
+            ],
+            "the child of a non-nested bullet must be checked, not exempted"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), "100. ordered\n   - parent\n     - child\n");
+
+        // Aligned to the parent's written content column, the child is correct.
+        let aligned = "100. ordered\n   - parent\n     - child\n";
+        let ctx = LintContext::new(aligned, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, separate_list_message(0, 0, 5, 3), false)],
+            "only the parent is reported"
         );
     }
 
@@ -3467,5 +3754,551 @@ items:
                   - Nested item
             "}
         );
+    }
+
+    // A bullet whose marker sits left of the preceding ordered item's content
+    // column is a separate list, not a child of that item. These tests pin the
+    // diagnostics for that shape under every style, and the genuine-child and
+    // irregular-item shapes that must keep their previous verdict.
+
+    const SIBLING_REPORT: &str = "1. a\n  - b\n\n10. c\n   - d\n\n10. e\n\nText.\n\n   - f\n";
+
+    fn indent_alone_rule(indent: u8) -> MD007ULIndent {
+        MD007ULIndent::from_config_struct(MD007Config {
+            indent: crate::types::IndentSize::from_const(indent),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: true,
+        })
+    }
+
+    fn text_aligned_rule() -> MD007ULIndent {
+        MD007ULIndent::from_config_struct(MD007Config {
+            indent: crate::types::IndentSize::from_const(2),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: true,
+            indent_explicit: false,
+        })
+    }
+
+    fn start_indented_rule(start_indent: u8) -> MD007ULIndent {
+        MD007ULIndent::from_config_struct(MD007Config {
+            indent: crate::types::IndentSize::from_const(2),
+            start_indented: true,
+            start_indent: crate::types::IndentSize::from_const(start_indent),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: false,
+        })
+    }
+
+    fn check_standard(rule: &MD007ULIndent, content: &str) -> Vec<LintWarning> {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.check(&ctx).unwrap()
+    }
+
+    fn line_messages(warnings: &[LintWarning]) -> Vec<(usize, String, bool)> {
+        warnings
+            .iter()
+            .map(|w| (w.line, w.message.clone(), w.fix.is_some()))
+            .collect()
+    }
+
+    fn fix_standard(rule: &MD007ULIndent, content: &str) -> String {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.fix(&ctx).unwrap()
+    }
+
+    fn separate_list_message(expected: usize, depth: usize, nest: usize, found: usize) -> String {
+        format!(
+            "Expected {expected} spaces for a separate list at indent depth {depth}, or {nest} spaces to nest under the preceding ordered item, found {found}"
+        )
+    }
+
+    #[test]
+    fn grandchild_of_a_sibling_bullet_targets_the_corrected_parent_position() {
+        // Bullet b (2 spaces) is left of the ordered content column, so it is a
+        // sibling list whose fix is withheld; c and d nest under it.
+        let content = "1. a\n  - b\n       - c\n          - d\n";
+        let rule = indent_alone_rule(4);
+        let result = line_messages(&check_standard(&rule, content));
+        assert_eq!(
+            result,
+            [
+                (2, separate_list_message(0, 0, 3, 2), false),
+                (3, "Expected 6 spaces for indent depth 1, found 7".to_string(), true),
+            ]
+        );
+        let fixed = fix_standard(&rule, content);
+        assert_eq!(fixed, "1. a\n  - b\n      - c\n          - d\n");
+        let after = line_messages(&check_standard(&rule, &fixed));
+        assert_eq!(after, [(2, separate_list_message(0, 0, 3, 2), false)]);
+    }
+
+    fn assert_report_diagnostics(rule: &MD007ULIndent, label: &str) {
+        let result = check_standard(rule, SIBLING_REPORT);
+        assert_eq!(
+            line_messages(&result),
+            vec![
+                (2, separate_list_message(0, 0, 3, 2), false),
+                (5, separate_list_message(0, 0, 4, 3), false),
+                (11, "Expected 0 spaces for indent depth 0, found 3".to_string(), true),
+            ],
+            "{label}: b and d are separate lists (no fix, two targets); f after a paragraph is fixable"
+        );
+        assert_eq!(
+            fix_standard(rule, SIBLING_REPORT),
+            "1. a\n  - b\n\n10. c\n   - d\n\n10. e\n\nText.\n\n- f\n",
+            "{label}: only f is rewritten"
+        );
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_default_style() {
+        assert_report_diagnostics(&MD007ULIndent::default(), "default");
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_explicit_indent_matches_default() {
+        // indent = 2 is the default value; stating it must not change the verdict.
+        assert_report_diagnostics(&indent_alone_rule(2), "indent = 2");
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_text_aligned_style() {
+        assert_report_diagnostics(&text_aligned_rule(), "text-aligned");
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_fixed_style_moves_to_column_zero() {
+        let rule = fixed_style_rule(2);
+        let result = check_standard(&rule, SIBLING_REPORT);
+        assert_eq!(
+            line_messages(&result),
+            vec![
+                (2, "Expected 0 spaces for indent depth 0, found 2".to_string(), true),
+                (5, "Expected 0 spaces for indent depth 0, found 3".to_string(), true),
+                (11, "Expected 0 spaces for indent depth 0, found 3".to_string(), true),
+            ]
+        );
+        let fixed = fix_standard(&rule, SIBLING_REPORT);
+        assert_eq!(fixed, "1. a\n- b\n\n10. c\n- d\n\n10. e\n\nText.\n\n- f\n");
+        assert!(
+            check_standard(&rule, &fixed).is_empty(),
+            "the fixed text must satisfy the rule"
+        );
+        assert_eq!(fix_standard(&rule, &fixed), fixed, "fixing is idempotent");
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_under_real_ancestor_uses_its_level() {
+        // `a` is nested under `root`, and b sits left of a's content column: b is
+        // root's child in a separate list. The target is root's level, not 0.
+        let content = "- root\n  1. a\n    - b\n";
+        let result = check_standard(&MD007ULIndent::default(), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(3, separate_list_message(2, 1, 5, 4), false)]
+        );
+        let result = check_standard(&fixed_style_rule(2), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(3, "Expected 2 spaces for indent depth 1, found 4".to_string(), true)]
+        );
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_inside_nested_bullet_offers_that_level() {
+        // The separate-list target is 4 (inside `inner`), not 0.
+        let content = "- root\n  - inner\n    1. a\n      - b\n";
+        let result = check_standard(&MD007ULIndent::default(), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(4, separate_list_message(4, 2, 7, 6), false)]
+        );
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_in_blockquote() {
+        let content = "> 1. a\n>   - b\n";
+        let result = check_standard(&MD007ULIndent::default(), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, separate_list_message(0, 0, 3, 2), false)]
+        );
+        let result = check_standard(&fixed_style_rule(2), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, "Expected 0 spaces for indent depth 0, found 2".to_string(), true)]
+        );
+    }
+
+    #[test]
+    fn test_sibling_after_wide_ordered_marker_reports_its_content_column() {
+        let content = "100. a\n   - b\n";
+        let result = check_standard(&MD007ULIndent::default(), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, separate_list_message(0, 0, 5, 3), false)]
+        );
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_single_target_when_separate_column_is_unusable() {
+        // start-indent 4 puts the separate-list column at 4: after a blank line
+        // that is indented code, so only the nesting column is offered.
+        let rule = start_indented_rule(4);
+        let result = check_standard(&rule, "100. a\n\n   - b\n");
+        assert_eq!(
+            line_messages(&result),
+            vec![(
+                3,
+                "Expected 5 spaces to nest under the preceding ordered item, found 3".to_string(),
+                false
+            )]
+        );
+        // start-indent 7 is at or right of the nesting column 3.
+        let rule = start_indented_rule(7);
+        let result = check_standard(&rule, "1. a\n\n  - b\n");
+        assert_eq!(
+            line_messages(&result),
+            vec![(
+                3,
+                "Expected 3 spaces to nest under the preceding ordered item, found 2".to_string(),
+                false
+            )]
+        );
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_silent_when_already_at_its_level() {
+        // start-indent 2: a separate list at column 2 is where the bullet belongs.
+        let rule = start_indented_rule(2);
+        assert!(check_standard(&rule, "1. a\n\n  - b\n").is_empty());
+    }
+
+    #[test]
+    fn test_sibling_after_ordered_one_space_keeps_fixable_depth_zero() {
+        // One space counts as column 0 for nesting, so the existing cleanup
+        // already treats this as a top-level bullet with a fixable report.
+        let content = "1. a\n - b\n";
+        let result = check_standard(&MD007ULIndent::default(), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, "Expected 0 spaces for indent depth 0, found 1".to_string(), true)]
+        );
+        assert_eq!(fix_standard(&MD007ULIndent::default(), content), "1. a\n- b\n");
+    }
+
+    #[test]
+    fn test_genuine_children_of_ordered_items_stay_exempt() {
+        for content in ["1. a\n   - b\n", "10. c\n    - d\n", "100. e\n     - f\n"] {
+            assert!(
+                check_standard(&MD007ULIndent::default(), content).is_empty(),
+                "default: {content:?}"
+            );
+            assert!(
+                check_standard(&indent_alone_rule(2), content).is_empty(),
+                "indent = 2: {content:?}"
+            );
+            assert!(
+                check_standard(&fixed_style_rule(2), content).is_empty(),
+                "fixed: {content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_nested_ordered_item_keeps_ancestry_for_genuine_descendants() {
+        // b at 6 is inside root's list via `a`; the nested ordered item is popped
+        // but the outer ordered root still contains the bullet.
+        let content = "1. root\n   - a\n     1. sub\n      - b\n";
+        assert!(check_standard(&MD007ULIndent::default(), content).is_empty());
+        let result = check_standard(&fixed_style_rule(2), content);
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("Expected 5") && result[0].message.contains("found 6"),
+            "{}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_children_of_sibling_bullet_follow_its_written_column() {
+        // c is aligned to b's content (4), so it is where it should be even
+        // though b itself is reported.
+        let content = "1. a\n  - b\n    - c\n      - d\n";
+        for (label, rule) in [
+            ("default", MD007ULIndent::default()),
+            ("indent = 2", indent_alone_rule(2)),
+            ("text-aligned", text_aligned_rule()),
+        ] {
+            let result = check_standard(&rule, content);
+            assert_eq!(
+                line_messages(&result),
+                vec![(2, separate_list_message(0, 0, 3, 2), false)],
+                "{label}: only b is reported; its aligned descendants are silent"
+            );
+        }
+    }
+
+    #[test]
+    fn test_sibling_bullet_does_not_use_an_ancestor_that_does_not_contain_it() {
+        // Neither the ordered item nor the wide root contains the bullet at
+        // column 3, so it starts a separate list whose position is column 0.
+        let content = "-   root\n  1. a\n   - b\n";
+        let result = check_standard(&MD007ULIndent::default(), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(3, separate_list_message(0, 0, 5, 3), false)]
+        );
+    }
+
+    #[test]
+    fn test_children_of_sibling_bullet_keep_the_configured_indent_step() {
+        // With `indent = 4` the children already sit one step right of their
+        // written parent, so they are not reported or moved.
+        let content = "1. a\n  - b\n      - c\n          - d\n";
+        let rule = indent_alone_rule(4);
+        let result = check_standard(&rule, content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, separate_list_message(0, 0, 3, 2), false)]
+        );
+        assert_eq!(fix_standard(&rule, content), content);
+    }
+
+    #[test]
+    fn test_fixed_style_names_the_nesting_position_when_the_separate_list_one_is_unusable() {
+        // start_indent places depth 0 at column 3, which is the ordered item's
+        // content column: that column nests the bullet instead.
+        let rule = MD007ULIndent::from_config_struct(MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: true,
+            start_indent: crate::types::IndentSize::from_const(3),
+            style: md007_config::IndentStyle::Fixed,
+            style_explicit: true,
+            indent_explicit: true,
+        });
+        let content = "1. a\n  - b\n";
+        let result = check_standard(&rule, content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(
+                2,
+                "Expected 4 spaces to nest under the preceding ordered item, found 2".to_string(),
+                false
+            )]
+        );
+        assert_eq!(fix_standard(&rule, content), content);
+        assert!(
+            check_standard(&rule, "1. a\n    - b\n").is_empty(),
+            "the named position is accepted"
+        );
+    }
+
+    #[test]
+    fn test_bullet_left_of_an_unresolved_bullets_content_is_its_sibling() {
+        // c at column 3 is left of b's content column (4), so it is b's sibling,
+        // not its child. b stays where it is written, so c is aligned with it.
+        let content = "1. a\n  - b\n   - c\n";
+        let rule = MD007ULIndent::default();
+        let result = check_standard(&rule, content);
+        assert_eq!(
+            line_messages(&result),
+            vec![
+                (2, separate_list_message(0, 0, 3, 2), false),
+                (3, "Expected 2 spaces for indent depth 0, found 3".to_string(), true),
+            ]
+        );
+        assert_eq!(fix_standard(&rule, content), "1. a\n  - b\n  - c\n");
+    }
+
+    #[test]
+    fn test_wide_marker_padding_keeps_the_child_verdict() {
+        // Five spaces after the marker start an indented code block, so the
+        // item's content column is 3 and b at column 3 is its child.
+        let content = "1.     ~~~\n\n   - b\n";
+        assert!(check_standard(&indent_alone_rule(3), content).is_empty());
+    }
+
+    #[test]
+    fn test_tab_before_the_marker_keeps_the_child_verdict() {
+        // The tab after `>` leaves b in a column the rule does not measure the
+        // way CommonMark does (b is a child of a there), so b is not declared
+        // a separate list.
+        let content = "> 1. a\n>\t  - b\n";
+        assert!(check_standard(&indent_alone_rule(2), content).is_empty());
+        let result = check_standard(&MD007ULIndent::default(), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, "Expected 3 spaces for indent depth 1, found 2".to_string(), true)]
+        );
+        // The same bullet written with spaces is measurable and is a separate list.
+        let result = check_standard(&MD007ULIndent::default(), "> 1. a\n>   - b\n");
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, separate_list_message(0, 0, 3, 2), false)]
+        );
+    }
+
+    #[test]
+    fn test_every_misaligned_sibling_is_aligned_with_the_first_bullet() {
+        // c and d share a column, but the list's column is b's: each of them is
+        // reported and one fix pass aligns the whole list.
+        let content = "1. a\n  - b\n   - c\n   - d\n";
+        let rule = MD007ULIndent::default();
+        let result = check_standard(&rule, content);
+        assert_eq!(
+            line_messages(&result),
+            vec![
+                (2, separate_list_message(0, 0, 3, 2), false),
+                (3, "Expected 2 spaces for indent depth 0, found 3".to_string(), true),
+                (4, "Expected 2 spaces for indent depth 0, found 3".to_string(), false),
+            ]
+        );
+        let applied = crate::utils::fix_utils::apply_warning_fixes(content, &result[1..2]).unwrap();
+        assert_eq!(applied, "1. a\n  - b\n  - c\n  - d\n");
+        assert_eq!(fix_standard(&rule, content), applied);
+    }
+
+    #[test]
+    fn test_later_siblings_of_an_unresolved_bullet_are_judged_against_it() {
+        // One report for the list after `1. a`; its other bullets are aligned
+        // with the first, at its column or at the separate-list column.
+        let rule = MD007ULIndent::default();
+        for content in [
+            "1. a\n  - b\n  - c\n  - d\n",
+            "1. a\n  - b\n    - child\n  - c\n",
+            "1. a\n  - b\n\n- c\n",
+        ] {
+            let result = check_standard(&rule, content);
+            assert_eq!(
+                line_messages(&result),
+                vec![(2, separate_list_message(0, 0, 3, 2), false)],
+                "{content:?}"
+            );
+            assert_eq!(fix_standard(&rule, content), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_configured_indent_step_never_leaves_the_unresolved_parents_content() {
+        // `indent = 1` would put c at column 3, left of b's content column 4
+        // where it is b's sibling; column 4 is the first child position.
+        let content = "1. a\n  - b\n    - c\n";
+        let result = check_standard(&indent_alone_rule(1), content);
+        assert_eq!(
+            line_messages(&result),
+            vec![(2, separate_list_message(0, 0, 3, 2), false)]
+        );
+    }
+
+    #[test]
+    fn test_fixed_style_judges_adjacent_siblings_after_an_ordered_item_as_one_list() {
+        let rule = MD007ULIndent::from_config_struct(MD007Config {
+            indent: crate::types::IndentSize::from_const(2),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::Fixed,
+            style_explicit: true,
+            indent_explicit: true,
+        });
+        let content = "1. a\n  - b\n   - c\n";
+        let result = check_standard(&rule, content);
+        assert_eq!(
+            line_messages(&result),
+            vec![
+                (2, "Expected 0 spaces for indent depth 0, found 2".to_string(), true),
+                (3, "Expected 0 spaces for indent depth 0, found 3".to_string(), false),
+            ]
+        );
+        assert_eq!(fix_standard(&rule, content), "1. a\n- b\n- c\n");
+    }
+
+    #[test]
+    fn test_misaligned_child_of_sibling_bullet_is_fixable_against_its_written_parent() {
+        let content = "1. a\n  - b\n     - c\n";
+        for (label, rule) in [
+            ("default", MD007ULIndent::default()),
+            ("indent = 2", indent_alone_rule(2)),
+            ("text-aligned", text_aligned_rule()),
+        ] {
+            let result = check_standard(&rule, content);
+            assert_eq!(
+                line_messages(&result),
+                vec![
+                    (2, separate_list_message(0, 0, 3, 2), false),
+                    (3, "Expected 4 spaces for indent depth 1, found 5".to_string(), true),
+                ],
+                "{label}"
+            );
+            assert_eq!(
+                fix_standard(&rule, content),
+                "1. a\n  - b\n    - c\n",
+                "{label}: the child moves to b's content column, b is untouched"
+            );
+        }
+    }
+
+    #[test]
+    fn test_fixed_style_child_of_sibling_bullet_follows_the_corrected_parent() {
+        let rule = fixed_style_rule(2);
+        let content = "1. a\n  - b\n    - c\n";
+        let result = check_standard(&rule, content);
+        assert_eq!(
+            line_messages(&result),
+            vec![
+                (2, "Expected 0 spaces for indent depth 0, found 2".to_string(), true),
+                (3, "Expected 2 spaces for indent depth 1, found 4".to_string(), false),
+            ]
+        );
+        let applied = crate::utils::fix_utils::apply_warning_fixes(content, &result[..1]).unwrap();
+        assert_eq!(applied, "1. a\n- b\n  - c\n");
+        assert_eq!(fix_standard(&rule, content), applied);
+    }
+
+    #[test]
+    fn test_bullet_after_blank_start_ordered_item_keeps_written_column_verdict() {
+        // An ordered item with nothing after its marker has CommonMark content
+        // column 3, but its written column is 6. Such items are not judged by the
+        // written column: with indent = 4 the bullet at 4 is a child and stays
+        // silent.
+        let content = "1.    \n    - b\n";
+        assert!(check_standard(&indent_alone_rule(4), content).is_empty());
+    }
+
+    #[test]
+    fn test_irregular_items_are_not_judged_by_their_written_content_column() {
+        // A tab after the ordered marker or a bullet without content has no
+        // reliable written content column, so these shapes are outside the
+        // sibling handling and keep the nesting-based verdict (whose fix the structure guard drops).
+        let tab_after_marker = check_standard(&MD007ULIndent::default(), "1.\ta\n  - b\n");
+        assert_eq!(
+            line_messages(&tab_after_marker),
+            vec![(2, "Expected 4 spaces for indent depth 1, found 2".to_string(), false)]
+        );
+        let bare_bullet = check_standard(&MD007ULIndent::default(), "1. a\n  -\n");
+        assert_eq!(
+            line_messages(&bare_bullet),
+            vec![(2, "Expected 3 spaces for indent depth 1, found 2".to_string(), false)]
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_fixed_alternative_under_ordered_parent_is_accepted() {
+        // MkDocs needs marker + 4 under an ordered item (primary expectation 4);
+        // an explicit indent of 5 is accepted as the alternative.
+        let rule = indent_alone_rule(5);
+        let content = "1. a\n     - b\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "{result:?}");
+        let ctx = LintContext::new("1. a\n      - b\n", crate::config::MarkdownFlavor::MkDocs, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "6 is neither 4 nor 5");
     }
 }

@@ -28,6 +28,7 @@ mod cli_list_rules_removed_test;
 mod cli_lsp_fix_consistency;
 mod cli_md003_quoted_headings_test;
 mod cli_md003_setext_test;
+mod cli_md007_sibling_after_ordered_test;
 mod cli_md009_code_span_test;
 mod cli_md010_code_span_test;
 mod cli_md010_footnote_test;

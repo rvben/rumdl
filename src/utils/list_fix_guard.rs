@@ -16,6 +16,7 @@ use crate::rule::LintWarning;
 use crate::utils::fix_utils::apply_warning_fixes;
 use crate::utils::parser_options::rumdl_parser_options_for;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+use std::collections::HashSet;
 use std::ops::Range;
 
 /// What a rule's fixes are allowed to change in the parsed document.
@@ -504,6 +505,78 @@ impl<'a> Parsed<'a> {
             _ => {}
         }
         self.events.push(event);
+    }
+
+    /// Find affected list runs and any enclosing items whose fixes must move
+    /// with them. Use item ranges so unrelated siblings retain their own fixes.
+    pub(crate) fn affected_list_runs(
+        &self,
+        ctx: &LintContext,
+        mut markers: HashSet<usize>,
+        moving_lines: &HashSet<usize>,
+    ) -> Vec<Range<usize>> {
+        let mut runs: Vec<Range<usize>> = Vec::new();
+        let mut open_lists = Vec::new();
+        let mut moving_ancestors: Vec<Option<Range<usize>>> = Vec::new();
+        let mut preceding: Option<usize> = None;
+        let mut affected = Vec::new();
+        let mut scopes = Vec::new();
+        for (index, event) in self.events.iter().enumerate() {
+            let (line, _) = self.places[index];
+            let end = self.ends[index] + 1;
+            match event {
+                Event::Start(Tag::List(start)) => {
+                    // An ordered marker at the container margin stays there.
+                    // Its list cannot become a child of the preceding list.
+                    let at_ordered_margin = start.is_some()
+                        && ctx.list_item_on_line(line + 1).is_some_and(|item| {
+                            item.is_ordered() && item.marker_column() == item.blockquote_prefix_len()
+                        });
+                    let run = match preceding.take() {
+                        Some(run) if !at_ordered_margin => {
+                            runs[run].end = end;
+                            run
+                        }
+                        _ => {
+                            runs.push(line..end);
+                            runs.len() - 1
+                        }
+                    };
+                    open_lists.push(run);
+                }
+                Event::End(TagEnd::List(_)) => preceding = open_lists.pop(),
+                Event::Start(Tag::Item) => {
+                    preceding = None;
+                    let ancestor = moving_ancestors.last().cloned().flatten();
+                    if let Some(&run) = open_lists.last()
+                        && markers.remove(&line)
+                    {
+                        affected.push(run);
+                        scopes.extend(ancestor.clone());
+                    }
+                    moving_ancestors.push(ancestor.or_else(|| moving_lines.contains(&line).then_some(line..end)));
+                }
+                Event::End(TagEnd::Item) => {
+                    preceding = None;
+                    moving_ancestors.pop();
+                }
+                _ => preceding = None,
+            }
+        }
+
+        scopes.extend(affected.into_iter().map(|index| runs[index].clone()));
+        scopes.sort_unstable_by_key(|scope| scope.start);
+        let mut merged: Vec<Range<usize>> = Vec::new();
+        for scope in scopes {
+            if let Some(last) = merged.last_mut()
+                && scope.start < last.end
+            {
+                last.end = last.end.max(scope.end);
+            } else {
+                merged.push(scope);
+            }
+        }
+        merged
     }
 
     pub(crate) fn new(text: &'a str) -> Self {
