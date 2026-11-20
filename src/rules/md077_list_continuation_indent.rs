@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lint_context::{CommonMarkItem, LineInfo, LintContext, NativeListSource};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::list_fix_guard::Parsed;
 use crate::utils::list_indent_shift::is_lazy_continuation_source as is_lazy_continuation;
 
 mod md077_config;
@@ -64,6 +65,39 @@ impl MD077ListContinuationIndent {
 }
 
 impl MD077ListContinuationIndent {
+    /// How many edits of the blocks above its own one fix carries at most.
+    const MAX_CARRIED_FIXES: usize = 64;
+    /// How many bytes of replacement text those edits hold at most. The fix
+    /// of a fence replaces the whole fence, so a count alone does not bound
+    /// what a fix below it copies.
+    const MAX_CARRIED_BYTES: usize = 4096;
+
+    fn replacement_bytes(fixes: &[Fix]) -> usize {
+        fixes.iter().map(|fix| fix.replacement.len()).sum()
+    }
+
+    /// `text` as the parser is to read it: the lines of a Kramdown extension
+    /// block are hidden from the document, so they are blanked, each to its
+    /// own length. A fence marker inside a comment would otherwise read as
+    /// code down to the end of the document. `text` has the lines of
+    /// `lines`, as the document does before and after the fixes.
+    fn without_hidden_lines<'t>(text: &'t str, lines: &[LineInfo]) -> std::borrow::Cow<'t, str> {
+        if !lines.iter().any(|line| line.in_kramdown_extension_block) {
+            return std::borrow::Cow::Borrowed(text);
+        }
+        let mut shown = String::with_capacity(text.len());
+        for (idx, line) in text.split_inclusive('\n').enumerate() {
+            if lines.get(idx).is_some_and(|info| info.in_kramdown_extension_block) {
+                let body = line.trim_end_matches(['\n', '\r']);
+                shown.extend(std::iter::repeat_n(' ', body.len()));
+                shown.push_str(&line[body.len()..]);
+            } else {
+                shown.push_str(line);
+            }
+        }
+        std::borrow::Cow::Owned(shown)
+    }
+
     /// Width of a GFM task checkbox prefix including its trailing space:
     /// `[ ] `, `[x] `, or `[X] ` — always exactly 4 bytes.
     const TASK_CHECKBOX_PREFIX_LEN: usize = 4;
@@ -831,6 +865,331 @@ impl MD077ListContinuationIndent {
         }
     }
 
+    /// Withhold every fix that would change the blocks of the document rather
+    /// than the item that holds them.
+    ///
+    /// A line flagged after a blank line can open a paragraph that stands
+    /// outside its item, and its fix moves that paragraph into the item. How
+    /// the lines below it are then read depends on every block around them:
+    /// text of the paragraph can become a list, a heading, a table or code,
+    /// and a block below the paragraph can become another one. The parser is
+    /// the authority on that, so the fixes of the blocks outside their items,
+    /// a fence among them as much as a paragraph, are applied together as
+    /// they will be, and the result is parsed and compared with `before`. A run of lines
+    /// without a blank one between them is fixed as a whole or not at all:
+    /// each line whose blocks changed costs the nearest run above it its
+    /// fixes, and the rest are compared again. A run can lose its fixes that
+    /// way for a change another run made, so the dropped runs are then
+    /// compared again beside the fixes that were kept. The warnings stay.
+    /// Returns the warnings whose fixes were kept, in line order.
+    fn drop_block_changing_fixes(
+        ctx: &NativeListSource<'_, '_>,
+        warnings: &mut [LintWarning],
+        guarded: Vec<usize>,
+        before: &Parsed<'_>,
+    ) -> Vec<usize> {
+        // Each fix is kept with the first line of its run.
+        let mut run_start = 0;
+        let mut run_of_line = Vec::with_capacity(ctx.lines.len() + 1);
+        run_of_line.push(0);
+        for (idx, info) in ctx.lines.iter().enumerate() {
+            if Self::is_cm_blank(info.content(ctx.content)) {
+                run_start = idx + 2;
+            }
+            run_of_line.push(run_start.min(idx + 1));
+        }
+        let mut live: Vec<(usize, usize)> = guarded
+            .into_iter()
+            .map(|i| (i, run_of_line[warnings[i].line]))
+            .collect();
+        let before = before.blocks();
+
+        const MAX_ROUNDS: usize = 8;
+        let unchanged_with = |warnings: &[LintWarning], kept: &[(usize, usize)]| {
+            let fixed =
+                Self::apply_ordered_fixes(ctx.content, kept.iter().filter_map(|&(i, _)| warnings[i].fix.as_ref()));
+            before.changed_lines(&Parsed::new(&Self::without_hidden_lines(&fixed, ctx.lines)).blocks())
+        };
+        let mut clean = false;
+        let mut dropped: Vec<(usize, usize)> = Vec::new();
+        let mut rounds_that_dropped = 0;
+        for _ in 0..MAX_ROUNDS {
+            if live.is_empty() {
+                break;
+            }
+            let Some(changed) = unchanged_with(warnings, &live) else {
+                break;
+            };
+            if changed.is_empty() {
+                clean = true;
+                break;
+            }
+            // `live` is in line order, and so are its runs.
+            let blamed: std::collections::HashSet<usize> = changed
+                .into_iter()
+                .map(|line| {
+                    let below = live.partition_point(|&(i, _)| warnings[i].line <= line + 1);
+                    live[below.saturating_sub(1)].1
+                })
+                .collect();
+            dropped.extend(live.iter().filter(|(_, run)| blamed.contains(run)));
+            live.retain(|(_, run)| !blamed.contains(run));
+            rounds_that_dropped += 1;
+        }
+        if !clean && !live.is_empty() {
+            for (i, _) in live.into_iter().chain(dropped) {
+                warnings[i].fix = None;
+            }
+            return Vec::new();
+        }
+
+        // A change is blamed on the run above it, and a definition changes the
+        // lines that refer to it wherever they are, so a run can be dropped
+        // for what another run did. The dropped runs are compared again beside
+        // the fixes that were kept: all of them, then each half of a group
+        // that changed a block, down to the runs that change one by
+        // themselves. A group not reached within the bound stays dropped.
+        const MAX_COMPARISONS_AGAIN: usize = 16;
+        dropped.sort_by_key(|&(i, _)| warnings[i].line);
+        let mut comparisons = 0;
+        // What one round dropped is known to change a block beside the rest.
+        let mut known_to_change = rounds_that_dropped == 1;
+        let mut groups: Vec<&[(usize, usize)]> = vec![&dropped];
+        while let Some(group) = groups.pop() {
+            let Some(&(_, first_run)) = group.first() else {
+                continue;
+            };
+            if !std::mem::take(&mut known_to_change) {
+                if comparisons == MAX_COMPARISONS_AGAIN {
+                    for &(i, _) in group {
+                        warnings[i].fix = None;
+                    }
+                    continue;
+                }
+                comparisons += 1;
+                let mut tried = live.clone();
+                tried.extend(group);
+                tried.sort_by_key(|&(i, _)| warnings[i].line);
+                if unchanged_with(warnings, &tried).is_some_and(|changed| changed.is_empty()) {
+                    live = tried;
+                    continue;
+                }
+            }
+            // Split between two runs, as near the middle as one starts.
+            let middle_run = group[group.len() / 2].1;
+            let split = if middle_run == first_run {
+                group.partition_point(|&(_, run)| run <= middle_run)
+            } else {
+                group.partition_point(|&(_, run)| run < middle_run)
+            };
+            if split == group.len() {
+                for &(i, _) in group {
+                    warnings[i].fix = None;
+                }
+            } else {
+                groups.push(&group[split..]);
+                groups.push(&group[..split]);
+            }
+        }
+        live.into_iter().map(|(i, _)| i).collect()
+    }
+
+    /// Makes the fix of the line opening each paragraph outside its item move
+    /// everything that fix was compared with.
+    ///
+    /// The fixes of the paragraphs were found to keep every block as it is
+    /// when applied together, and an editor applies the fix of one warning.
+    /// The opening line moved alone takes the paragraph into the item and
+    /// leaves the lines below it behind, where one that reads as a block now
+    /// is one, so its fix carries theirs. A paragraph below another of the
+    /// same item reaches the item only once the one above it has: moved
+    /// alone it would stand behind a paragraph that ended the list, as code
+    /// where the content column is deep enough. So its opening fix also
+    /// carries the fixes of the paragraphs above it. A line below an opening
+    /// one moved alone stays a line of the same paragraph, and its fix stands
+    /// by itself.
+    ///
+    /// A fence outside its item, or any other block that is no paragraph,
+    /// ends the list as a paragraph does and is one more link of the chain:
+    /// its fix carries the fixes above it, and those below carry its fix.
+    ///
+    /// `kept` holds the warnings whose fixes passed the comparison, and
+    /// `blocks` the first line, last line and item of each paragraph or
+    /// other block, in order. Where a kept line has lost its fix since, its
+    /// block was not compared without it, nor were the blocks of the item
+    /// below it, and none of their lines is fixed. The same holds below a paragraph whose
+    /// opening line has no fix that was kept: it stays outside the item.
+    ///
+    /// A fix carries at most `MAX_CARRIED_FIXES` fixes of the blocks above
+    /// its own, and at most `MAX_CARRIED_BYTES` of their text, so that what
+    /// the fixes hold together grows with the document and not with its
+    /// square. A block that would need more has no fix of its own for its
+    /// opening line: the last opening fix within the bound carries its edits
+    /// instead, so every edit is still applied in one pass and each fix still
+    /// holds all it depends on.
+    fn move_blocks_as_one(
+        warnings: &mut [LintWarning],
+        kept: &[usize],
+        blocks: &[(usize, usize, usize)],
+        standing_alone: &std::collections::HashSet<usize>,
+    ) -> OutsideBlocks {
+        const MAX_CARRIED_FIXES: usize = MD077ListContinuationIndent::MAX_CARRIED_FIXES;
+        let mut outcome = OutsideBlocks::default();
+        let mut item = None;
+        // The fixes of the blocks above, within the item, and the bytes of
+        // their replacements.
+        let mut above: Vec<Fix> = Vec::new();
+        let mut above_bytes = 0;
+        let mut held_back = false;
+        // The last opening line whose fix carries the paragraphs above it,
+        // and whether a paragraph since has been past the bound.
+        let mut carrier: Option<usize> = None;
+        let mut past_bound = false;
+        for &(first, last, owner) in blocks {
+            if item != Some(owner) {
+                item = Some(owner);
+                above.clear();
+                above_bytes = 0;
+                held_back = false;
+                carrier = None;
+                past_bound = false;
+            }
+            let from = kept.partition_point(|&i| warnings[i].line < first);
+            let to = kept.partition_point(|&i| warnings[i].line <= last);
+            let lines = &kept[from..to];
+            // The paragraph moves with the fix of its opening line, and only
+            // as it was compared.
+            let opener = lines.first().copied().filter(|&i| warnings[i].line == first);
+            held_back |= opener.is_none() || lines.iter().any(|&i| warnings[i].fix.is_none());
+            let Some(opener) = opener.filter(|_| !held_back) else {
+                outcome.staying.entry(owner).or_insert(first);
+                for &i in lines {
+                    warnings[i].fix = None;
+                }
+                continue;
+            };
+            let own: Vec<Fix> = lines.iter().filter_map(|&i| warnings[i].fix.clone()).collect();
+            let whole = standing_alone.contains(&first);
+            // A paragraph below one past the bound depends on it, and is
+            // past the bound with it.
+            let own_bytes = Self::replacement_bytes(&own);
+            past_bound |=
+                above.len() + own.len() > MAX_CARRIED_FIXES || above_bytes + own_bytes > Self::MAX_CARRIED_BYTES;
+            outcome.moved.entry(owner).or_default().push((first, own.clone()));
+            match carrier.filter(|_| past_bound) {
+                Some(carrier) => {
+                    for &i in &lines[..if whole { lines.len() } else { 1 }] {
+                        warnings[i].fix = None;
+                    }
+                    if let Some(fix) = warnings[carrier].fix.as_mut() {
+                        fix.additional_edits.extend(own);
+                    }
+                }
+                None => {
+                    // A block that is not a paragraph is one only while all
+                    // its lines stand at one column: a row moved without the
+                    // rows around it leaves its table. Each line's fix moves
+                    // the block within the bound, and past it only the fix
+                    // of the opening line does.
+                    for (at, &i) in lines.iter().enumerate() {
+                        if at == 0 || (whole && !past_bound) {
+                            if let Some(fix) = warnings[i].fix.as_mut() {
+                                fix.additional_edits =
+                                    own[..at].iter().chain(&own[at + 1..]).chain(&above).cloned().collect();
+                            }
+                        } else if whole {
+                            warnings[i].fix = None;
+                        }
+                    }
+                    carrier = Some(opener);
+                    above.extend(own);
+                    above_bytes += own_bytes;
+                }
+            }
+        }
+        outcome
+    }
+
+    /// Settles the fixes of the lines below the blocks outside their item
+    /// that are not lines of those blocks: text the item would hold deeper
+    /// than it should.
+    ///
+    /// Below a block that stays outside, nothing reaches the item by moving,
+    /// for the block has ended the list, and a line moved to a deep content
+    /// column would be indented code. Such a line has no fix. Below blocks
+    /// that move, a line reaches the item only once they have, so its fix
+    /// carries theirs, as the fix of a block carries those above it. Past the
+    /// same bound the line has no fix until the blocks have moved, and no
+    /// block waits for it.
+    fn settle_lines_below_outside_blocks(
+        warnings: &mut [LintWarning],
+        owners: &std::collections::HashMap<usize, usize>,
+        in_a_block: impl Fn(usize) -> bool,
+        outcome: &OutsideBlocks,
+    ) {
+        if outcome.staying.is_empty() && outcome.moved.is_empty() {
+            return;
+        }
+        for warning in warnings {
+            let Some(item) = owners.get(&warning.line) else {
+                continue;
+            };
+            if outcome
+                .staying
+                .get(item)
+                .is_some_and(|&paragraph| warning.line > paragraph)
+            {
+                warning.fix = None;
+                continue;
+            }
+            if in_a_block(warning.line) {
+                continue;
+            }
+            let Some(moved) = outcome.moved.get(item) else {
+                continue;
+            };
+            let above = &moved[..moved.partition_point(|(first, _)| *first < warning.line)];
+            let Some(fix) = warning.fix.as_mut() else {
+                continue;
+            };
+            // Counted before any is copied, so that a line past the bound
+            // costs no more than the bound.
+            let (mut carried, mut bytes) = (0, 0);
+            let within_bound = above.iter().all(|(_, fixes)| {
+                carried += fixes.len();
+                if carried > Self::MAX_CARRIED_FIXES {
+                    return false;
+                }
+                bytes += Self::replacement_bytes(fixes);
+                bytes <= Self::MAX_CARRIED_BYTES
+            });
+            if within_bound {
+                fix.additional_edits
+                    .extend(above.iter().flat_map(|(_, fixes)| fixes.iter().cloned()));
+            } else {
+                warning.fix = None;
+            }
+        }
+    }
+
+    /// `content` with `fixes` applied, which are in source order and do not
+    /// overlap. The text is written once from start to end, so the time taken
+    /// grows with the document and not with the document times its fixes.
+    fn apply_ordered_fixes<'f>(content: &str, fixes: impl Iterator<Item = &'f Fix>) -> String {
+        let mut fixed = String::with_capacity(content.len() + content.len() / 8);
+        let mut at = 0;
+        for fix in fixes {
+            if fix.range.start < at || fix.range.end > content.len() || fix.range.start > fix.range.end {
+                continue;
+            }
+            fixed.push_str(&content[at..fix.range.start]);
+            fixed.push_str(&fix.replacement);
+            at = fix.range.end;
+        }
+        fixed.push_str(&content[at..]);
+        fixed
+    }
+
     /// Whether Python-Markdown reads the line as an indented code block of the
     /// item: after a blank line, four columns past the item's paragraph column.
     /// Its levels differ from the parser's for an item whose marker sits less
@@ -983,6 +1342,15 @@ impl MD077ListContinuationIndent {
     }
 }
 
+/// What became of the blocks outside their items, by item: the line of the
+/// first one that stays outside, and the first line and fixes of each one
+/// that moves, in order.
+#[derive(Default)]
+struct OutsideBlocks {
+    staying: std::collections::HashMap<usize, usize>,
+    moved: std::collections::HashMap<usize, Vec<(usize, Vec<Fix>)>>,
+}
+
 /// A list item written on the same line as the item that holds it (`- 1. x`),
 /// as the columns a continuation has to reach to belong to it.
 #[derive(Clone, Copy)]
@@ -1048,7 +1416,18 @@ struct UnderIndentOutcome {
 impl MD077ListContinuationIndent {
     // Keep the native fixer authoritative: its stable descending replacements
     // intentionally retain their existing overlap and line-ending semantics.
-    pub(crate) fn apply_native_fixes(content: &str, mut fixes: Vec<Fix>) -> String {
+    pub(crate) fn apply_native_fixes(content: &str, fixes: Vec<Fix>) -> String {
+        // The edits a fix carries apply with it, and an edit that several
+        // fixes carry applies once.
+        let mut seen = std::collections::HashSet::new();
+        let mut fixes: Vec<Fix> = fixes
+            .into_iter()
+            .flat_map(|mut fix| {
+                let carried = std::mem::take(&mut fix.additional_edits);
+                std::iter::once(fix).chain(carried)
+            })
+            .filter(|fix| seen.insert((fix.range.clone(), fix.replacement.clone())))
+            .collect();
         fixes.sort_by_key(|fix| std::cmp::Reverse(fix.range.start));
         let mut content = content.to_string();
         for fix in fixes {
@@ -1070,6 +1449,29 @@ impl MD077ListContinuationIndent {
         // The item whose scope produced the warning on each line.
         let mut owners: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         let mut flagged_lines = std::collections::HashSet::new();
+        // The parser's reading of the document, taken once a line is found
+        // that the fix would move into its item.
+        let shown = Self::without_hidden_lines(ctx.content, ctx.lines);
+        let parsed: std::cell::OnceCell<Parsed<'_>> = std::cell::OnceCell::new();
+        let paragraphs: std::cell::OnceCell<Vec<(usize, usize)>> = std::cell::OnceCell::new();
+        let others: std::cell::OnceCell<Vec<(usize, usize)>> = std::cell::OnceCell::new();
+        // The lines of the block outside its item that was opened last and
+        // is not a paragraph.
+        let mut standing = (1, 0);
+        // The lines of each paragraph that stands outside its item: the fix
+        // of one can move the paragraph into the item, which no other fix of
+        // this rule does.
+        let mut joining: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        // Lines of a paragraph that stands outside its item because its first
+        // line sits left of the content column. They are that paragraph's
+        // text, not the item's content, so they are not over-indented.
+        let mut outside_item: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        // The first line, last line and item of each block that stands
+        // outside its item: such a paragraph, or a fence left of the content
+        // column.
+        let mut outside_blocks: Vec<(usize, usize, usize)> = Vec::new();
+        // The blocks among them that are no paragraph, by their line.
+        let mut standing_alone: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
         // Collect all list item lines sorted, with their content_column,
         // marker_column, and — if the item is a GFM task — its post-checkbox
@@ -1460,6 +1862,43 @@ impl MD077ListContinuationIndent {
                         format!("Continuation line under-indented (expected {required}, found {actual})")
                     };
                     let outcome = Self::build_under_indent_warning(ctx, line, required, message);
+                    if line.saw_blank {
+                        // A paragraph is outside the item when the line
+                        // opening it is; a later line short of the content
+                        // column is a lazy one.
+                        if joining.contains(&line.line_num) {
+                        } else if (standing.0..=standing.1).contains(&line.line_num) {
+                            // A later line of a block that is not a
+                            // paragraph: a row of a table.
+                            standing_alone.insert(line.line_num);
+                        } else if actual < scope.content_col {
+                            let paragraphs = paragraphs
+                                .get_or_init(|| parsed.get_or_init(|| Parsed::new(&shown)).blocks().paragraphs());
+                            let opened = paragraphs.partition_point(|&(first, _)| first + 1 < line.line_num);
+                            if let Some(&(first, last)) = paragraphs.get(opened)
+                                && first + 1 == line.line_num
+                            {
+                                joining.extend(line.line_num..=last + 1);
+                                outside_item.extend(line.line_num + 1..=last + 1);
+                                outside_blocks.push((line.line_num, last + 1, item_line));
+                            } else if opened == 0 || paragraphs[opened - 1].1 + 1 < line.line_num {
+                                // No paragraph holds the line, so it
+                                // opens a block of another kind, or is one
+                                // by itself: a fence, a table, a line of
+                                // HTML.
+                                let others =
+                                    others.get_or_init(|| parsed.get_or_init(|| Parsed::new(&shown)).blocks().others());
+                                let at = others.partition_point(|&(first, _)| first + 1 < line.line_num);
+                                let last = others
+                                    .get(at)
+                                    .filter(|&&(first, _)| first + 1 == line.line_num)
+                                    .map_or(line.line_num, |&(_, last)| last + 1);
+                                standing = (line.line_num, last);
+                                standing_alone.insert(line.line_num);
+                                outside_blocks.push((line.line_num, last, item_line));
+                            }
+                        }
+                    }
                     if let Some(closer_line) = outcome.also_flag_line {
                         flagged_lines.insert(closer_line);
                     }
@@ -1503,7 +1942,7 @@ impl MD077ListContinuationIndent {
                 if Self::is_python_markdown_code(ctx, scope, line) || (scope.tight_only && line.saw_blank) {
                     return ControlFlow::Continue(());
                 }
-                if actual <= required {
+                if actual <= required || outside_item.contains(&line.line_num) {
                     return ControlFlow::Continue(());
                 }
                 let fix_target = Self::compute_fix_target(actual, required, task_col, uses_content_col, uses_task_col);
@@ -1534,9 +1973,31 @@ impl MD077ListContinuationIndent {
         // returning - callers and tests expect document order.
         warnings.sort_by_key(|w| (w.line, w.column));
 
+        // A warning that inline configuration suppresses never reaches the
+        // fixer, so its fix is no part of the result.
+        let guarded: Vec<usize> = warnings
+            .iter()
+            .enumerate()
+            .filter(|(_, warning)| {
+                warning.fix.is_some()
+                    && (joining.contains(&warning.line) || standing_alone.contains(&warning.line))
+                    && !ctx.is_rule_disabled("MD077", warning.line)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        let kept = if guarded.is_empty() {
+            Vec::new()
+        } else {
+            let parsed = parsed.get_or_init(|| Parsed::new(&shown));
+            Self::drop_block_changing_fixes(ctx, &mut warnings, guarded, parsed)
+        };
         if strict_indent {
             Self::drop_unsafe_fixes(ctx, &mut warnings, &owners);
         }
+        outside_blocks.sort_unstable();
+        let outcome = Self::move_blocks_as_one(&mut warnings, &kept, &outside_blocks, &standing_alone);
+        let in_a_block = |line: usize| joining.contains(&line) || standing_alone.contains(&line);
+        Self::settle_lines_below_outside_blocks(&mut warnings, &owners, in_a_block, &outcome);
 
         warnings
     }
@@ -1622,6 +2083,566 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let rule = MD077ListContinuationIndent::default();
         rule.fix(&ctx).unwrap()
+    }
+
+    #[test]
+    fn each_paragraph_is_searched_for_its_own_latent_marker() {
+        // The second paragraph holds the marker; the first joins the item.
+        assert_eq!(fix("- X\n\n a\n\n b\n2. c\n"), "- X\n\n  a\n\n b\n2. c\n");
+        // Every flagged line above the marker keeps its place, the first as
+        // much as the last.
+        let content = "- X\n\n a\n b\n c\n2. d\n";
+        assert_eq!(check(content).len(), 3);
+        assert!(check(content).iter().all(|warning| warning.fix.is_none()));
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn a_marker_line_that_moves_with_its_paragraph_stays_text() {
+        // Moved alone, `a` would release ` 2. b` to open a list. Every line of
+        // the paragraph has a fix, and applied together they keep ` 2. b` the
+        // text it was, so the paragraph joins the item in one pass.
+        let content = "- X\n\n a\n 2. b\n c\n";
+        let fixes: Vec<bool> = check(content).iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [true, true, true]);
+        let once = fix(content);
+        assert_eq!(once, "- X\n\n  a\n  2. b\n  c\n");
+        assert!(check(&once).is_empty());
+    }
+
+    #[test]
+    fn the_fix_of_an_opening_line_moves_its_whole_paragraph() {
+        use crate::utils::fix_utils::apply_warning_fixes;
+
+        // An editor applies the fix of one warning. Moved alone, `a` would
+        // release ` 2. b` to open a list, so its fix carries the other lines.
+        let content = "- X\n\n a\n 2. b\n c\n";
+        let moved = "- X\n\n  a\n  2. b\n  c\n";
+        let warnings = check(content);
+        let carried: Vec<usize> = warnings
+            .iter()
+            .map(|warning| warning.fix.as_ref().map_or(0, |fix| fix.additional_edits.len()))
+            .collect();
+        assert_eq!(carried, [2, 0, 0]);
+        assert_eq!(apply_warning_fixes(content, &warnings[..1]).unwrap(), moved);
+        let opener = warnings[0].fix.clone().into_iter().collect();
+        assert_eq!(MD077ListContinuationIndent::apply_native_fixes(content, opener), moved);
+        // A line below the opening one moves alone and stays text.
+        assert_eq!(
+            apply_warning_fixes(content, &warnings[1..2]).unwrap(),
+            "- X\n\n a\n  2. b\n c\n"
+        );
+        // Applied together, an edit that two fixes hold is made once, by
+        // the rule's fixer and by the one every rule shares.
+        assert_eq!(fix(content), moved);
+        assert_eq!(apply_warning_fixes(content, &warnings).unwrap(), moved);
+
+        // The fix of a suppressed warning is not carried.
+        let content = "- X\n\n a\n b <!-- rumdl-disable-line MD077 -->\n c\n";
+        let warnings = check(content);
+        assert_eq!(
+            apply_warning_fixes(content, &warnings[..1]).unwrap(),
+            "- X\n\n  a\n b <!-- rumdl-disable-line MD077 -->\n  c\n"
+        );
+
+        // Nor does a line below a suppressed opening line carry the rest.
+        let content = "- X\n\n a <!-- rumdl-disable-line MD077 -->\n b\n c\n";
+        assert!(
+            check(content)
+                .iter()
+                .all(|warning| warning.fix.as_ref().is_none_or(|fix| fix.additional_edits.is_empty()))
+        );
+
+        // Each paragraph is carried by its own opening line.
+        let content = "- X\n\n a\n b\n\n c\n d\n";
+        assert_eq!(
+            apply_warning_fixes(content, &check(content)[..1]).unwrap(),
+            "- X\n\n  a\n  b\n\n c\n d\n"
+        );
+    }
+
+    #[test]
+    fn the_fix_of_a_paragraph_moves_the_paragraphs_above_it() {
+        use crate::utils::fix_utils::apply_warning_fixes;
+
+        // Moved alone, `b` and `c` would stand five columns in behind a
+        // paragraph that ended the list, and be code.
+        let content = "100. X\n\n a\n\n b\n c\n\n101. Y\n\n d\n";
+        let warnings = check(content);
+        let carried: Vec<usize> = warnings
+            .iter()
+            .map(|warning| warning.fix.as_ref().map_or(0, |fix| fix.additional_edits.len()))
+            .collect();
+        // The paragraph of another item carries nothing of this one.
+        assert_eq!(carried, [0, 2, 0, 0]);
+        assert_eq!(
+            apply_warning_fixes(content, &warnings[1..2]).unwrap(),
+            "100. X\n\n     a\n\n     b\n     c\n\n101. Y\n\n d\n"
+        );
+        // The paragraph above needs none of the ones below it.
+        assert_eq!(
+            apply_warning_fixes(content, &warnings[..1]).unwrap(),
+            "100. X\n\n     a\n\n b\n c\n\n101. Y\n\n d\n"
+        );
+        assert_eq!(fix(content), "100. X\n\n     a\n\n     b\n     c\n\n101. Y\n\n     d\n");
+    }
+
+    #[test]
+    fn a_paragraph_far_down_an_item_is_moved_by_a_fix_above_it() {
+        use crate::utils::fix_utils::apply_warning_fixes;
+
+        // Each fix carries the paragraphs above its own, up to a bound. Past
+        // it the last fix within the bound carries the paragraphs below it,
+        // and all of them are still moved in one pass.
+        let content = format!("- X\n{}", "\n a\n".repeat(70));
+        let moved = format!("- X\n{}", "\n  a\n".repeat(70));
+        let warnings = check(&content);
+        let carried: Vec<Option<usize>> = warnings
+            .iter()
+            .map(|warning| warning.fix.as_ref().map(|fix| fix.additional_edits.len()))
+            .collect();
+        let expected: Vec<Option<usize>> = (0..63).map(Some).chain([Some(69)]).chain([None; 6]).collect();
+        assert_eq!(carried, expected);
+        assert_eq!(apply_warning_fixes(&content, &warnings[63..64]).unwrap(), moved);
+        assert_eq!(fix(&content), moved);
+
+        // A paragraph past the bound keeps the fixes of the lines below its
+        // first, which stay its text moved alone, and the fix above carries
+        // them too.
+        let content = format!("- X\n{}\n a\n b\n", "\n a\n".repeat(64));
+        let moved = format!("- X\n{}\n  a\n  b\n", "\n  a\n".repeat(64));
+        let warnings = check(&content);
+        let fixed: Vec<bool> = warnings[64..].iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixed, [false, true]);
+        assert_eq!(apply_warning_fixes(&content, &warnings[63..64]).unwrap(), moved);
+        assert_eq!(fix(&content), moved);
+
+        // A short paragraph below one past the bound depends on it, so the
+        // same fix carries it although it would fit within the bound alone.
+        let long = "\n a\n b\n c\n d\n e\n f\n";
+        let content = format!("- X\n{}{long}\n a\n", "\n a\n".repeat(60));
+        let moved = content.replace("\n ", "\n  ");
+        let warnings = check(&content);
+        assert_eq!(warnings.len(), 67);
+        assert_eq!(warnings[59].fix.as_ref().unwrap().additional_edits.len(), 59 + 6 + 1);
+        assert!(warnings[66].fix.is_none());
+        assert_eq!(apply_warning_fixes(&content, &warnings[59..60]).unwrap(), moved);
+        assert_eq!(fix(&content), moved);
+    }
+
+    #[test]
+    fn the_fix_of_a_fence_moves_the_paragraphs_above_it() {
+        use crate::utils::fix_utils::apply_warning_fixes;
+        // Moved alone, the fence would stand behind a paragraph that ended
+        // the list, as indented code at this content column.
+        let content = "100. X\n\n a\n\n b\n\n ~~~rust\n y\n ~~~\n";
+        let moved = "100. X\n\n     a\n\n     b\n\n     ~~~rust\n     y\n     ~~~\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 3);
+        assert_eq!(apply_warning_fixes(content, &warnings[2..]).unwrap(), moved);
+        assert_eq!(fix(content), moved);
+
+        // Past the bound the fence moves with the last fix within it.
+        let paragraphs = |indent: &str| format!("\n{indent}a\n").repeat(70);
+        let content = format!("100. X\n{}\n ~~~rust\n y\n ~~~\n", paragraphs(" "));
+        let warnings = check(&content);
+        assert_eq!(warnings.len(), 71);
+        assert!(warnings[70].fix.is_none());
+        let moved = format!("100. X\n{}\n     ~~~rust\n     y\n     ~~~\n", paragraphs("     "));
+        assert_eq!(fix(&content), moved);
+    }
+
+    #[test]
+    fn each_fix_of_a_table_outside_its_item_moves_the_whole_table() {
+        use crate::utils::fix_utils::apply_warning_fixes;
+
+        // A row moved without the rows around it would leave its table.
+        for (block, lines) in [
+            (" | a | b |\n | - | - |\n | x | y |\n", 3),
+            (" term\n : def\n : more\n", 3),
+        ] {
+            let content = format!("- X\n\n a\n\n{block}\n b\n");
+            let indented = block.replace("\n ", "\n  ");
+            let warnings = check(&content);
+            assert_eq!(warnings.len(), lines + 2, "{block:?}");
+            let alone = |n: usize| apply_warning_fixes(&content, &warnings[n..=n]).unwrap();
+            assert_eq!(alone(0), format!("- X\n\n  a\n\n{block}\n b\n"));
+            for n in 1..=lines {
+                assert_eq!(alone(n), format!("- X\n\n  a\n\n {indented}\n b\n"), "{block:?} {n}");
+            }
+            assert_eq!(alone(lines + 1), format!("- X\n\n  a\n\n {indented}\n  b\n"));
+        }
+
+        // A row counts toward the bound once, as a line of its table.
+        let content = format!("- X\n\n | a | b |\n | - | - |\n{}", " | x | y |\n".repeat(40));
+        let warnings = check(&content);
+        assert_eq!(warnings.len(), 42);
+        assert!(warnings.iter().all(|warning| warning.fix.is_some()));
+        assert_eq!(
+            apply_warning_fixes(&content, &warnings[41..]).unwrap(),
+            format!("- X\n\n  | a | b |\n  | - | - |\n{}", "  | x | y |\n".repeat(40))
+        );
+
+        // Past the bound the fix of the opening row alone moves the table.
+        let rows = |indent: &str| format!("{indent}| x | y |\n").repeat(70);
+        let content = format!("- X\n\n | a | b |\n | - | - |\n{}", rows(" "));
+        let warnings = check(&content);
+        let fixes: Vec<bool> = warnings.iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [vec![true], vec![false; 71]].concat());
+        assert_eq!(
+            apply_warning_fixes(&content, &warnings[..1]).unwrap(),
+            format!("- X\n\n  | a | b |\n  | - | - |\n{}", rows("  "))
+        );
+
+        // Below a block that carries, the fix of that block moves the table.
+        let content = format!("- X\n\n a\n\n | a | b |\n | - | - |\n{}", rows(" "));
+        let warnings = check(&content);
+        let fixes: Vec<bool> = warnings.iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [vec![true], vec![false; 72]].concat());
+        assert_eq!(
+            apply_warning_fixes(&content, &warnings[..1]).unwrap(),
+            format!("- X\n\n  a\n\n  | a | b |\n  | - | - |\n{}", rows("  "))
+        );
+    }
+
+    #[test]
+    fn the_fix_of_a_block_moves_the_fences_above_it() {
+        use crate::utils::fix_utils::apply_warning_fixes;
+        // A fence left of the content column ends the list as a paragraph
+        // does, so what stands below it reaches the item only with it.
+        let content = "100. X\n\n a\n\n ~~~rust\n y\n ~~~\n\n ~~~py\n z\n ~~~\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 3);
+        let alone = |n: usize| apply_warning_fixes(content, &warnings[n..=n]).unwrap();
+        assert_eq!(
+            alone(1),
+            "100. X\n\n     a\n\n     ~~~rust\n     y\n     ~~~\n\n ~~~py\n z\n ~~~\n"
+        );
+        let moved = "100. X\n\n     a\n\n     ~~~rust\n     y\n     ~~~\n\n     ~~~py\n     z\n     ~~~\n";
+        assert_eq!(alone(2), moved);
+        assert_eq!(fix(content), moved);
+
+        // Past the bound a fence has no fix of its own and moves with the
+        // last fix within the bound, so one pass settles the item.
+        let fences = |indent: &str| format!("\n{indent}~~~\n{indent}y\n{indent}~~~\n").repeat(70);
+        let content = format!("100. X\n{}", fences(" "));
+        let warnings = check(&content);
+        assert_eq!(warnings.len(), 70);
+        assert!(warnings[69].fix.is_none());
+        assert_eq!(fix(&content), format!("100. X\n{}", fences("     ")));
+    }
+
+    #[test]
+    fn the_fix_of_a_deeper_line_moves_the_blocks_above_it() {
+        use crate::utils::fix_utils::apply_warning_fixes;
+        // The line is over-indented only for an item that holds it, which
+        // this one does once the paragraph above has moved.
+        let content = "- X\n\n a\n\n   c\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(
+            apply_warning_fixes(content, &warnings[1..]).unwrap(),
+            "- X\n\n  a\n\n  c\n"
+        );
+
+        // Past the bound it waits for the paragraphs to move.
+        let content = format!("- X\n{}\n   c\n", "\n a\n".repeat(70));
+        let warnings = check(&content);
+        assert_eq!(warnings.len(), 71);
+        assert!(warnings[70].fix.is_none());
+        assert_eq!(fix(&content), format!("- X\n{}\n   c\n", "\n  a\n".repeat(70)));
+    }
+
+    #[test]
+    fn the_text_of_a_long_fence_is_held_by_one_fix() {
+        // The fix of a fence replaces all of it, so the fixes below a long
+        // one would each hold a copy of its text.
+        let body = |indent: &str| format!("{indent}y\n").repeat(MD077ListContinuationIndent::MAX_CARRIED_BYTES);
+        let content = format!("- X\n\n ~~~\n{} ~~~\n\n ~~~\n z\n ~~~\n\n   c\n", body(" "));
+        let warnings = check(&content);
+        assert_eq!(warnings.len(), 3);
+        let fixes: Vec<bool> = warnings.iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [true, false, false]);
+        // The second fence moves with the first, and the deeper line waits.
+        let moved = format!("- X\n\n  ~~~\n{}  ~~~\n\n  ~~~\n  z\n  ~~~\n\n   c\n", body("  "));
+        assert_eq!(fix(&content), moved);
+
+        // The bound is on what the fences of one item hold together.
+        let fence = format!(
+            " ~~~\n{} ~~~\n",
+            " y\n".repeat(MD077ListContinuationIndent::MAX_CARRIED_BYTES / 6)
+        );
+        let fixes =
+            |content: &str| -> Vec<bool> { check(content).iter().map(|warning| warning.fix.is_some()).collect() };
+        assert_eq!(fixes(&format!("- X\n\n{fence}\n{fence}")), [true, false]);
+        assert_eq!(
+            fixes(&format!("- X\n\n{fence}\n- Y\n\n{fence}\n ~~~\n z\n ~~~\n")),
+            [true, true, true]
+        );
+    }
+
+    #[test]
+    fn nothing_moves_below_a_fence_that_stays_outside() {
+        // Behind a fence that ended the list, the fence below it would be
+        // code at this content column.
+        let content = "100. X\n\n ~~~\n y\n ~~~\n\n ~~~\n z\n ~~~\n";
+        let mut warnings = check(content);
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().all(|warning| warning.fix.is_some()));
+        warnings[0].fix = None;
+        MD077ListContinuationIndent::move_blocks_as_one(
+            &mut warnings,
+            &[0, 1],
+            &[(3, 3, 1), (7, 7, 1)],
+            &Default::default(),
+        );
+        assert!(warnings[1].fix.is_none());
+    }
+
+    #[test]
+    fn a_paragraph_that_lost_one_fix_keeps_none() {
+        // The fixes of a paragraph were compared together, so without one of
+        // them the others are not known to keep the blocks.
+        let content = "- X\n\n a\n 2. b\n c\n\n d\n";
+        let mut warnings = check(content);
+        assert_eq!(warnings.len(), 4);
+        warnings[1].fix = None;
+        MD077ListContinuationIndent::move_blocks_as_one(
+            &mut warnings,
+            &[0, 1, 2, 3],
+            &[(3, 5, 1), (7, 7, 1)],
+            &Default::default(),
+        );
+        // The paragraph below it was compared with all three moved.
+        let fixes: Vec<bool> = warnings.iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [false, false, false, false]);
+    }
+
+    #[test]
+    fn text_that_would_begin_a_block_holds_back_its_whole_paragraph() {
+        // The quote line has no fix of its own, so ` c` moving alone would
+        // only leave the paragraph ragged.
+        let content = "- X\n\n a\n    > b\n c\n";
+        let fixes: Vec<bool> = check(content).iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [false, false]);
+        assert_eq!(fix(content), content);
+        // A marker further down does not release the lines around it.
+        let content = "- X\n\n a\n    > b\n 2. c\n d\n";
+        let fixes: Vec<bool> = check(content).iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [false, false, false]);
+    }
+
+    #[test]
+    fn a_marker_the_item_cannot_reach_holds_back_its_whole_paragraph() {
+        let content = "- X\n\n a\n2. b\n c\n";
+        assert!(check(content).iter().all(|warning| warning.fix.is_none()));
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn several_marker_lines_move_with_their_paragraph() {
+        let content = "- X\n\n a\n 2. b\n c\n 3. d\n e\n";
+        let fixes: Vec<bool> = check(content).iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [true, true, true, true, true]);
+        let once = fix(content);
+        assert_eq!(once, "- X\n\n  a\n  2. b\n  c\n  3. d\n  e\n");
+        assert!(check(&once).is_empty());
+    }
+
+    #[test]
+    fn a_paragraph_the_item_already_holds_is_moved_whatever_follows_it() {
+        let indent_4 = MD077ListContinuationIndent::from_config_struct(MD077Config {
+            indent: Some(4),
+            ..Default::default()
+        });
+        let fixed = |content: &str| {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            indent_4.fix(&ctx).unwrap()
+        };
+        // The quote already interrupts the item's paragraph.
+        assert_eq!(fixed("- X\n\n  a\n    > b\n"), "- X\n\n    a\n    > b\n");
+        // ` 2. c` is a lazy line of a paragraph the item holds.
+        assert_eq!(fixed("- X\n\n  a\n   b\n 2. c\n"), "- X\n\n    a\n    b\n 2. c\n");
+    }
+
+    #[test]
+    fn text_is_read_where_it_lands_when_it_moves_with_its_paragraph() {
+        // Both lines are short of column 6, and there `# h` is a heading.
+        let content = "1234. X\n\n a\n    # h\n";
+        let fixes: Vec<bool> = check(content).iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [false, false]);
+        assert_eq!(fix(content), content);
+        // Below a line that ends the item's lines nothing moves.
+        let content = "1234. X\n\n a\nb\n    # h\n";
+        assert_eq!(fix(content), "1234. X\n\n      a\nb\n    # h\n");
+    }
+
+    #[test]
+    fn a_paragraph_opens_after_the_block_above_it_ends() {
+        for content in [
+            "- X\n\n  <!-- c -->\n a\n2. b\n",
+            "- X\n\n  ```\n  c\n  ```\n a\n2. b\n",
+            "- X\n\n  | h |\n  |---|\n a\n2. b\n",
+            "- X\n\n  | h |\n  |---|\n  | r |\n a\n2. b\n",
+            "- X\n\n  >\n a\n2. b\n",
+            "- X\n\n  > q\n  >\n a\n2. b\n",
+            "- X\n\n  > # h\n a\n2. b\n",
+            "- X\n\n  > h\n  > ===\n a\n2. b\n",
+            "- X\n\n  > h\n  > -\n a\n2. b\n",
+            "- X\n\n  > | h |\n  > |---|\n a\n2. b\n",
+        ] {
+            assert!(!check(content).is_empty(), "{content:?}");
+            assert_eq!(fix(content), content, "{content:?}");
+        }
+        // A quote that ends in text lends its paragraph to the line below.
+        assert_eq!(fix("- X\n\n  > q\n a\n2. b\n"), "- X\n\n  > q\n  a\n2. b\n");
+    }
+
+    #[test]
+    fn a_marker_past_the_end_of_the_item_holds_back_its_whole_paragraph() {
+        // `c` ends the item's lines, so `2. d` below it is never moved and
+        // the paragraph cannot follow `a` into the item.
+        let content = "- X\n\n a\n b\nc\n 2. d\n";
+        let fixes: Vec<bool> = check(content).iter().map(|warning| warning.fix.is_some()).collect();
+        assert_eq!(fixes, [false, false]);
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn only_a_paragraph_outside_its_item_is_exempt_from_over_indentation() {
+        let over_indented = |content: &str, rule: &MD077ListContinuationIndent| {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            rule.check(&ctx)
+                .unwrap()
+                .iter()
+                .filter(|warning| warning.message.contains("over-indented"))
+                .count()
+        };
+        let default = MD077ListContinuationIndent::default();
+        // ` a` opens a paragraph outside the item, and `    b` is its text.
+        assert_eq!(over_indented("- X\n\n a\n    b\n", &default), 0);
+        // ` b` is a lazy line of a paragraph the item holds, and so is `c`.
+        assert_eq!(over_indented("- X\n\n  a\n b\n      c\n", &default), 1);
+        // Short of the configured indent, `a` is inside the item all the same.
+        let indent_4 = MD077ListContinuationIndent::from_config_struct(MD077Config {
+            indent: Some(4),
+            ..Default::default()
+        });
+        assert_eq!(over_indented("- X\n\n   a\n       b\n", &indent_4), 1);
+        // A lazy line opens no paragraph, so the paragraph after it is not
+        // taken for one that it opened.
+        assert_eq!(over_indented("- X\n\n  a\n b\n\n  c\n     d\n", &default), 1);
+    }
+
+    #[test]
+    fn a_fix_is_judged_without_the_suppressed_fixes_around_it() {
+        // Together the two lines join the item and ` 2. b` stays text. The
+        // warning of ` 2. b` is suppressed and its fix never applied, and
+        // moved alone ` a` would release it to open a list.
+        let content = "- X\n\n a\n 2. b <!-- rumdl-disable-line MD077 -->\n";
+        assert_eq!(fix(content), content);
+        // Control: unsuppressed, both lines move.
+        assert_eq!(fix("- X\n\n a\n 2. b\n"), "- X\n\n  a\n  2. b\n");
+    }
+
+    /// The time to check an item followed by `lines` under-indented lines of one
+    /// paragraph, as the fastest of five runs.
+    fn under_indented_paragraph_check_time(lines: usize) -> std::time::Duration {
+        // Lines long enough that copying the document counts.
+        let content = format!("- X\n\n{}", " a line of the paragraph outside its item\n".repeat(lines));
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+        let rule = MD077ListContinuationIndent::default();
+        (0..5)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                let warnings = rule.check(&ctx).unwrap();
+                let elapsed = start.elapsed();
+                assert_eq!(warnings.len(), lines);
+                assert!(warnings.iter().all(|warning| warning.fix.is_some()));
+                elapsed
+            })
+            .min()
+            .unwrap()
+    }
+
+    #[test]
+    fn under_indented_paragraphs_linear_complexity() {
+        // A fix carries the fixes of the paragraphs above its own. Carrying
+        // all of them would hold the square of their number.
+        let time = |paragraphs: usize| {
+            let content = format!("- X\n{}", "\n a paragraph outside its item\n".repeat(paragraphs));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let rule = MD077ListContinuationIndent::default();
+            (0..5)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    let warnings = rule.check(&ctx).unwrap();
+                    let elapsed = start.elapsed();
+                    assert_eq!(warnings.len(), paragraphs);
+                    elapsed
+                })
+                .min()
+                .unwrap()
+        };
+        let (short, long) = (time(10_000), time(40_000));
+        let ratio = long.as_secs_f64() / short.as_secs_f64();
+        println!("check: {short:?} for 10000 paragraphs, {long:?} for 40000 ({ratio:.2}x)");
+        assert!(
+            ratio < 8.0,
+            "checking under-indented paragraphs grows faster than their number: {short:?} for 10000, {long:?} for \
+             40000 ({ratio:.2}x)"
+        );
+    }
+
+    #[test]
+    fn withheld_paragraph_fixes_linear_complexity() {
+        // Every paragraph would turn its second line into a list item, so
+        // every fix is dropped, and the dropped ones are compared again.
+        // Parsing the document once more for each of them costs the square
+        // of their number.
+        let time = |paragraphs: usize| {
+            let content = "- X\n\n a\n2. b\n\n# Heading\n\n".repeat(paragraphs);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let rule = MD077ListContinuationIndent::default();
+            (0..5)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    let warnings = rule.check(&ctx).unwrap();
+                    let elapsed = start.elapsed();
+                    assert_eq!(warnings.len(), paragraphs);
+                    assert!(warnings.iter().all(|warning| warning.fix.is_none()));
+                    elapsed
+                })
+                .min()
+                .unwrap()
+        };
+        let (short, long) = (time(1_000), time(4_000));
+        let ratio = long.as_secs_f64() / short.as_secs_f64();
+        println!("check: {short:?} for 1000 paragraphs, {long:?} for 4000 ({ratio:.2}x)");
+        assert!(
+            ratio < 8.0,
+            "checking paragraphs whose fixes are withheld grows faster than their number: {short:?} for 1000, \
+             {long:?} for 4000 ({ratio:.2}x)"
+        );
+    }
+
+    #[test]
+    fn under_indented_paragraph_lines_linear_complexity() {
+        // Every line of the paragraph is flagged, and each asks whether a line
+        // below it would open a list. Searching the paragraph once costs the
+        // same per line at any length; searching it again from every line costs
+        // the square of the length, sixteen times as much for four times the
+        // lines. So does applying the fixes one by one to see what they make
+        // of the paragraph, each moving the text below it.
+        let short = under_indented_paragraph_check_time(10_000);
+        let long = under_indented_paragraph_check_time(40_000);
+        let ratio = long.as_secs_f64() / short.as_secs_f64();
+        println!("check: {short:?} for 10000 lines, {long:?} for 40000 ({ratio:.2}x)");
+        assert!(
+            ratio < 8.0,
+            "checking an under-indented paragraph grows faster than its length: {short:?} for 10000 lines, \
+             {long:?} for 40000 ({ratio:.2}x)"
+        );
     }
 
     #[test]
@@ -4882,6 +5903,53 @@ mod tests {
             fix_aligned_flavor("- A\nb `y\nand z` end\n", MarkdownFlavor::Standard),
             "- A\n  b `y\nand z` end\n"
         );
+    }
+
+    #[test]
+    fn a_paragraph_is_not_pulled_into_its_item_when_that_opens_a_list_below_it() {
+        // `2. a` continues the paragraph ` a` as text: an ordered list that does
+        // not start at 1 cannot interrupt a paragraph. With ` a` inside the
+        // item the paragraph belongs to the item, the line at the margin is no
+        // longer held by it, and `2. a` opens a list. The line is reported and
+        // left for the author.
+        for content in [
+            "- X\n\n a\n2. a\n``",
+            "- X\n\n a\n2. a\nzz\n",
+            "- X\n\n a\nb\n 7) c\n",
+            "1. X\n\n  a\n3. b\n",
+        ] {
+            for style in [ContinuationStyle::Any, ContinuationStyle::Aligned] {
+                let rule = MD077ListContinuationIndent::new(style);
+                let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+                assert_eq!(warnings[0].line, 3, "{content:?}");
+                assert!(warnings[0].fix.is_none(), "{content:?}: {:?}", warnings[0].fix);
+                assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_paragraph_is_still_pulled_into_its_item_when_nothing_below_it_changes() {
+        for (content, expected) in [
+            // Plain text below it.
+            ("- X\n\n a\nb\n", "- X\n\n  a\nb\n"),
+            // A marker the parser already reads as a list item.
+            ("- X\n\n a\n1. a\n", "- X\n\n  a\n1. a\n"),
+            ("- X\n\n a\n- a\n", "- X\n\n  a\n- a\n"),
+            // A marker inside the item's content column stays paragraph text.
+            ("- X\n\n a\n  2. a\n", "- X\n\n  a\n  2. a\n"),
+            // A marker in a later paragraph is a list either way.
+            ("- X\n\n a\n\n2. a\n", "- X\n\n  a\n\n2. a\n"),
+        ] {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            assert_eq!(
+                MD077ListContinuationIndent::default().fix(&ctx).unwrap(),
+                expected,
+                "{content:?}"
+            );
+        }
     }
 
     /// The warnings of `content` under the aligned style as (line, message).

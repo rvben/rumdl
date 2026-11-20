@@ -15,7 +15,7 @@ use crate::lint_context::LintContext;
 use crate::rule::LintWarning;
 use crate::utils::fix_utils::apply_warning_fixes;
 use crate::utils::parser_options::rumdl_parser_options_for;
-use pulldown_cmark::{Event, Parser, Tag};
+use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use std::ops::Range;
 
 /// What a rule's fixes are allowed to change in the parsed document.
@@ -316,10 +316,127 @@ pub(crate) struct Parsed<'a> {
     /// For each event, the line it belongs to (an end tag belongs to the line
     /// its element ends on) and how many elements enclose it.
     places: Vec<(usize, usize)>,
+    /// For each event, the line its source ends on.
+    ends: Vec<usize>,
     line_starts: Vec<usize>,
     lists: Vec<Range<usize>>,
     depth: usize,
     list_depth: usize,
+}
+
+/// A document's blocks in order, each with what it holds, leaving out which
+/// list or item holds it.
+///
+/// A fix that moves a paragraph into the list item above it changes what
+/// holds the paragraph and nothing else, and two documents that differ only
+/// so have the same blocks. The parser writes the text of an item in a tight
+/// list without a paragraph around it and the same text in a loose list with
+/// one, and a paragraph joining an item makes its list loose, so text written
+/// straight into an item counts as a paragraph here. Where a list begins and
+/// ends is left out with it: two lists a paragraph stood between become one
+/// when it joins the first. Each item is still marked where it begins, so
+/// text that becomes an item, or an item that becomes text, is a difference.
+pub(crate) struct Blocks<'p, 'a> {
+    /// Each event with the line it belongs to and, for the start of a task
+    /// item, whether the task is checked.
+    events: Vec<(usize, &'p Event<'a>, Option<bool>)>,
+    lines: usize,
+}
+
+/// Whether the element is part of a block's text rather than a block.
+fn is_inline(tag: &Tag<'_>) -> bool {
+    matches!(
+        tag,
+        Tag::Emphasis
+            | Tag::Strong
+            | Tag::Strikethrough
+            | Tag::Superscript
+            | Tag::Subscript
+            | Tag::Link { .. }
+            | Tag::Image { .. }
+    )
+}
+
+impl Blocks<'_, '_> {
+    /// The first and last line of every paragraph, in order.
+    pub(crate) fn paragraphs(&self) -> Vec<(usize, usize)> {
+        let mut paragraphs = Vec::new();
+        let mut opened = None;
+        for &(line, event, _) in &self.events {
+            match event {
+                Event::Start(Tag::Paragraph) => opened = Some(line),
+                Event::End(TagEnd::Paragraph) => paragraphs.extend(opened.take().map(|first| (first, line))),
+                _ => {}
+            }
+        }
+        paragraphs
+    }
+
+    /// The first and last line of every block that is neither a paragraph nor
+    /// a list or an item, ordered by first line, without the blocks another
+    /// of them holds.
+    pub(crate) fn others(&self) -> Vec<(usize, usize)> {
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        let mut open: Vec<Option<usize>> = Vec::new();
+        for &(line, event, _) in &self.events {
+            match event {
+                // An item is written here without its end.
+                Event::Start(Tag::Item) => {}
+                Event::Start(tag) => open.push((!is_inline(tag) && !matches!(tag, Tag::Paragraph)).then_some(line)),
+                Event::End(_) => {
+                    if let Some(Some(first)) = open.pop() {
+                        spans.push((first, line));
+                    }
+                }
+                _ => {}
+            }
+        }
+        spans.sort_unstable_by_key(|&(first, last)| (first, std::cmp::Reverse(last)));
+        let mut outer: Vec<(usize, usize)> = Vec::new();
+        for span in spans {
+            if outer.last().is_none_or(|&(_, last)| span.0 > last) {
+                outer.push(span);
+            }
+        }
+        outer
+    }
+
+    /// The lines whose blocks differ in `other`, which must have as many
+    /// lines; `None` when it does not, since lines then do not correspond.
+    pub(crate) fn changed_lines(&self, other: &Blocks<'_, '_>) -> Option<Vec<usize>> {
+        if self.lines != other.lines {
+            return None;
+        }
+        // The parser does not write its events in line order: the cell a
+        // short table row lacks is placed on the line below the row's end.
+        // The text of a code block is kept whole with the line the block
+        // opens on: the parser writes it in pieces that follow the
+        // indentation of its lines and their endings, not what it holds.
+        #[derive(Clone, Default, PartialEq)]
+        struct Line<'e> {
+            events: Vec<(&'e Event<'e>, Option<bool>)>,
+            code: String,
+        }
+        fn by_line<'e>(blocks: &'e Blocks<'_, '_>) -> Vec<Line<'e>> {
+            let mut lines = vec![Line::default(); blocks.lines];
+            let mut code_opened: Option<usize> = None;
+            for &(line, event, task) in &blocks.events {
+                match (event, code_opened) {
+                    (Event::Text(text), Some(opened)) => {
+                        lines[opened].code.push_str(text);
+                        continue;
+                    }
+                    (Event::Start(Tag::CodeBlock(_)), _) => code_opened = Some(line),
+                    (Event::End(TagEnd::CodeBlock), _) => code_opened = None,
+                    _ => {}
+                }
+                lines[line].events.push((event, task));
+            }
+            lines
+        }
+        let (mine, theirs) = (by_line(self), by_line(other));
+        Some((0..self.lines).filter(|&line| mine[line] != theirs[line]).collect())
+    }
 }
 
 /// The line holding `offset`, given where each line starts.
@@ -350,6 +467,7 @@ impl<'a> Parsed<'a> {
         Self {
             events: Vec::new(),
             places: Vec::new(),
+            ends: Vec::new(),
             line_starts,
             lists: Vec::new(),
             depth: 0,
@@ -370,6 +488,8 @@ impl<'a> Parsed<'a> {
             _ => line_at(&self.line_starts, range.start),
         };
         self.places.push((line, self.depth));
+        self.ends
+            .push(line_at(&self.line_starts, range.end.saturating_sub(1).max(range.start)));
         if matches!(event, Event::Start(_)) {
             self.depth += 1;
         }
@@ -400,6 +520,7 @@ impl<'a> Parsed<'a> {
         Parsed {
             events: self.events.into_iter().map(Event::into_static).collect(),
             places: self.places,
+            ends: self.ends,
             line_starts: self.line_starts,
             lists: self.lists,
             depth: self.depth,
@@ -464,6 +585,100 @@ impl<'a> Parsed<'a> {
 
     fn line_of(&self, offset: usize) -> usize {
         line_at(&self.line_starts, offset)
+    }
+
+    /// The document's blocks without the lists that hold them.
+    pub(crate) fn blocks(&self) -> Blocks<'_, 'a> {
+        static PARAGRAPH: Event<'static> = Event::Start(Tag::Paragraph);
+        static PARAGRAPH_END: Event<'static> = Event::End(TagEnd::Paragraph);
+
+        let mut events: Vec<(usize, &Event<'a>, Option<bool>)> = Vec::with_capacity(self.events.len());
+        // Where each open item starts in `events`.
+        let mut items: Vec<usize> = Vec::new();
+        // The last line of the text written straight into an item so far.
+        let mut bare_end = 0;
+        // For each open block, whether it is a list item.
+        let mut open: Vec<bool> = Vec::new();
+        let mut inline_depth = 0usize;
+        // Whether text written straight into an item has opened a paragraph.
+        let mut bare = false;
+        // The line the event before ends on, unless that event opens a block.
+        let mut content_end: Option<usize> = None;
+        for ((event, &(line, _)), &end) in self.events.iter().zip(&self.places).zip(&self.ends) {
+            // A definition list ends where what it holds does. The parser's
+            // range for it can reach further, over the blank lines below it
+            // and up to the block after them, which says nothing of the list
+            // itself.
+            let line = match event {
+                Event::End(TagEnd::DefinitionList | TagEnd::DefinitionListDefinition) => {
+                    content_end.map_or(line, |held| line.min(held))
+                }
+                _ => line,
+            };
+            content_end = match event {
+                Event::Start(_) => None,
+                Event::End(_) => Some(line),
+                _ => Some(end),
+            };
+            // The parser writes a task marker inside the item's paragraph or
+            // ahead of it, depending on the list and on where the text
+            // starts, so the marker is kept with its item.
+            if let Event::TaskListMarker(checked) = event {
+                if let Some(&item) = items.last() {
+                    events[item].2 = Some(*checked);
+                }
+                continue;
+            }
+            let inline = match event {
+                Event::Start(tag) => is_inline(tag),
+                Event::End(_) => inline_depth > 0,
+                Event::Rule | Event::Html(_) => false,
+                _ => true,
+            };
+            if inline {
+                if !bare && inline_depth == 0 && open.last() == Some(&true) {
+                    events.push((line, &PARAGRAPH, None));
+                    bare = true;
+                }
+                bare_end = end;
+                match event {
+                    Event::Start(_) => inline_depth += 1,
+                    Event::End(_) => inline_depth -= 1,
+                    _ => {}
+                }
+                events.push((line, event, None));
+                continue;
+            }
+            if std::mem::take(&mut bare) {
+                events.push((bare_end, &PARAGRAPH_END, None));
+            }
+            match event {
+                Event::Start(tag) => {
+                    open.push(matches!(tag, Tag::Item));
+                    if matches!(tag, Tag::Item) {
+                        items.push(events.len());
+                    }
+                    if !matches!(tag, Tag::List(_)) {
+                        events.push((line, event, None));
+                    }
+                }
+                Event::End(end) => {
+                    open.pop();
+                    match end {
+                        TagEnd::List(_) => {}
+                        TagEnd::Item => {
+                            items.pop();
+                        }
+                        _ => events.push((line, event, None)),
+                    }
+                }
+                _ => events.push((line, event, None)),
+            }
+        }
+        Blocks {
+            events,
+            lines: self.line_starts.len(),
+        }
     }
 
     /// Each line's events, with how deeply each is nested.
@@ -797,5 +1012,131 @@ mod tests {
         let mut warnings = vec![edit(2, start..start + 2, "")];
         mdx_guard(content, &mut warnings);
         assert!(warnings[0].fix.is_some());
+    }
+
+    fn block_changes(before: &str, after: &str) -> Option<Vec<usize>> {
+        Parsed::new(before).blocks().changed_lines(&Parsed::new(after).blocks())
+    }
+
+    #[test]
+    fn blocks_are_the_same_whichever_list_holds_them() {
+        // A paragraph joining the item above it, which makes the list loose.
+        assert_eq!(block_changes("- X\n\n a\n", "- X\n\n  a\n"), Some(vec![]));
+        // The text of a tight item is the paragraph a loose one holds.
+        assert_eq!(block_changes("- *X* y\n\nz\n", "- *X* y\n\n  z\n"), Some(vec![]));
+        // Two lists becoming one hold the same items. The items of the
+        // second are numbered on from the first, which is what joining the
+        // paragraph is for where every item is written `1.`.
+        assert_eq!(block_changes("- X\n\n a\n- Y\n", "- X\n\n  a\n- Y\n"), Some(vec![]));
+        assert_eq!(
+            block_changes("1. X\n\n a\n1. Y\n", "1. X\n\n   a\n1. Y\n"),
+            Some(vec![])
+        );
+        // The text of a tight item ends where its last element does.
+        assert_eq!(
+            block_changes("- X\n  `b\n  c`\n\n a\n", "- X\n  `b\n  c`\n\n  a\n"),
+            Some(vec![])
+        );
+        // A task marker, with the text beside it and on the next line.
+        assert_eq!(block_changes("- [ ] task\n\n a\n", "- [ ] task\n\n  a\n"), Some(vec![]));
+        assert_eq!(
+            block_changes("- [ ]\n  task\n\n a\n", "- [ ]\n  task\n\n  a\n"),
+            Some(vec![])
+        );
+    }
+
+    #[test]
+    fn blocks_differ_where_text_becomes_a_block() {
+        // Text becoming an item, and an item becoming text. The paragraph
+        // above ends on another line as well.
+        assert_eq!(
+            block_changes("- X\n\n a\n2. b\n", "- X\n\n  a\n2. b\n"),
+            Some(vec![2, 3])
+        );
+        assert_eq!(
+            block_changes("- X\n\n  a\n2. b\n", "- X\n\n a\n2. b\n"),
+            Some(vec![2, 3])
+        );
+        // Text becoming a heading, a quote and code.
+        assert_eq!(
+            block_changes("- X\n\n a\n    # h\n", "- X\n\n  a\n  # h\n"),
+            Some(vec![2, 3])
+        );
+        assert_eq!(
+            block_changes("- X\n\n a\n    > q\n", "- X\n\n  a\n  > q\n"),
+            Some(vec![2, 3])
+        );
+        assert_eq!(block_changes("- X\n\n  a\n", "- X\n\n      a\n"), Some(vec![2]));
+        // A task that becomes checked.
+        assert_eq!(block_changes("- [ ] a\n", "- [x] a\n"), Some(vec![0]));
+        // A table row short of a cell, whose events the parser does not write
+        // in line order, hides nothing below it.
+        let table = "| a | b |\n| - | - |\n| c |\n\n";
+        assert_eq!(
+            block_changes(
+                &format!("{table}- X\n\n a\n2. b\n"),
+                &format!("{table}- X\n\n  a\n2. b\n")
+            ),
+            Some(vec![6, 7])
+        );
+        // Documents of different lengths have no lines to compare.
+        assert_eq!(block_changes("a\n", "a\n\nb\n"), None);
+    }
+
+    #[test]
+    fn the_text_of_a_code_block_is_compared_whole() {
+        // The parser writes the text of a fence in one piece or in one for
+        // each line, by the indentation and the ending of its lines.
+        for (before, after) in [
+            ("- X\n\n ~~~\nx\ny\n ~~~\n", "- X\n\n  ~~~\n  x\n  y\n  ~~~\n"),
+            ("- X\n\n ~~~\n x\ny\n ~~~\n", "- X\n\n  ~~~\n  x\n  y\n  ~~~\n"),
+            (
+                "- X\r\n\r\n ~~~\r\nx\r\ny\r\n ~~~\r\n",
+                "- X\r\n\r\n  ~~~\r\n  x\r\n  y\r\n  ~~~\r\n",
+            ),
+        ] {
+            assert_eq!(block_changes(before, after), Some(vec![]), "{before:?}");
+        }
+        // Text that differs is a change of the block, on the line it opens.
+        assert_eq!(
+            block_changes("a\n\n~~~\nx\ny\n~~~\n", "a\n\n~~~\nx\n y\n~~~\n"),
+            Some(vec![2])
+        );
+        assert_eq!(block_changes("~~~\nxy\n\n~~~\n", "~~~\nx\ny\n~~~\n"), Some(vec![0]));
+        // So is text that leaves the block, or the language it is written in.
+        assert_ne!(
+            block_changes("- X\n\n ~~~\n x\ny\n ~~~\n", "- X\n\n  ~~~\n  x\n y\n  ~~~\n"),
+            Some(vec![])
+        );
+        assert_ne!(block_changes("~~~\nx\n~~~\ny\n", "~~~\nx\ny\n~~~\n"), Some(vec![]));
+        assert_eq!(block_changes("~~~a\nx\n~~~\n", "~~~b\nx\n~~~\n"), Some(vec![0]));
+    }
+
+    #[test]
+    fn a_block_ends_where_what_it_holds_does() {
+        // The parser's range for the definition list reaches the paragraph
+        // below it only while the item holds that paragraph.
+        assert_eq!(
+            block_changes("- X\n  : def\n\n a\n", "- X\n  : def\n\n  a\n"),
+            Some(vec![])
+        );
+        // What the block holds is still compared line by line.
+        assert_eq!(
+            block_changes("- X\n  : def\n\n a\n", "- X\n  : def\n  a\n\n"),
+            Some(vec![1, 2, 3])
+        );
+    }
+
+    #[test]
+    fn blocks_that_are_not_paragraphs_are_listed_with_their_first_and_last_line() {
+        let parsed = Parsed::new("- X\n\n | a | b |\n | - | - |\n | x | y |\n\n~~~\nc\n~~~\n\np\n\n> q\n> r\n");
+        assert_eq!(parsed.blocks().others(), [(2, 4), (6, 8), (12, 13)]);
+    }
+
+    #[test]
+    fn paragraphs_are_listed_with_their_first_and_last_line() {
+        let parsed = Parsed::new("- X\n\n a\n    > b\n c\n\n# h\n\nd\n");
+        // The text of the tight item is a paragraph as well.
+        assert_eq!(parsed.blocks().paragraphs(), [(0, 0), (2, 4), (8, 8)]);
     }
 }

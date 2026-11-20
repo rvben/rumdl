@@ -652,6 +652,27 @@ fn test_md077_fence_lookup_linear_complexity() {
     }
 }
 
+/// A line below a long paragraph outside its item must not read every fix of
+/// that paragraph to find that they are more than its own fix carries.
+#[test]
+fn test_md077_lines_below_a_long_outside_paragraph_linear_complexity() {
+    let rule = MD077ListContinuationIndent::default();
+    let times: Vec<_> = [8192, 16384, 32768]
+        .into_iter()
+        .map(|count| {
+            let content = format!("- X\n\n{}\n{}", " a\n".repeat(count), "   b\n".repeat(count));
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert!(!rule.should_skip(&ctx));
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 2 * count);
+            assert!(warnings[..count].iter().all(|warning| warning.fix.is_some()));
+            assert!(warnings[count..].iter().all(|warning| warning.fix.is_none()));
+            measure_rule_time_with_context(&rule, &ctx, 5)
+        })
+        .collect();
+    assert_linear_complexity("MD077 lines below a long outside paragraph", &times, 3.0);
+}
+
 /// Unrecognized numeric text must not rescan the same indented run per line.
 #[test]
 fn test_md030_indented_fallback_linear_complexity() {
