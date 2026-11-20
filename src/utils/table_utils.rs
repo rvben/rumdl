@@ -1824,6 +1824,28 @@ mod tests {
     }
 
     #[test]
+    fn a_table_on_the_line_where_an_item_ends_is_outside_the_item() {
+        let list_indent = |content: &str| {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let tables = &ctx.table_blocks;
+            assert_eq!(tables.len(), 1, "{content:?}: {tables:?}");
+            tables[0].list_context.as_ref().map(|list| list.content_indent)
+        };
+        // The parser ends the quote and its item before the second line: a row
+        // the quote does not hold followed by a quoted delimiter row, and a
+        // line that opens an HTML block. The item ends exactly where that
+        // line starts, so the line is no longer under the item's indent.
+        for content in ["> - a\n  | h |\n>   |---|\n", "> - a\n  <div> | x\n  |---|\n"] {
+            assert_eq!(list_indent(content), None, "{content:?}");
+        }
+        // The item is still open on a row that lazily continues its paragraph,
+        // and on one the quote holds.
+        for content in ["> - a\n   | h |\n   |---|\n", "> - a\n>   | h |\n>   |---|\n"] {
+            assert_eq!(list_indent(content), Some(2), "{content:?}");
+        }
+    }
+
+    #[test]
     fn test_bare_list_marker_content_starts_one_column_past_the_marker() {
         assert_eq!(TableUtils::extract_list_prefix("-"), ("-", "", 2));
         assert_eq!(TableUtils::extract_list_prefix("1."), ("1.", "", 3));
