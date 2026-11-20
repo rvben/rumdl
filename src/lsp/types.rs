@@ -3,7 +3,9 @@
 //! This module contains LSP-specific types and utilities for rumdl,
 //! following the Language Server Protocol specification.
 
-use super::position::{analysis_range_to_lsp_range, byte_range_to_lsp_range, char_column_to_utf16, utf16_len};
+use super::position::{
+    analysis_range_to_lsp_range, byte_range_to_lsp_range, byte_ranges_to_lsp_ranges, char_column_to_utf16, utf16_len,
+};
 use crate::rules::md013_line_length::MD013Config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -297,23 +299,20 @@ pub(crate) fn warning_to_code_actions_with_md013_config(
 /// Create a fix code action from a rumdl warning with fix
 fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_text: &str) -> Option<CodeAction> {
     if let Some(fix) = &warning.fix {
-        // Build the primary edit plus any additional edits this fix carries.
-        // A logical fix is atomic — either every edit applies or none should.
-        // If any sub-edit's range can't be mapped to LSP positions, abort the
-        // whole code action so we don't emit a partial/inconsistent fix.
-        let primary = TextEdit {
-            range: byte_range_to_lsp_range(document_text, fix.range.clone())?,
-            new_text: fix.replacement.clone(),
-        };
-
-        let mut edits = Vec::with_capacity(1 + fix.additional_edits.len());
-        edits.push(primary);
-        for extra in &fix.additional_edits {
-            edits.push(TextEdit {
-                range: byte_range_to_lsp_range(document_text, extra.range.clone())?,
-                new_text: extra.replacement.clone(),
-            });
-        }
+        // The primary edit plus any additional edits this fix carries, as one
+        // atomic action: when any range has no LSP form, no action is offered.
+        // The ranges are converted together so the document is read once
+        // however many edits the fix holds.
+        let carried: Vec<&crate::rule::Fix> = std::iter::once(fix).chain(&fix.additional_edits).collect();
+        let byte_ranges: Vec<_> = carried.iter().map(|edit| edit.range.clone()).collect();
+        let edits: Vec<TextEdit> = byte_ranges_to_lsp_ranges(document_text, &byte_ranges)?
+            .into_iter()
+            .zip(&carried)
+            .map(|(range, edit)| TextEdit {
+                range,
+                new_text: edit.replacement.clone(),
+            })
+            .collect();
 
         let mut changes = std::collections::HashMap::new();
         changes.insert(uri.clone(), edits);

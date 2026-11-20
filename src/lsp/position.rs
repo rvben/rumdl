@@ -82,50 +82,67 @@ pub(super) fn analysis_range_to_lsp_range(text: &str, byte_range: std::ops::Rang
 /// than failing, so a fix that deletes trailing content still has somewhere to
 /// point.
 pub(super) fn byte_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Option<Range> {
-    let mut line = 0u32;
-    let mut character = 0u32;
+    byte_ranges_to_lsp_ranges(text, std::slice::from_ref(&byte_range))?.pop()
+}
+
+/// Convert byte ranges of `text` itself into LSP `Range`s, in the order given.
+///
+/// The text is read once however many ranges there are, so a fix that carries
+/// an edit for every line of a long paragraph costs one pass rather than one
+/// pass per edit. A range that reaches past the end of the text, or that ends
+/// before it starts, has no LSP form, and then none of the ranges is answered.
+pub(super) fn byte_ranges_to_lsp_ranges(text: &str, byte_ranges: &[std::ops::Range<usize>]) -> Option<Vec<Range>> {
+    if let Some(unanswerable) = byte_ranges
+        .iter()
+        .find(|range| range.start > range.end || range.end > text.len())
+    {
+        log::warn!(
+            "Failed to convert byte range {:?} to LSP range for text of length {}",
+            unanswerable,
+            text.len()
+        );
+        return None;
+    }
+
+    let mut offsets: Vec<(usize, usize)> = byte_ranges
+        .iter()
+        .enumerate()
+        .flat_map(|(index, range)| [(range.start, index * 2), (range.end, index * 2 + 1)])
+        .collect();
+    offsets.sort_unstable();
+
+    let mut positions = vec![Position::default(); offsets.len()];
+    let mut pending = offsets.iter().peekable();
+    let mut position = Position::default();
     let mut byte_pos = 0;
 
-    let mut start_pos = None;
-    let mut end_pos = None;
-
     for ch in text.chars() {
-        if byte_pos == byte_range.start {
-            start_pos = Some(Position { line, character });
+        while let Some(&(_, slot)) = pending.next_if(|&&(offset, _)| offset <= byte_pos) {
+            positions[slot] = position;
         }
-        if byte_pos == byte_range.end {
-            end_pos = Some(Position { line, character });
+        if pending.peek().is_none() {
             break;
         }
-
         if ch == '\n' {
-            line += 1;
-            character = 0;
+            position.line += 1;
+            position.character = 0;
         } else {
-            character += ch.len_utf16() as u32;
+            position.character += ch.len_utf16() as u32;
         }
-
         byte_pos += ch.len_utf8();
     }
-
-    if start_pos.is_none() && byte_pos >= byte_range.start {
-        start_pos = Some(Position { line, character });
-    }
-    if end_pos.is_none() && byte_pos >= byte_range.end {
-        end_pos = Some(Position { line, character });
+    for &(_, slot) in pending {
+        positions[slot] = position;
     }
 
-    match (start_pos, end_pos) {
-        (Some(start), Some(end)) => Some(Range { start, end }),
-        _ => {
-            log::warn!(
-                "Failed to convert byte range {:?} to LSP range for text of length {}",
-                byte_range,
-                text.len()
-            );
-            None
-        }
-    }
+    Some(
+        positions
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[start, end]| Range { start, end })
+            .collect(),
+    )
 }
 
 /// The position just past the last character of the text.
@@ -257,6 +274,68 @@ mod tests {
         let range = analysis_range_to_lsp_range("\u{feff}\u{feff}Hi", 0..5).unwrap();
         // One unit for the stripped mark, then the second mark and "Hi".
         assert_eq!((range.start.character, range.end.character), (1, 4));
+    }
+
+    #[test]
+    fn byte_ranges_are_answered_in_the_order_given_whatever_their_order_in_the_text() {
+        let text = format!("a{EMOJI}b\nWorld\nTest");
+        let ranges = [12..16, 0..1, 5..6, 7..12, 16..17];
+        let together = byte_ranges_to_lsp_ranges(&text, &ranges).unwrap();
+        let alone: Vec<Range> = ranges
+            .iter()
+            .map(|range| byte_range_to_lsp_range(&text, range.clone()).unwrap())
+            .collect();
+        assert_eq!(together, alone);
+        assert_eq!(together[0].start, Position { line: 1, character: 5 });
+        assert_eq!(together[0].end, Position { line: 2, character: 3 });
+        assert_eq!(together[2].start, Position { line: 0, character: 3 });
+        assert_eq!(together[4].end, Position { line: 2, character: 4 });
+    }
+
+    /// The time to convert one range on each of `lines` lines, as the fastest
+    /// of five runs.
+    fn one_range_a_line_time(lines: usize) -> std::time::Duration {
+        let line = "a line of some paragraph\n";
+        let text = line.repeat(lines);
+        let ranges: Vec<_> = (0..lines)
+            .map(|index| index * line.len()..index * line.len() + 1)
+            .collect();
+        (0..5)
+            .map(|_| {
+                let start = std::time::Instant::now();
+                let converted = byte_ranges_to_lsp_ranges(&text, &ranges).unwrap();
+                let elapsed = start.elapsed();
+                assert_eq!(converted.len(), lines);
+                assert_eq!(converted[lines - 1].start.line as usize, lines - 1);
+                elapsed
+            })
+            .min()
+            .unwrap()
+    }
+
+    #[test]
+    fn byte_ranges_to_lsp_ranges_linear_complexity() {
+        // A fix can carry an edit for every line of a paragraph. Reading the
+        // text once for all of them costs the same per line at any length;
+        // reading it from the start for each costs the square of the length,
+        // sixteen times as much for four times the lines.
+        let short = one_range_a_line_time(10_000);
+        let long = one_range_a_line_time(40_000);
+        let ratio = long.as_secs_f64() / short.as_secs_f64();
+        println!("convert: {short:?} for 10000 lines, {long:?} for 40000 ({ratio:.2}x)");
+        assert!(
+            ratio < 8.0,
+            "converting a range a line grows faster than the text: {short:?} for 10000 lines, {long:?} for 40000 \
+             ({ratio:.2}x)"
+        );
+    }
+
+    #[test]
+    fn one_range_without_an_lsp_form_leaves_none_answered() {
+        let reversed = std::ops::Range { start: 3, end: 1 };
+        assert_eq!(byte_range_to_lsp_range("Hello", reversed.clone()), None);
+        assert_eq!(byte_ranges_to_lsp_ranges("Hello", &[0..1, reversed]), None);
+        assert_eq!(byte_ranges_to_lsp_ranges("Hello", &[0..1, 5..6]), None);
     }
 
     #[test]
