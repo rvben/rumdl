@@ -291,6 +291,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_line_inside_a_span_only_the_mkdocs_container_scan_finds_starts_inside_code() {
+        // After the blank line the parser reads the admonition's body as
+        // indented code and finds no span in it. The container scan does, and
+        // the span runs over two lines.
+        let content = "!!! note\n\n    text `a\n    b` more\n\n    `c` opens its own span\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let source = ctx.native_list_source();
+        let starts_inside: Vec<bool> = ctx
+            .lines
+            .iter()
+            .map(|line| source.line_starts_inside_code_span(line))
+            .collect();
+        assert_eq!(starts_inside, [false, false, false, true, false, false]);
+        // No other reading of the document has the span.
+        assert!(!source.line_starts_inside_code_span_with_or_without_math(&ctx.lines[3]));
+    }
+
     fn compare(source: &str, flavor: MarkdownFlavor) {
         let (prepared, finish) = LintContext::prepare_native_structure(source, flavor, None, None, None);
         let rules = [
