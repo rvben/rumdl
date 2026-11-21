@@ -2940,6 +2940,17 @@ fn test_md034_long_line_linear_complexity() {
     for (name, unit, warnings_per_unit) in [
         ("formatted", "[link](https://example.com) <hello@example.com> ", 0),
         ("bare Unicode", "é🦀 https://example.com hello@example.com ", 2),
+        // Full-width punctuation ends a URL but not the regex match, so each
+        // search must stop at the next cut instead of reading to the line end.
+        ("full-width comma", "https://example.com/a、", 1),
+        ("www and full-width comma", "www.example.com/a、", 1),
+        // A `（` before a URL does not keep the `）` after it from cutting, so
+        // the cut must be found from the URL, not from the search position.
+        ("full-width paren pair", "（https://example.com/a）", 1),
+        ("unclosed full-width paren", "（（https://example.com/a）", 1),
+        // The regex ends this URL at an ASCII delimiter, and the line has no
+        // whitespace, so the search must still stop at the match end.
+        ("ASCII delimiter", "https://example.com/a\"", 1),
     ] {
         let durations: Vec<_> = [4096, 8192, 16384]
             .into_iter()

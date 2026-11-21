@@ -2649,3 +2649,210 @@ fn test_duplicate_wrapped_definitions_are_not_bare_urls() {
         }
     }
 }
+
+/// Check MD034 on `content`: the URL each fix covers, that each warning's
+/// columns match its fix range, the fixed text, and that the fixed text is clean.
+fn assert_bare_urls(flavor: rumdl_lib::config::MarkdownFlavor, content: &str, urls: &[&str], expected: &str) {
+    use rumdl_lib::utils::range_utils::calculate_url_range;
+
+    let rule = MD034NoBareUrls;
+    let ctx = LintContext::new(content, flavor, None);
+    let warnings = rule.check(&ctx).unwrap();
+    let mut found = Vec::new();
+    for warning in &warnings {
+        let range = warning.fix.as_ref().expect("MD034 warnings carry a fix").range.clone();
+        let line_start = content[..range.start].rfind('\n').map_or(0, |i| i + 1);
+        let line = content[line_start..].lines().next().unwrap_or("");
+        assert_eq!(
+            (warning.line, warning.column, warning.end_line, warning.end_column),
+            calculate_url_range(warning.line, line, range.start - line_start, range.len()),
+            "{flavor:?} {content:?}"
+        );
+        found.push(&content[range]);
+    }
+    if flavor == rumdl_lib::config::MarkdownFlavor::Standard {
+        assert_eq!(found, urls, "{flavor:?} {content:?}");
+    } else {
+        // The JSX fix range can differ from the URL text, so compare counts only.
+        assert_eq!(found.len(), urls.len(), "{flavor:?} {content:?}: {found:?}");
+    }
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, expected, "{flavor:?} {content:?}");
+    let recheck = rule.check(&LintContext::new(&fixed, flavor, None)).unwrap();
+    assert!(recheck.is_empty(), "{flavor:?} {fixed:?}: {recheck:?}");
+}
+
+/// A bare URL ends right before full-width or CJK punctuation, in both the
+/// warning and the fix, and the scan resumes there so a URL right after it is
+/// found (#1012). A `）` that closes a `（` inside the URL is part of it.
+#[test]
+fn test_cjk_punctuation_ends_bare_url() {
+    use rumdl_lib::config::MarkdownFlavor::{MDX, Standard};
+
+    // The example document from #1012.
+    let issue = indoc! {"
+        # Repro
+
+        詳細は公式ドキュメント（https://example.com/docs）を参照。
+
+        参照：https://example.com/docs、または https://example.com/faq。
+
+        「https://example.com/docs」を開く。
+    "};
+    let issue_fixed = indoc! {"
+        # Repro
+
+        詳細は公式ドキュメント（<https://example.com/docs>）を参照。
+
+        参照：<https://example.com/docs>、または <https://example.com/faq>。
+
+        「<https://example.com/docs>」を開く。
+    "};
+    let docs = "https://example.com/docs";
+    let faq = "https://example.com/faq";
+    assert_bare_urls(Standard, issue, &[docs, docs, faq, docs], issue_fixed);
+
+    // Every terminator, taken from the spec rather than from the implementation.
+    for c in "、。，．：；！？」』）】〕〉》”".chars() {
+        let content = format!("https://example.com/a{c}b");
+        let expected = format!("<https://example.com/a>{c}b");
+        assert_bare_urls(Standard, &content, &["https://example.com/a"], &expected);
+    }
+
+    let a = "https://a.example.com/x";
+    let b = "https://b.example.com/y";
+    let cases: &[(&str, &[&str], &str)] = &[
+        (
+            "https://example.com/wiki/A（B）、です",
+            &["https://example.com/wiki/A（B）"],
+            "<https://example.com/wiki/A（B）>、です",
+        ),
+        // A half-width `(` does not pair with `）`.
+        (
+            "https://a.example.com/(x）です",
+            &["https://a.example.com/(x"],
+            "<https://a.example.com/(x>）です",
+        ),
+        (
+            "（https://a.example.com/x）（https://b.example.com/y）",
+            &[a, b],
+            "（<https://a.example.com/x>）（<https://b.example.com/y>）",
+        ),
+        // A `（` before a URL does not pair with a `）` inside it.
+        (
+            "（（https://a.example.com/x）（https://b.example.com/y）",
+            &[a, b],
+            "（（<https://a.example.com/x>）（<https://b.example.com/y>）",
+        ),
+        // A `）` that closes a `（` inside the URL does not cut; the next one does.
+        (
+            "（https://example.com/wiki/A（B）C）です",
+            &["https://example.com/wiki/A（B）C"],
+            "（<https://example.com/wiki/A（B）C>）です",
+        ),
+        (
+            "（https://a.example.com/x（y）、https://b.example.com/z）",
+            &["https://a.example.com/x（y）", "https://b.example.com/z"],
+            "（<https://a.example.com/x（y）>、<https://b.example.com/z>）",
+        ),
+        (
+            "www.example.com/docs、です",
+            &["www.example.com/docs"],
+            "<https://www.example.com/docs>、です",
+        ),
+        (
+            "https://[::1]/path、です",
+            &["https://[::1]/path"],
+            "<https://[::1]/path>、です",
+        ),
+        (
+            "参照：https://a.example.com/x、https://b.example.com/y。",
+            &[a, b],
+            "参照：<https://a.example.com/x>、<https://b.example.com/y>。",
+        ),
+        (
+            "参照：https://a.example.com/x、 https://b.example.com/y。",
+            &[a, b],
+            "参照：<https://a.example.com/x>、 <https://b.example.com/y>。",
+        ),
+        // ASCII trailing punctuation is trimmed from what remains after the cut.
+        (
+            "https://x.example/a.、次",
+            &["https://x.example/a"],
+            "<https://x.example/a>.、次",
+        ),
+        // A scheme cut down to no host is prose.
+        ("https://、次", &[], "https://、次"),
+        // An address after the cut is no longer inside the URL.
+        (
+            "https://example.com/x、user@example.com",
+            &["https://example.com/x", "user@example.com"],
+            "<https://example.com/x>、<user@example.com>",
+        ),
+        // A URI after the cut still owns its user part.
+        (
+            "https://example.com/x、ssh://git@host.example/r",
+            &["https://example.com/x"],
+            "<https://example.com/x>、ssh://git@host.example/r",
+        ),
+        // URLs found after a cut inside a link or autolink stay ignored.
+        (
+            "<https://a.example/x、https://b.example/y>",
+            &[],
+            "<https://a.example/x、https://b.example/y>",
+        ),
+        (
+            "[https://a.example/x、https://b.example/y](https://c.example)",
+            &[],
+            "[https://a.example/x、https://b.example/y](https://c.example)",
+        ),
+    ];
+    for &(content, urls, expected) in cases {
+        assert_bare_urls(Standard, content, urls, expected);
+    }
+
+    // MDX goes through the JSX fix, which writes `[url](url)`.
+    assert_bare_urls(
+        MDX,
+        "詳細は（https://example.com/docs）を参照。",
+        &[docs],
+        "詳細は（[https://example.com/docs](https://example.com/docs)）を参照。",
+    );
+    assert_bare_urls(
+        MDX,
+        "www.example.com/docs、です",
+        &["www.example.com/docs"],
+        "[www.example.com/docs](https://www.example.com/docs)、です",
+    );
+}
+
+/// Kanji, kana and full-width letters do not end a URL: they are valid in a
+/// path, and `https://example.com/docs/東京を参照` may be the intended URL
+/// (#1012). Only the trailing `。` is dropped there; a writer who means a
+/// shorter URL adds a space or `<>`. This is intended, not a gap to close.
+#[test]
+fn test_cjk_text_without_punctuation_stays_in_url() {
+    use rumdl_lib::config::MarkdownFlavor::Standard;
+
+    let tokyo = "https://example.com/docs/東京";
+    let cases: &[(&str, &[&str], &str)] = &[
+        (
+            "（https://example.com/docs/東京）を参照。",
+            &[tokyo],
+            "（<https://example.com/docs/東京>）を参照。",
+        ),
+        (
+            "https://example.com/docs/東京 を参照。",
+            &[tokyo],
+            "<https://example.com/docs/東京> を参照。",
+        ),
+        (
+            "https://example.com/docs/東京を参照。",
+            &["https://example.com/docs/東京を参照"],
+            "<https://example.com/docs/東京を参照>。",
+        ),
+    ];
+    for &(content, urls, expected) in cases {
+        assert_bare_urls(Standard, content, urls, expected);
+    }
+}

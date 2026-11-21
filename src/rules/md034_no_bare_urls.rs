@@ -11,20 +11,137 @@ use crate::utils::regex_cache::{EMAIL_PATTERN, URL_IPV6_REGEX, URL_STANDARD_REGE
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 
+/// Full-width and CJK punctuation that ends a bare URL, since CJK prose puts no
+/// space after one. `）` is handled in [`cjk_marks`] to keep a balanced `（…）`.
+fn is_cjk_url_terminator(c: char) -> bool {
+    matches!(
+        c,
+        '、' | '。' | '，' | '．' | '：' | '；' | '！' | '？' | '」' | '』' | '】' | '〕' | '〉' | '》' | '”'
+    )
+}
+
+/// A `（`, `）` or terminator in a line. `cut` and `next_stop` index the marks;
+/// `marks.len()` stands for "none, the line end".
+struct CjkMark {
+    pos: usize,
+    c: char,
+    /// The first mark that cuts a URL starting here: a terminator, or a `）` that
+    /// closes no `（` opened at or after this mark.
+    cut: usize,
+    /// The first mark at or after this one that is not a `（`.
+    next_stop: usize,
+}
+
+/// The marks of `line` in order, with each one's first cut. Filled from the end:
+/// a `（` is closed by the first cut after it if that cut is a `）`, and the URL
+/// then runs on to the first cut after that `）`.
+fn cjk_marks(line: &str) -> Vec<CjkMark> {
+    if line.is_ascii() {
+        return Vec::new();
+    }
+    let mut marks: Vec<CjkMark> = line
+        .char_indices()
+        .filter(|&(_, c)| c == '（' || c == '）' || is_cjk_url_terminator(c))
+        .map(|(pos, c)| CjkMark {
+            pos,
+            c,
+            cut: 0,
+            next_stop: 0,
+        })
+        .collect();
+    let n = marks.len();
+    for i in (0..n).rev() {
+        if marks[i].c != '（' {
+            marks[i].cut = i;
+            marks[i].next_stop = i;
+            continue;
+        }
+        let cut_from = |j: usize| marks.get(j).map_or(n, |m| m.cut);
+        let first = cut_from(i + 1);
+        let cut = if marks.get(first).is_some_and(|m| m.c == '）') {
+            cut_from(first + 1)
+        } else {
+            first
+        };
+        marks[i].cut = cut;
+        marks[i].next_stop = marks.get(i + 1).map_or(n, |m| m.next_stop);
+    }
+    marks
+}
+
+/// Byte ranges of the matches of `regex` in `line`, each cut at full-width
+/// punctuation. The search resumes at the cut, so a URL right after it is found.
+///
+/// A match runs to the next whitespace, so a search over the whole line would
+/// reread the rest of it for every URL. Each search is instead cut off right
+/// after a mark, which keeps the leftmost start and ends the match at the cut-off
+/// if it ran past it: the patterns have no anchors, `\b` or look-around, every
+/// required part of them is ASCII, and a mark (never whitespace) is accepted by
+/// every repetition it can fall in, after which the rest of the pattern is
+/// optional.
+///
+/// The first search finds the start, cut off after the next `）` or terminator.
+/// If a `（` inside the URL keeps that `）` from cutting, a second search from the
+/// start is cut off after the URL's own cut. Both read no further than the cut
+/// plus one character, so a line is scanned in linear time.
+fn cut_url_matches<'a>(regex: &'a Regex, line: &'a str) -> impl Iterator<Item = (usize, usize)> + 'a {
+    let marks = cjk_marks(line);
+    let mut mark = 0; // the first mark at or after the last position looked up
+    let mut pos = 0;
+    std::iter::from_fn(move || {
+        let mut first_mark_from = |at: usize| {
+            while marks.get(mark).is_some_and(|m| m.pos < at) {
+                mark += 1;
+            }
+            mark
+        };
+        let end_of = |i: usize| marks.get(i).map_or(line.len(), |m| m.pos + m.c.len_utf8());
+        loop {
+            let stop = marks.get(first_mark_from(pos)).map_or(marks.len(), |m| m.next_stop);
+            let search_end = end_of(stop);
+            let Some(mat) = regex.find_at(&line[..search_end], pos) else {
+                if search_end == line.len() {
+                    return None;
+                }
+                // Nothing starts before the mark; continue after it.
+                pos = search_end;
+                continue;
+            };
+            let start = mat.start();
+            let cut = marks.get(first_mark_from(start)).map_or(marks.len(), |m| m.cut);
+            let cut_end = end_of(cut);
+            let match_end = if cut_end == search_end {
+                mat.end()
+            } else {
+                // `mat` is also a match in this longer haystack and nothing
+                // starts between `pos` and `start`, so this finds `start` again.
+                regex
+                    .find_at(&line[..cut_end], start)
+                    .expect("a match found in a prefix of the haystack")
+                    .end()
+            };
+            let end = match_end.min(marks.get(cut).map_or(line.len(), |m| m.pos));
+            // Every URL pattern starts with an ASCII prefix (`https://`, `www.`),
+            // so a cut never empties a match.
+            debug_assert!(end > start, "empty URL cut at {start} in {line:?}");
+            pos = end;
+            return Some((start, end));
+        }
+    })
+}
+
 // Literal prefixes are necessary for every match of their pattern. Skip
 // irrelevant engines while preserving independent cursors and overlap ordering.
 fn collect_urls(line: &str, found: &mut Vec<(usize, usize)>) {
     found.clear();
     if line.contains("://[") {
         // First, find IPv6 URLs (they need special handling)
-        for mat in URL_IPV6_REGEX.find_iter(line) {
-            found.push((mat.start(), mat.end()));
-        }
+        found.extend(cut_url_matches(&URL_IPV6_REGEX, line));
     }
     if line.contains("://") {
         // Then find regular URLs
-        for mat in URL_STANDARD_REGEX.find_iter(line) {
-            let url_str = mat.as_str();
+        for (start, end) in cut_url_matches(&URL_STANDARD_REGEX, line) {
+            let url_str = &line[start..end];
 
             // Skip if it's an IPv6 URL (already handled)
             if url_str.contains("://[") {
@@ -38,22 +155,19 @@ fn collect_urls(line: &str, found: &mut Vec<(usize, usize)>) {
                 // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
                 if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
                     // Check if the next byte after our match is ] (ASCII, so byte check is safe)
-                    if line.as_bytes().get(mat.end()) == Some(&b']') {
+                    if line.as_bytes().get(end) == Some(&b']') {
                         // This is likely a malformed IPv6 URL like "https://::1]:8080"
                         continue;
                     }
                 }
             }
 
-            found.push((mat.start(), mat.end()));
+            found.push((start, end));
         }
     }
     if line.contains("www.") {
         // Find www URLs without protocol (e.g., www.example.com)
-        for mat in URL_WWW_REGEX.find_iter(line) {
-            let start_pos = mat.start();
-            let end_pos = mat.end();
-
+        for (start_pos, end_pos) in cut_url_matches(&URL_WWW_REGEX, line) {
             // Skip if preceded by / or @ (likely part of a full URL)
             if start_pos > 0 {
                 let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -108,16 +222,39 @@ fn collect_urls(line: &str, found: &mut Vec<(usize, usize)>) {
     });
 }
 
+/// Naive reference for [`cut_url_matches`]: search the whole rest of the line
+/// after every cut and cut with a separate char loop. Quadratic, test only.
+#[cfg(test)]
+fn naive_cut_url_matches(regex: &Regex, line: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut pos = 0;
+    while let Some(mat) = regex.find_at(line, pos) {
+        let mut end = mat.end();
+        let mut open = 0;
+        for (idx, c) in mat.as_str().char_indices() {
+            if c == '（' {
+                open += 1;
+            } else if c == '）' && open > 0 {
+                open -= 1;
+            } else if "、。，．：；！？」』）】〕〉》”".contains(c) {
+                end = mat.start() + idx;
+                break;
+            }
+        }
+        ranges.push((mat.start(), end));
+        pos = end.max(mat.start() + 1);
+    }
+    ranges
+}
+
 #[cfg(test)]
 fn collect_urls_legacy(line: &str, found: &mut Vec<(usize, usize)>) {
     // First, find IPv6 URLs (they need special handling)
-    for mat in URL_IPV6_REGEX.find_iter(line) {
-        found.push((mat.start(), mat.end()));
-    }
+    found.extend(naive_cut_url_matches(&URL_IPV6_REGEX, line));
 
     // Then find regular URLs
-    for mat in URL_STANDARD_REGEX.find_iter(line) {
-        let url_str = mat.as_str();
+    for (start, end) in naive_cut_url_matches(&URL_STANDARD_REGEX, line) {
+        let url_str = &line[start..end];
 
         // Skip if it's an IPv6 URL (already handled)
         if url_str.contains("://[") {
@@ -131,21 +268,18 @@ fn collect_urls_legacy(line: &str, found: &mut Vec<(usize, usize)>) {
             // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
             if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
                 // Check if the next byte after our match is ] (ASCII, so byte check is safe)
-                if line.as_bytes().get(mat.end()) == Some(&b']') {
+                if line.as_bytes().get(end) == Some(&b']') {
                     // This is likely a malformed IPv6 URL like "https://::1]:8080"
                     continue;
                 }
             }
         }
 
-        found.push((mat.start(), mat.end()));
+        found.push((start, end));
     }
 
     // Find www URLs without protocol (e.g., www.example.com)
-    for mat in URL_WWW_REGEX.find_iter(line) {
-        let start_pos = mat.start();
-        let end_pos = mat.end();
-
+    for (start_pos, end_pos) in naive_cut_url_matches(&URL_WWW_REGEX, line) {
         // Skip if preceded by / or @ (likely part of a full URL)
         if start_pos > 0 {
             let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -553,14 +687,16 @@ impl MD034NoBareUrls {
         buffers.schemed_uri_ranges.clear();
 
         if has_at && line.contains("://") {
-            for mat in SCHEMED_URI_REGEX.find_iter(line) {
+            // Cut like the URL patterns, so an address after `、` is reported
+            // and one in a URI after the cut is still covered.
+            for (start, end) in cut_url_matches(&SCHEMED_URI_REGEX, line) {
                 // Do not accept the alphabetic suffix of an invalid scheme
                 // starting with a digit, such as `3ssh://`.
-                if mat.start() > 0 && is_scheme_byte(line.as_bytes()[mat.start() - 1]) {
+                if start > 0 && is_scheme_byte(line.as_bytes()[start - 1]) {
                     continue;
                 }
-                let end = mat.start() + uri_content_end(mat.as_str());
-                buffers.schemed_uri_ranges.push((mat.start(), end));
+                let uri_end = start + uri_content_end(&line[start..end]);
+                buffers.schemed_uri_ranges.push((start, uri_end));
             }
         }
 
@@ -2189,6 +2325,7 @@ mod shared_url_scan_tests {
                 "https://", "www.", "xmpp:", "@", "://", "[", "]",
                 "(", ")", "<", ">", "\"", "'", "`", "\\", "/", "?", "#",
                 " ", "\n", "\t", "\r\n", "\u{a0}", "\u{2003}", "é", "中文", ":", ".", "_", "*",
+                "、", "。", "（", "）", "」", "”", "（（", "））", "（https://", "）www.", "\u{3000}",
             ]), 0..40)
         ) {
             let line = parts.concat();
