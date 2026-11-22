@@ -15,7 +15,7 @@ use rumdl_lib::rules::MD034NoBareUrls;
 fn test_wikipedia_url_with_parentheses_detected() {
     let content = "https://en.wikipedia.org/wiki/Rust_(programming_language)\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
 
@@ -35,7 +35,7 @@ fn test_wikipedia_url_with_parentheses_detected() {
 fn test_wikipedia_url_with_parentheses_fixed() {
     let content = "https://en.wikipedia.org/wiki/Rust_(programming_language)\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let fixed = rule.fix(&ctx).unwrap();
 
@@ -51,7 +51,7 @@ fn test_wikipedia_url_with_parentheses_fixed() {
 fn test_balanced_parentheses_in_url_path() {
     let content = "https://example.com/path_(foo)_(bar)\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1);
@@ -73,7 +73,7 @@ fn test_balanced_parentheses_in_url_path() {
 fn test_sentence_parentheses_after_url_excluded() {
     let content = "Check https://example.com (it's great)\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1);
@@ -101,7 +101,7 @@ fn test_sentence_parentheses_after_url_excluded() {
 fn test_url_inside_parentheses() {
     let content = "See (https://example.com) for more\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1);
@@ -119,7 +119,7 @@ fn test_url_inside_parentheses() {
 fn test_unbalanced_trailing_paren_excluded() {
     let content = "https://example.com)\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1);
@@ -145,7 +145,7 @@ fn test_multibyte_url_with_unbalanced_paren() {
     // Chinese Wikipedia URL with closing paren - this used to panic
     let content = "https://zh.wikipedia.org/wiki/百分号编码)\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Should not panic and should detect the URL correctly
     let warnings = rule.check(&ctx).unwrap();
@@ -171,7 +171,7 @@ fn test_multibyte_url_with_balanced_parens() {
     // URL with Chinese characters AND balanced parentheses in path
     let content = "https://example.com/路径_(测试)\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
     assert_eq!(warnings.len(), 1);
@@ -202,7 +202,7 @@ This URL should be ignored: https://hidden.example.com
 This URL should be flagged: https://visible.example.com
 "#;
     let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
 
@@ -220,7 +220,7 @@ This URL should be flagged: https://visible.example.com
 fn test_url_inside_obsidian_inline_comment_ignored() {
     let content = "Check this: %%https://hidden.example.com%% and https://visible.example.com\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
 
@@ -238,7 +238,7 @@ fn test_url_inside_obsidian_inline_comment_ignored() {
 fn test_url_inside_obsidian_inline_comment_with_unicode_ignored() {
     let content = "✅ Check this: %%https://hidden.example.com%% and https://visible.example.com\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
 
@@ -263,7 +263,7 @@ http://d.com
 http://visible.com
 "#;
     let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
 
@@ -281,7 +281,7 @@ http://visible.com
 fn test_obsidian_comment_syntax_not_special_in_standard_flavor() {
     let content = "Check: %%http://example.com%% end\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
 
@@ -295,7 +295,7 @@ fn test_obsidian_comment_syntax_not_special_in_standard_flavor() {
 fn test_url_after_obsidian_comment_flagged() {
     let content = "%%comment%% http://visible.example.com\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&ctx).unwrap();
 

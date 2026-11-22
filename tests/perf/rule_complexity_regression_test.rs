@@ -2898,7 +2898,7 @@ fn test_md054_fix_planning_linear_complexity() {
 fn test_md034_linear_complexity() {
     let sizes = [500, 1000, 2000];
     let iterations = 5;
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let durations: Vec<_> = sizes
         .iter()
@@ -2913,7 +2913,7 @@ fn test_md034_linear_complexity() {
 
 #[test]
 fn test_md034_interleaved_code_links_and_bare_urls_linear_complexity() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let durations: Vec<_> = [2000, 4000, 8000]
         .into_iter()
         .map(|size| {
@@ -2936,22 +2936,28 @@ fn test_md034_interleaved_code_links_and_bare_urls_linear_complexity() {
 
 #[test]
 fn test_md034_long_line_linear_complexity() {
-    let rule = MD034NoBareUrls;
-    for (name, unit, warnings_per_unit) in [
-        ("formatted", "[link](https://example.com) <hello@example.com> ", 0),
-        ("bare Unicode", "é🦀 https://example.com hello@example.com ", 2),
+    // The last column is `cjk-punctuation`.
+    for (name, unit, warnings_per_unit, cjk_punctuation) in [
+        (
+            "formatted",
+            "[link](https://example.com) <hello@example.com> ",
+            0,
+            false,
+        ),
+        ("bare Unicode", "é🦀 https://example.com hello@example.com ", 2, false),
         // Full-width punctuation ends a URL but not the regex match, so each
         // search must stop at the next cut instead of reading to the line end.
-        ("full-width comma", "https://example.com/a、", 1),
-        ("www and full-width comma", "www.example.com/a、", 1),
+        ("full-width comma", "https://example.com/a、", 1, true),
+        ("www and full-width comma", "www.example.com/a、", 1, true),
         // A `（` before a URL does not keep the `）` after it from cutting, so
         // the cut must be found from the URL, not from the search position.
-        ("full-width paren pair", "（https://example.com/a）", 1),
-        ("unclosed full-width paren", "（（https://example.com/a）", 1),
+        ("full-width paren pair", "（https://example.com/a）", 1, true),
+        ("unclosed full-width paren", "（（https://example.com/a）", 1, true),
         // The regex ends this URL at an ASCII delimiter, and the line has no
         // whitespace, so the search must still stop at the match end.
-        ("ASCII delimiter", "https://example.com/a\"", 1),
+        ("ASCII delimiter", "https://example.com/a\"", 1, true),
     ] {
+        let rule = MD034NoBareUrls::with_cjk_punctuation(cjk_punctuation);
         let durations: Vec<_> = [4096, 8192, 16384]
             .into_iter()
             .map(|size| {

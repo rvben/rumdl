@@ -5044,7 +5044,7 @@ fn quoted_html_attributes_keep_literal_text_out_of_autofixes() {
         Box::new(MD009TrailingSpaces::new(0, true)),
         Box::new(MD010NoHardTabs::new(4)),
         Box::new(MD011NoReversedLinks),
-        Box::new(MD034NoBareUrls),
+        Box::new(MD034NoBareUrls::default()),
         Box::new(MD037NoSpaceInEmphasis),
     ];
     for name in ["span", "Card"] {
@@ -5113,7 +5113,7 @@ fn mdx_member_attributes_keep_literal_text_out_of_autofixes() {
         Box::new(MD009TrailingSpaces::new(0, true)),
         Box::new(MD010NoHardTabs::new(4)),
         Box::new(MD011NoReversedLinks),
-        Box::new(MD034NoBareUrls),
+        Box::new(MD034NoBareUrls::default()),
         Box::new(MD037NoSpaceInEmphasis),
     ];
     let content = "Before <ui.Card onClick={() => null} title=\"www.example.org left\tvalue   \nright * hi * (url)[text]\">text</ui.Card> after www.example.org left\tvalue * hi * (url)[text]   \n";

@@ -16,7 +16,7 @@ fn make_ctx(content: &str) -> LintContext<'_> {
 /// Keep the context warm to measure the rule; CLI comparisons include parsing.
 fn bench_md034_scaling(c: &mut Criterion) {
     let mut group = c.benchmark_group("md034_scaling");
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     for count in [16, 256, 4096, 16384] {
         for (name, unit, warnings_per_unit) in [
             ("formatted", "[link](https://example.com) <hello@example.com> ", 0),

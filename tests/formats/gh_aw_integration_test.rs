@@ -22,7 +22,7 @@ fn gh_aw_ctx(content: &str) -> LintContext<'_> {
 
 #[test]
 fn representative_workflow_preserves_directives_and_finds_the_first_heading() {
-    let md034 = MD034NoBareUrls;
+    let md034 = MD034NoBareUrls::default();
     let md041 = MD041FirstLineHeading::default();
     let ctx = gh_aw_ctx(REPRESENTATIVE_WORKFLOW);
 
@@ -34,7 +34,7 @@ fn representative_workflow_preserves_directives_and_finds_the_first_heading() {
 
 #[test]
 fn representative_valid_corpus_is_clean_and_fix_stable() {
-    let md034 = MD034NoBareUrls;
+    let md034 = MD034NoBareUrls::default();
     let md041 = MD041FirstLineHeading::with_pattern(1, true, None, true);
 
     for (name, content) in [
@@ -62,7 +62,7 @@ fn directive_exemptions_are_exact_and_flavor_scoped() {
         "# Workflow\n\n",
         "Body URL https://example.com must still be linted.\n",
     );
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let warnings = rule.check(&gh_aw_ctx(content)).unwrap();
     assert_eq!(warnings.len(), 1);
@@ -97,7 +97,7 @@ fn current_conditional_branch_forms_are_structural() {
     );
     let ctx = gh_aw_ctx(content);
 
-    assert!(MD034NoBareUrls.check(&ctx).unwrap().is_empty());
+    assert!(MD034NoBareUrls::default().check(&ctx).unwrap().is_empty());
     assert!(MD041FirstLineHeading::default().check(&ctx).unwrap().is_empty());
 }
 
@@ -115,7 +115,7 @@ fn directive_lookalikes_remain_markdown() {
         "{{#runtime-import https://example.com/extra-close.md}}}\n",
         "{{#runtime-import https://example.com/two-extra-closes.md}}}}\n",
     );
-    let warnings = MD034NoBareUrls.check(&gh_aw_ctx(content)).unwrap();
+    let warnings = MD034NoBareUrls::default().check(&gh_aw_ctx(content)).unwrap();
 
     assert_eq!(
         warnings.len(),

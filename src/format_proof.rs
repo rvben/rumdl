@@ -1309,8 +1309,8 @@ mod tests {
     fn unconditional_policies_remain_configuration_free() {
         for rule in crate::rules::all_rules(&Config::default()) {
             if [
-                "MD011", "MD020", "MD021", "MD023", "MD034", "MD039", "MD042", "MD047", "MD056", "MD062", "MD069",
-                "MD070", "MD075", "MD086",
+                "MD011", "MD020", "MD021", "MD023", "MD039", "MD042", "MD047", "MD056", "MD062", "MD069", "MD070",
+                "MD075", "MD086",
             ]
             .contains(&rule.name())
             {
@@ -1410,7 +1410,7 @@ mod tests {
     fn reference_url_certificates_follow_native_line_and_destination_guards() {
         use crate::rule::Rule;
 
-        let rule = crate::rules::MD034NoBareUrls;
+        let rule = crate::rules::MD034NoBareUrls::default();
         let policy = NativeFormatPolicy::validated(&rule).unwrap();
         for source in ["![www.example.com][r]\n", "[https://example.com][r]\n"] {
             let context = LintContext::new(source, MarkdownFlavor::Standard, None);

@@ -152,7 +152,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         )),
         "MD032" => Some(("Text\n* List item\nText", Box::new(MD032BlanksAroundLists::default()))),
         "MD033" => Some(("Text with <div>HTML</div>", Box::new(MD033NoInlineHtml::default()))),
-        "MD034" => Some(("Visit https://example.com", Box::new(MD034NoBareUrls))),
+        "MD034" => Some(("Visit https://example.com", Box::new(MD034NoBareUrls::default()))),
         "MD035" => Some(("Text\n***\nText", Box::new(MD035HRStyle::default()))),
         "MD036" => Some((
             "**Bold text as heading**",
