@@ -2694,9 +2694,11 @@ fn assert_bare_urls(
 fn test_cjk_punctuation_is_opt_in() {
     use rumdl_lib::config::MarkdownFlavor::Standard;
 
-    // The two adjacent URLs from #1012, and a raw `、` meant as part of a path.
+    // The two adjacent URLs from #1012, and a raw `、` meant as part of a path
+    // of a URL or an XMPP URI.
     let adjacent = "参照：https://a.example.com/x、https://b.example.com/y。";
     let iri = "https://example.com/notes/東京、大阪";
+    let xmpp = "xmpp:user@example.com/東京、大阪";
     let off: &[(&str, &[&str], &str)] = &[
         (
             adjacent,
@@ -2704,6 +2706,18 @@ fn test_cjk_punctuation_is_opt_in() {
             "参照：<https://a.example.com/x、https://b.example.com/y。>",
         ),
         (iri, &[iri], "<https://example.com/notes/東京、大阪>"),
+        (xmpp, &[xmpp], "<xmpp:user@example.com/東京、大阪>"),
+        // An address after `、` stays inside the URI or URL before it.
+        (
+            "ssh://git@host.example/r、me@example.org",
+            &[],
+            "ssh://git@host.example/r、me@example.org",
+        ),
+        (
+            "https://example.com/x、user@example.com",
+            &["https://example.com/x、user@example.com"],
+            "<https://example.com/x、user@example.com>",
+        ),
     ];
     let on: &[(&str, &[&str], &str)] = &[
         (
@@ -2715,6 +2729,11 @@ fn test_cjk_punctuation_is_opt_in() {
             iri,
             &["https://example.com/notes/東京"],
             "<https://example.com/notes/東京>、大阪",
+        ),
+        (
+            xmpp,
+            &["xmpp:user@example.com/東京"],
+            "<xmpp:user@example.com/東京>、大阪",
         ),
     ];
     for (rule, cases) in [

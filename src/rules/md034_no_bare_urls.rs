@@ -16,10 +16,10 @@ use crate::lint_context::LintContext;
 /// Configuration for MD034 (No bare URLs)
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct MD034Config {
-    /// End a bare URL right before full-width or CJK punctuation (`、`, `。`,
-    /// `）` and others) instead of at the next whitespace. Off by default: the
-    /// same punctuation can be part of an internationalized URL, and cutting it
-    /// there would change where an existing bare link points.
+    /// End a bare URL or XMPP URI right before full-width or CJK punctuation
+    /// (`、`, `。`, `）` and others) instead of running on through it. Off by
+    /// default: the same punctuation can be part of an internationalized URL,
+    /// and cutting it there would change where an existing bare link points.
     #[serde(default, rename = "cjk-punctuation", alias = "cjk_punctuation")]
     pub cjk_punctuation: bool,
 }
@@ -88,7 +88,8 @@ fn cjk_marks(line: &str) -> Vec<CjkMark> {
 }
 
 /// Byte ranges of the matches of `regex` in `line`, each cut at full-width
-/// punctuation. The search resumes at the cut, so a URL right after it is found.
+/// punctuation. `marks` are the [`cjk_marks`] of `line`. The search resumes at
+/// the cut, so a URL right after it is found.
 ///
 /// A match runs to the next whitespace, so a search over the whole line would
 /// reread the rest of it for every URL. Each search is instead cut off right
@@ -102,8 +103,11 @@ fn cjk_marks(line: &str) -> Vec<CjkMark> {
 /// If a `（` inside the URL keeps that `）` from cutting, a second search from the
 /// start is cut off after the URL's own cut. Both read no further than the cut
 /// plus one character, so a line is scanned in linear time.
-fn cut_url_matches<'a>(regex: &'a Regex, line: &'a str) -> impl Iterator<Item = (usize, usize)> + 'a {
-    let marks = cjk_marks(line);
+fn cut_url_matches<'a>(
+    regex: &'a Regex,
+    line: &'a str,
+    marks: &'a [CjkMark],
+) -> impl Iterator<Item = (usize, usize)> + 'a {
     let mut mark = 0; // the first mark at or after the last position looked up
     let mut pos = 0;
     std::iter::from_fn(move || {
@@ -148,29 +152,50 @@ fn cut_url_matches<'a>(regex: &'a Regex, line: &'a str) -> impl Iterator<Item = 
     })
 }
 
-/// Byte ranges of the matches of `regex` in `line`, cut at full-width
-/// punctuation only when `cjk_punctuation` is set.
+/// Either plain regex matches or matches cut at full-width punctuation, without
+/// boxing or a per-item check of which one is in use.
+enum UrlMatches<W, C> {
+    Whole(W),
+    Cut(C),
+}
+
+impl<W: Iterator<Item = (usize, usize)>, C: Iterator<Item = (usize, usize)>> Iterator for UrlMatches<W, C> {
+    type Item = (usize, usize);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Whole(matches) => matches.next(),
+            Self::Cut(matches) => matches.next(),
+        }
+    }
+}
+
+/// Byte ranges of the matches of `regex` in `line`. With `cjk-punctuation` on,
+/// `marks` holds the line's [`cjk_marks`] and each match is cut at them; `None`
+/// is the plain regex search.
 fn url_matches<'a>(
     regex: &'a Regex,
     line: &'a str,
-    cjk_punctuation: bool,
+    marks: Option<&'a [CjkMark]>,
 ) -> impl Iterator<Item = (usize, usize)> + 'a {
-    let whole = (!cjk_punctuation).then(|| regex.find_iter(line).map(|mat| (mat.start(), mat.end())));
-    let cut = cjk_punctuation.then(|| cut_url_matches(regex, line));
-    whole.into_iter().flatten().chain(cut.into_iter().flatten())
+    match marks {
+        None => UrlMatches::Whole(regex.find_iter(line).map(|mat| (mat.start(), mat.end()))),
+        Some(marks) => UrlMatches::Cut(cut_url_matches(regex, line, marks)),
+    }
 }
 
 // Literal prefixes are necessary for every match of their pattern. Skip
 // irrelevant engines while preserving independent cursors and overlap ordering.
-fn collect_urls(line: &str, cjk_punctuation: bool, found: &mut Vec<(usize, usize)>) {
+fn collect_urls(line: &str, marks: Option<&[CjkMark]>, found: &mut Vec<(usize, usize)>) {
     found.clear();
     if line.contains("://[") {
         // First, find IPv6 URLs (they need special handling)
-        found.extend(url_matches(&URL_IPV6_REGEX, line, cjk_punctuation));
+        found.extend(url_matches(&URL_IPV6_REGEX, line, marks));
     }
     if line.contains("://") {
         // Then find regular URLs
-        for (start, end) in url_matches(&URL_STANDARD_REGEX, line, cjk_punctuation) {
+        for (start, end) in url_matches(&URL_STANDARD_REGEX, line, marks) {
             let url_str = &line[start..end];
 
             // Skip if it's an IPv6 URL (already handled)
@@ -197,7 +222,7 @@ fn collect_urls(line: &str, cjk_punctuation: bool, found: &mut Vec<(usize, usize
     }
     if line.contains("www.") {
         // Find www URLs without protocol (e.g., www.example.com)
-        for (start_pos, end_pos) in url_matches(&URL_WWW_REGEX, line, cjk_punctuation) {
+        for (start_pos, end_pos) in url_matches(&URL_WWW_REGEX, line, marks) {
             // Skip if preceded by / or @ (likely part of a full URL)
             if start_pos > 0 {
                 let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -220,10 +245,7 @@ fn collect_urls(line: &str, cjk_punctuation: bool, found: &mut Vec<(usize, usize
     }
     if line.contains("xmpp:") {
         // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
-        for mat in XMPP_URI_REGEX.find_iter(line) {
-            let start_pos = mat.start();
-            let end_pos = mat.end();
-
+        for (start_pos, end_pos) in url_matches(&XMPP_URI_REGEX, line, marks) {
             // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
             if start_pos > 0 && end_pos < line.len() {
                 let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -252,8 +274,9 @@ fn collect_urls(line: &str, cjk_punctuation: bool, found: &mut Vec<(usize, usize
     });
 }
 
-/// Naive reference for [`url_matches`]: search the whole rest of the line
-/// after every cut and cut with a separate char loop. Quadratic, test only.
+/// Naive reference for [`url_matches`]. Off, a plain search. On, it searches
+/// the whole rest of the line after every cut and cuts with a separate char
+/// loop. Quadratic, test only.
 #[cfg(test)]
 fn naive_url_matches(regex: &Regex, line: &str, cjk_punctuation: bool) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
@@ -333,10 +356,7 @@ fn collect_urls_legacy(line: &str, cjk_punctuation: bool, found: &mut Vec<(usize
     }
 
     // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
-    for mat in XMPP_URI_REGEX.find_iter(line) {
-        let start_pos = mat.start();
-        let end_pos = mat.end();
-
+    for (start_pos, end_pos) in naive_url_matches(&XMPP_URI_REGEX, line, cjk_punctuation) {
         // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
         if start_pos > 0 && end_pos < line.len() {
             let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -733,10 +753,14 @@ impl MD034NoBareUrls {
         buffers.image_ranges.clear();
         buffers.schemed_uri_ranges.clear();
 
+        // Indexed once per line and shared by every pattern below.
+        let marks = self.config.cjk_punctuation.then(|| cjk_marks(line));
+        let marks = marks.as_deref();
+
         if has_at && line.contains("://") {
             // Cut like the URL patterns, so under `cjk-punctuation` an address
             // after `、` is reported and one in a URI after the cut is still covered.
-            for (start, end) in url_matches(&SCHEMED_URI_REGEX, line, self.config.cjk_punctuation) {
+            for (start, end) in url_matches(&SCHEMED_URI_REGEX, line, marks) {
                 // Do not accept the alphabetic suffix of an invalid scheme
                 // starting with a digit, such as `3ssh://`.
                 if start > 0 && is_scheme_byte(line.as_bytes()[start - 1]) {
@@ -800,7 +824,7 @@ impl MD034NoBareUrls {
         // Find bare URLs
         buffers.urls_found.clear();
 
-        collect_urls(line, self.config.cjk_punctuation, &mut buffers.urls_found);
+        collect_urls(line, marks, &mut buffers.urls_found);
 
         // Process found URLs
         let mut url_columns = ColumnCursor::default();
@@ -1241,35 +1265,32 @@ fn is_scheme_without_host(url: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// The option reaches the rule through the config in both spellings and is
+    /// off by default.
     #[test]
-    fn cjk_punctuation_option_is_off_by_default_and_parses_in_both_spellings() {
+    fn test_cjk_punctuation_option_from_config() {
         use crate::config::{Config, MarkdownFlavor, RuleConfig};
 
-        assert!(!MD034Config::default().cjk_punctuation);
-        let content = "https://example.com/notes/東京、大阪\n";
+        let content = "https://example.com/a、b\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let fixed_by = |config: &Config| MD034NoBareUrls::from_config(config).fix(&ctx).unwrap();
-        assert_eq!(fixed_by(&Config::default()), "<https://example.com/notes/東京、大阪>\n");
+        assert_eq!(fixed_by(&Config::default()), "<https://example.com/a、b>\n");
         for key in ["cjk-punctuation", "cjk_punctuation"] {
-            let options = format!("{key} = true");
-            let parsed: MD034Config = toml::from_str(&options).unwrap();
-            assert!(parsed.cjk_punctuation, "{key}");
-
             let mut config = Config::default();
             config.rules.insert(
                 "MD034".into(),
                 RuleConfig {
                     severity: None,
-                    values: toml::from_str(&options).unwrap(),
+                    values: toml::from_str(&format!("{key} = true")).unwrap(),
                 },
             );
-            assert_eq!(fixed_by(&config), "<https://example.com/notes/東京>、大阪\n", "{key}");
+            assert_eq!(fixed_by(&config), "<https://example.com/a>、b\n", "{key}");
         }
     }
 
     /// The format proof models the default scan only, so the option opts out of it.
     #[test]
-    fn cjk_punctuation_option_drops_the_native_format_policy() {
+    fn test_cjk_punctuation_option_drops_the_native_format_policy() {
         assert!(MD034NoBareUrls::default().native_format_policy().is_some());
         assert!(
             MD034NoBareUrls::with_cjk_punctuation(true)
@@ -2371,7 +2392,7 @@ Parens https://ex.com/a(b and https://en.wikipedia.org/wiki/Foo_(bar).
 
 #[cfg(test)]
 mod shared_url_scan_tests {
-    use super::{collect_urls, collect_urls_legacy};
+    use super::{cjk_marks, collect_urls, collect_urls_legacy};
     use proptest::prelude::*;
 
     #[test]
@@ -2383,12 +2404,13 @@ mod shared_url_scan_tests {
             "<www.example.com/https://inner.com>",
             "xmpp:user@example.comhttps://host/https://host/",
             "（https://a.example/x、www.b.example/y）。",
+            "xmpp:user@example.com/東京、xmpp:other@example.com/a）",
         ] {
             for cjk_punctuation in [false, true] {
                 let mut expected = Vec::new();
                 collect_urls_legacy(line, cjk_punctuation, &mut expected);
                 let mut actual = Vec::new();
-                collect_urls(line, cjk_punctuation, &mut actual);
+                collect_urls(line, cjk_punctuation.then(|| cjk_marks(line)).as_deref(), &mut actual);
                 assert_eq!(actual, expected, "{line} (cjk-punctuation = {cjk_punctuation})");
             }
         }
@@ -2407,7 +2429,7 @@ mod shared_url_scan_tests {
                 "https://", "www.", "xmpp:", "@", "://", "[", "]",
                 "(", ")", "<", ">", "\"", "'", "`", "\\", "/", "?", "#",
                 " ", "\n", "\t", "\r\n", "\u{a0}", "\u{2003}", "é", "中文", ":", ".", "_", "*",
-                "、", "。", "（", "）", "」", "”", "（（", "））", "（https://", "）www.", "\u{3000}",
+                "、", "。", "：", "】", "（", "）", "」", "”", "（（", "））", "（https://", "）www.", "\u{3000}",
             ]), 0..40),
             // One setting per case rather than both, so the run time stays the same.
             cjk_punctuation in any::<bool>(),
@@ -2416,7 +2438,7 @@ mod shared_url_scan_tests {
             let mut expected = Vec::new();
             collect_urls_legacy(&line, cjk_punctuation, &mut expected);
             let mut actual = vec![(999, 999)];
-            collect_urls(&line, cjk_punctuation, &mut actual);
+            collect_urls(&line, cjk_punctuation.then(|| cjk_marks(&line)).as_deref(), &mut actual);
             prop_assert_eq!(actual, expected, "input: {:?}, cjk-punctuation: {}", line, cjk_punctuation);
         }
     }
