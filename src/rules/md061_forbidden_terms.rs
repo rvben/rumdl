@@ -34,7 +34,10 @@ impl MD061ForbiddenTerms {
         }
 
         // Build alternation pattern from terms, escaping regex metacharacters
-        let escaped_terms: Vec<String> = config.terms.iter().map(|term| regex::escape(term)).collect();
+        let mut escaped_terms: Vec<String> = config.terms.iter().map(|term| regex::escape(term)).collect();
+        // Longest first, so a term that is a prefix of a later one (FIX before FIXME)
+        // does not match first and hide the longer term
+        escaped_terms.sort_by_key(|term| std::cmp::Reverse(term.len()));
         let pattern_str = escaped_terms.join("|");
 
         RegexBuilder::new(&pattern_str)
