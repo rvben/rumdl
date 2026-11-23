@@ -280,6 +280,41 @@ mod tests {
     }
 
     #[test]
+    fn test_term_that_extends_an_earlier_term() {
+        let rule = MD061ForbiddenTerms::new(vec!["FIX".to_string(), "FIXME".to_string()], true);
+        let content = "FIXME: later\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("FIXME"));
+        assert_eq!(result[0].column, 1);
+        assert_eq!(result[0].end_column, 6);
+    }
+
+    #[test]
+    fn test_longer_term_listed_first() {
+        let rule = MD061ForbiddenTerms::new(vec!["FIXME".to_string(), "FIX".to_string()], true);
+        let content = "FIXME: later\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("FIXME"));
+    }
+
+    #[test]
+    fn test_prefix_term_still_matches_on_its_own() {
+        let rule = MD061ForbiddenTerms::new(vec!["blacklist".to_string(), "blacklisted".to_string()], true);
+        let content = "The host is blacklisted.\nAdd it to the blacklist.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("blacklisted"));
+        assert_eq!(result[0].line, 1);
+        assert!(result[1].message.contains("'blacklist'"));
+        assert_eq!(result[1].line, 2);
+    }
+
+    #[test]
     fn test_word_boundary_with_punctuation() {
         let rule = MD061ForbiddenTerms::new(vec!["TODO".to_string()], false);
         let content = "TODO: colon\nTODO. period\n(TODO) parens\n";
