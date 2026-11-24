@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **tables**: detect a table whose header row opens with a code span ([6c441a5](https://github.com/rvben/rumdl/commit/6c441a525d2546e4fd4ac301b8556800915845b1))
 - **tables**: keep the list context across a lazy continuation line ([61c894e](https://github.com/rvben/rumdl/commit/61c894ed358b3790cf4d36261569a4177702e938))
 - **MD077**: align a continuation line that opens with a code span ([94766cc](https://github.com/rvben/rumdl/commit/94766cc81eeedd350335314a8eec459ca962d880))
+- **deps**: refresh Rust dependencies for v0.3.6 ([c75c611](https://github.com/rvben/rumdl/commit/c75c611b41e2661971114b123c90b8959539e47b))
 
 ### Performance
 
