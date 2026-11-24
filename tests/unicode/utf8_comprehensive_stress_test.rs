@@ -120,7 +120,7 @@ fn get_all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::default()),
         Box::new(MD033NoInlineHtml::default()),
-        Box::new(MD034NoBareUrls), // The rule that had the UTF-8 panic
+        Box::new(MD034NoBareUrls::default()), // The rule that had the UTF-8 panic
         Box::new(MD035HRStyle::default()),
         Box::new(MD036NoEmphasisAsHeading::default()),
         Box::new(MD037NoSpaceInEmphasis),
@@ -192,7 +192,7 @@ fn test_all_rules_no_panic_with_multibyte_utf8() {
 /// This is the exact pattern that caused the kubernetes/website panic
 #[test]
 fn test_md034_email_with_all_scripts() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     for (script_name, script_text) in TEST_SCRIPTS {
         // Create content with email immediately after multi-byte text
@@ -268,7 +268,7 @@ fn test_fix_ranges_are_valid_char_boundaries() {
 /// Test edge case: email address at exact byte positions that could cause issues
 #[test]
 fn test_md034_email_at_various_byte_offsets() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Create content where the email starts at different byte offsets
     // to test the `start - 5` check for "xmpp:"

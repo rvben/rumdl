@@ -4,27 +4,199 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::utils::regex_cache::{EMAIL_PATTERN, URL_IPV6_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, XMPP_URI_REGEX};
 
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 
+/// Configuration for MD034 (No bare URLs)
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
+pub struct MD034Config {
+    /// End a bare URL or XMPP URI right before full-width or CJK punctuation
+    /// (`、`, `。`, `）` and others) instead of running on through it. Off by
+    /// default: the same punctuation can be part of an internationalized URL,
+    /// and cutting it there would change where an existing bare link points.
+    #[serde(default, rename = "cjk-punctuation", alias = "cjk_punctuation")]
+    pub cjk_punctuation: bool,
+}
+
+impl RuleConfig for MD034Config {
+    const RULE_NAME: &'static str = "MD034";
+}
+
+/// Full-width and CJK punctuation that ends a bare URL under `cjk-punctuation`,
+/// since CJK prose puts no space after one. `）` is handled in [`cjk_marks`] to
+/// keep a balanced `（…）`.
+fn is_cjk_url_terminator(c: char) -> bool {
+    matches!(
+        c,
+        '、' | '。' | '，' | '．' | '：' | '；' | '！' | '？' | '」' | '』' | '】' | '〕' | '〉' | '》' | '”'
+    )
+}
+
+/// A `（`, `）` or terminator in a line. `cut` and `next_stop` index the marks;
+/// `marks.len()` stands for "none, the line end".
+struct CjkMark {
+    pos: usize,
+    c: char,
+    /// The first mark that cuts a URL starting here: a terminator, or a `）` that
+    /// closes no `（` opened at or after this mark.
+    cut: usize,
+    /// The first mark at or after this one that is not a `（`.
+    next_stop: usize,
+}
+
+/// The marks of `line` in order, with each one's first cut. Filled from the end:
+/// a `（` is closed by the first cut after it if that cut is a `）`, and the URL
+/// then runs on to the first cut after that `）`.
+fn cjk_marks(line: &str) -> Vec<CjkMark> {
+    if line.is_ascii() {
+        return Vec::new();
+    }
+    let mut marks: Vec<CjkMark> = line
+        .char_indices()
+        .filter(|&(_, c)| c == '（' || c == '）' || is_cjk_url_terminator(c))
+        .map(|(pos, c)| CjkMark {
+            pos,
+            c,
+            cut: 0,
+            next_stop: 0,
+        })
+        .collect();
+    let n = marks.len();
+    for i in (0..n).rev() {
+        if marks[i].c != '（' {
+            marks[i].cut = i;
+            marks[i].next_stop = i;
+            continue;
+        }
+        let cut_from = |j: usize| marks.get(j).map_or(n, |m| m.cut);
+        let first = cut_from(i + 1);
+        let cut = if marks.get(first).is_some_and(|m| m.c == '）') {
+            cut_from(first + 1)
+        } else {
+            first
+        };
+        marks[i].cut = cut;
+        marks[i].next_stop = marks.get(i + 1).map_or(n, |m| m.next_stop);
+    }
+    marks
+}
+
+/// Byte ranges of the matches of `regex` in `line`, each cut at full-width
+/// punctuation. `marks` are the [`cjk_marks`] of `line`. The search resumes at
+/// the cut, so a URL right after it is found.
+///
+/// A match runs to the next whitespace, so a search over the whole line would
+/// reread the rest of it for every URL. Each search is instead cut off right
+/// after a mark, which keeps the leftmost start and ends the match at the cut-off
+/// if it ran past it: the patterns have no anchors, `\b` or look-around, every
+/// required part of them is ASCII, and a mark (never whitespace) is accepted by
+/// every repetition it can fall in, after which the rest of the pattern is
+/// optional.
+///
+/// The first search finds the start, cut off after the next `）` or terminator.
+/// If a `（` inside the URL keeps that `）` from cutting, a second search from the
+/// start is cut off after the URL's own cut. Both read no further than the cut
+/// plus one character, so a line is scanned in linear time.
+fn cut_url_matches<'a>(
+    regex: &'a Regex,
+    line: &'a str,
+    marks: &'a [CjkMark],
+) -> impl Iterator<Item = (usize, usize)> + 'a {
+    let mut mark = 0; // the first mark at or after the last position looked up
+    let mut pos = 0;
+    std::iter::from_fn(move || {
+        let mut first_mark_from = |at: usize| {
+            while marks.get(mark).is_some_and(|m| m.pos < at) {
+                mark += 1;
+            }
+            mark
+        };
+        let end_of = |i: usize| marks.get(i).map_or(line.len(), |m| m.pos + m.c.len_utf8());
+        loop {
+            let stop = marks.get(first_mark_from(pos)).map_or(marks.len(), |m| m.next_stop);
+            let search_end = end_of(stop);
+            let Some(mat) = regex.find_at(&line[..search_end], pos) else {
+                if search_end == line.len() {
+                    return None;
+                }
+                // Nothing starts before the mark; continue after it.
+                pos = search_end;
+                continue;
+            };
+            let start = mat.start();
+            let cut = marks.get(first_mark_from(start)).map_or(marks.len(), |m| m.cut);
+            let cut_end = end_of(cut);
+            let match_end = if cut_end == search_end {
+                mat.end()
+            } else {
+                // `mat` is also a match in this longer haystack and nothing
+                // starts between `pos` and `start`, so this finds `start` again.
+                regex
+                    .find_at(&line[..cut_end], start)
+                    .expect("a match found in a prefix of the haystack")
+                    .end()
+            };
+            let end = match_end.min(marks.get(cut).map_or(line.len(), |m| m.pos));
+            // Every URL pattern starts with an ASCII prefix (`https://`, `www.`),
+            // so a cut never empties a match.
+            debug_assert!(end > start, "empty URL cut at {start} in {line:?}");
+            pos = end;
+            return Some((start, end));
+        }
+    })
+}
+
+/// Either plain regex matches or matches cut at full-width punctuation, without
+/// boxing or a per-item check of which one is in use.
+enum UrlMatches<W, C> {
+    Whole(W),
+    Cut(C),
+}
+
+impl<W: Iterator<Item = (usize, usize)>, C: Iterator<Item = (usize, usize)>> Iterator for UrlMatches<W, C> {
+    type Item = (usize, usize);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Whole(matches) => matches.next(),
+            Self::Cut(matches) => matches.next(),
+        }
+    }
+}
+
+/// Byte ranges of the matches of `regex` in `line`. With `cjk-punctuation` on,
+/// `marks` holds the line's [`cjk_marks`] and each match is cut at them; `None`
+/// is the plain regex search.
+fn url_matches<'a>(
+    regex: &'a Regex,
+    line: &'a str,
+    marks: Option<&'a [CjkMark]>,
+) -> impl Iterator<Item = (usize, usize)> + 'a {
+    match marks {
+        None => UrlMatches::Whole(regex.find_iter(line).map(|mat| (mat.start(), mat.end()))),
+        Some(marks) => UrlMatches::Cut(cut_url_matches(regex, line, marks)),
+    }
+}
+
 // Literal prefixes are necessary for every match of their pattern. Skip
 // irrelevant engines while preserving independent cursors and overlap ordering.
-fn collect_urls(line: &str, found: &mut Vec<(usize, usize)>) {
+fn collect_urls(line: &str, marks: Option<&[CjkMark]>, found: &mut Vec<(usize, usize)>) {
     found.clear();
     if line.contains("://[") {
         // First, find IPv6 URLs (they need special handling)
-        for mat in URL_IPV6_REGEX.find_iter(line) {
-            found.push((mat.start(), mat.end()));
-        }
+        found.extend(url_matches(&URL_IPV6_REGEX, line, marks));
     }
     if line.contains("://") {
         // Then find regular URLs
-        for mat in URL_STANDARD_REGEX.find_iter(line) {
-            let url_str = mat.as_str();
+        for (start, end) in url_matches(&URL_STANDARD_REGEX, line, marks) {
+            let url_str = &line[start..end];
 
             // Skip if it's an IPv6 URL (already handled)
             if url_str.contains("://[") {
@@ -38,22 +210,19 @@ fn collect_urls(line: &str, found: &mut Vec<(usize, usize)>) {
                 // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
                 if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
                     // Check if the next byte after our match is ] (ASCII, so byte check is safe)
-                    if line.as_bytes().get(mat.end()) == Some(&b']') {
+                    if line.as_bytes().get(end) == Some(&b']') {
                         // This is likely a malformed IPv6 URL like "https://::1]:8080"
                         continue;
                     }
                 }
             }
 
-            found.push((mat.start(), mat.end()));
+            found.push((start, end));
         }
     }
     if line.contains("www.") {
         // Find www URLs without protocol (e.g., www.example.com)
-        for mat in URL_WWW_REGEX.find_iter(line) {
-            let start_pos = mat.start();
-            let end_pos = mat.end();
-
+        for (start_pos, end_pos) in url_matches(&URL_WWW_REGEX, line, marks) {
             // Skip if preceded by / or @ (likely part of a full URL)
             if start_pos > 0 {
                 let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -76,10 +245,7 @@ fn collect_urls(line: &str, found: &mut Vec<(usize, usize)>) {
     }
     if line.contains("xmpp:") {
         // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
-        for mat in XMPP_URI_REGEX.find_iter(line) {
-            let start_pos = mat.start();
-            let end_pos = mat.end();
-
+        for (start_pos, end_pos) in url_matches(&XMPP_URI_REGEX, line, marks) {
             // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
             if start_pos > 0 && end_pos < line.len() {
                 let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -108,16 +274,42 @@ fn collect_urls(line: &str, found: &mut Vec<(usize, usize)>) {
     });
 }
 
+/// Naive reference for [`url_matches`]. Off, a plain search. On, it searches
+/// the whole rest of the line after every cut and cuts with a separate char
+/// loop. Quadratic, test only.
 #[cfg(test)]
-fn collect_urls_legacy(line: &str, found: &mut Vec<(usize, usize)>) {
-    // First, find IPv6 URLs (they need special handling)
-    for mat in URL_IPV6_REGEX.find_iter(line) {
-        found.push((mat.start(), mat.end()));
+fn naive_url_matches(regex: &Regex, line: &str, cjk_punctuation: bool) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut pos = 0;
+    while let Some(mat) = regex.find_at(line, pos) {
+        let mut end = mat.end();
+        if cjk_punctuation {
+            let mut open = 0;
+            for (idx, c) in mat.as_str().char_indices() {
+                if c == '（' {
+                    open += 1;
+                } else if c == '）' && open > 0 {
+                    open -= 1;
+                } else if "、。，．：；！？」』）】〕〉》”".contains(c) {
+                    end = mat.start() + idx;
+                    break;
+                }
+            }
+        }
+        ranges.push((mat.start(), end));
+        pos = end.max(mat.start() + 1);
     }
+    ranges
+}
+
+#[cfg(test)]
+fn collect_urls_legacy(line: &str, cjk_punctuation: bool, found: &mut Vec<(usize, usize)>) {
+    // First, find IPv6 URLs (they need special handling)
+    found.extend(naive_url_matches(&URL_IPV6_REGEX, line, cjk_punctuation));
 
     // Then find regular URLs
-    for mat in URL_STANDARD_REGEX.find_iter(line) {
-        let url_str = mat.as_str();
+    for (start, end) in naive_url_matches(&URL_STANDARD_REGEX, line, cjk_punctuation) {
+        let url_str = &line[start..end];
 
         // Skip if it's an IPv6 URL (already handled)
         if url_str.contains("://[") {
@@ -131,21 +323,18 @@ fn collect_urls_legacy(line: &str, found: &mut Vec<(usize, usize)>) {
             // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
             if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
                 // Check if the next byte after our match is ] (ASCII, so byte check is safe)
-                if line.as_bytes().get(mat.end()) == Some(&b']') {
+                if line.as_bytes().get(end) == Some(&b']') {
                     // This is likely a malformed IPv6 URL like "https://::1]:8080"
                     continue;
                 }
             }
         }
 
-        found.push((mat.start(), mat.end()));
+        found.push((start, end));
     }
 
     // Find www URLs without protocol (e.g., www.example.com)
-    for mat in URL_WWW_REGEX.find_iter(line) {
-        let start_pos = mat.start();
-        let end_pos = mat.end();
-
+    for (start_pos, end_pos) in naive_url_matches(&URL_WWW_REGEX, line, cjk_punctuation) {
         // Skip if preceded by / or @ (likely part of a full URL)
         if start_pos > 0 {
             let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -167,10 +356,7 @@ fn collect_urls_legacy(line: &str, found: &mut Vec<(usize, usize)>) {
     }
 
     // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
-    for mat in XMPP_URI_REGEX.find_iter(line) {
-        let start_pos = mat.start();
-        let end_pos = mat.end();
-
+    for (start_pos, end_pos) in naive_url_matches(&XMPP_URI_REGEX, line, cjk_punctuation) {
         // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
         if start_pos > 0 && end_pos < line.len() {
             let prev_char = line.as_bytes().get(start_pos - 1).copied();
@@ -468,9 +654,24 @@ struct LineCheckBuffers {
 }
 
 #[derive(Default, Clone)]
-pub struct MD034NoBareUrls;
+pub struct MD034NoBareUrls {
+    config: MD034Config,
+}
 
 impl MD034NoBareUrls {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_config_struct(config: MD034Config) -> Self {
+        Self { config }
+    }
+
+    /// Construct with `cjk-punctuation` explicitly enabled or disabled.
+    pub fn with_cjk_punctuation(cjk_punctuation: bool) -> Self {
+        Self::from_config_struct(MD034Config { cjk_punctuation })
+    }
+
     #[inline]
     pub fn should_skip_content(&self, content: &str) -> bool {
         // Skip if content has no URLs, XMPP URIs, or email addresses
@@ -552,15 +753,21 @@ impl MD034NoBareUrls {
         buffers.image_ranges.clear();
         buffers.schemed_uri_ranges.clear();
 
+        // Indexed once per line and shared by every pattern below.
+        let marks = self.config.cjk_punctuation.then(|| cjk_marks(line));
+        let marks = marks.as_deref();
+
         if has_at && line.contains("://") {
-            for mat in SCHEMED_URI_REGEX.find_iter(line) {
+            // Cut like the URL patterns, so under `cjk-punctuation` an address
+            // after `、` is reported and one in a URI after the cut is still covered.
+            for (start, end) in url_matches(&SCHEMED_URI_REGEX, line, marks) {
                 // Do not accept the alphabetic suffix of an invalid scheme
                 // starting with a digit, such as `3ssh://`.
-                if mat.start() > 0 && is_scheme_byte(line.as_bytes()[mat.start() - 1]) {
+                if start > 0 && is_scheme_byte(line.as_bytes()[start - 1]) {
                     continue;
                 }
-                let end = mat.start() + uri_content_end(mat.as_str());
-                buffers.schemed_uri_ranges.push((mat.start(), end));
+                let uri_end = start + uri_content_end(&line[start..end]);
+                buffers.schemed_uri_ranges.push((start, uri_end));
             }
         }
 
@@ -617,7 +824,7 @@ impl MD034NoBareUrls {
         // Find bare URLs
         buffers.urls_found.clear();
 
-        collect_urls(line, &mut buffers.urls_found);
+        collect_urls(line, marks, &mut buffers.urls_found);
 
         // Process found URLs
         let mut url_columns = ColumnCursor::default();
@@ -858,7 +1065,7 @@ impl MD034NoBareUrls {
 
 impl Rule for MD034NoBareUrls {
     fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
-        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(34))
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(34))
     }
 
     #[inline]
@@ -870,12 +1077,7 @@ impl Rule for MD034NoBareUrls {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        Box::new(MD034NoBareUrls)
-    }
+    crate::impl_rule_config_methods!(MD034Config);
 
     #[inline]
     fn category(&self) -> RuleCategory {
@@ -1063,6 +1265,40 @@ fn is_scheme_without_host(url: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// The option reaches the rule through the config in both spellings and is
+    /// off by default.
+    #[test]
+    fn test_cjk_punctuation_option_from_config() {
+        use crate::config::{Config, MarkdownFlavor, RuleConfig};
+
+        let content = "https://example.com/a、b\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let fixed_by = |config: &Config| MD034NoBareUrls::from_config(config).fix(&ctx).unwrap();
+        assert_eq!(fixed_by(&Config::default()), "<https://example.com/a、b>\n");
+        for key in ["cjk-punctuation", "cjk_punctuation"] {
+            let mut config = Config::default();
+            config.rules.insert(
+                "MD034".into(),
+                RuleConfig {
+                    severity: None,
+                    values: toml::from_str(&format!("{key} = true")).unwrap(),
+                },
+            );
+            assert_eq!(fixed_by(&config), "<https://example.com/a>、b\n", "{key}");
+        }
+    }
+
+    /// The format proof models the default scan only, so the option opts out of it.
+    #[test]
+    fn test_cjk_punctuation_option_drops_the_native_format_policy() {
+        assert!(MD034NoBareUrls::default().native_format_policy().is_some());
+        assert!(
+            MD034NoBareUrls::with_cjk_punctuation(true)
+                .native_format_policy()
+                .is_none()
+        );
+    }
+
     #[test]
     fn construct_lookup_preserves_nested_ranges_and_span_boundaries() {
         let ranges = [(5, 12), (0, 10), (2, 4), (5, 7), (12, 15), (20, 20)];
@@ -1127,7 +1363,7 @@ mod tests {
             ("é www.one.example café https://two.example/path, third@example.com", 3),
         ] {
             let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-            let warnings = MD034NoBareUrls.check(&ctx).unwrap();
+            let warnings = MD034NoBareUrls::default().check(&ctx).unwrap();
             assert_eq!(warnings.len(), count, "{content}");
             for warning in warnings {
                 let fix = warning.fix.unwrap();
@@ -1154,7 +1390,7 @@ mod tests {
                 unit.repeat(128)
             );
             let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
-            let rule = MD034NoBareUrls;
+            let rule = MD034NoBareUrls::default();
             let warnings = rule.check(&ctx).unwrap();
             assert_eq!(warnings.len(), 258);
             for warning in &warnings {
@@ -1175,7 +1411,7 @@ mod tests {
 
     #[test]
     fn test_shortcut_ref_at_end_of_line_no_trailing_chars() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "See [https://example.com]";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1187,7 +1423,7 @@ mod tests {
 
     #[test]
     fn test_shortcut_ref_multiple_spaces_before_paren() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "[text]  (https://example.com)";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1199,7 +1435,7 @@ mod tests {
 
     #[test]
     fn test_shortcut_ref_tab_before_bracket() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "[https://example.com]\t[other]";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1215,7 +1451,7 @@ mod tests {
 
     #[test]
     fn test_shortcut_ref_followed_by_punctuation() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "[https://example.com], see also other things.";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1230,7 +1466,7 @@ mod tests {
         // Exact reproduction from issue #572: URL inside inline code within an MDX
         // component body must not be flagged. The same URL in backticks outside the
         // component is already handled correctly and serves as a control.
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Test\n\nControl: `https://rumdl.example.com/` is fine here.\n\n<ParamField path=\"--stuff\">\n  This URL `https://rumdl.example.com/` must not be flagged.\n</ParamField>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1244,7 +1480,7 @@ mod tests {
     fn test_bare_url_inside_mdx_component_still_flagged() {
         // A bare URL (not in backticks) inside an MDX component body must still be flagged.
         // This ensures the fix for issue #572 only suppresses properly code-spanned URLs.
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content =
             "# Test\n\n<ParamField path=\"--stuff\">\n  Visit https://rumdl.example.com/ for details.\n</ParamField>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
@@ -1259,7 +1495,7 @@ mod tests {
     #[test]
     fn test_url_in_backticks_inside_nested_mdx_component_not_flagged() {
         // Nested MDX components must also respect code spans.
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Outer>\n  <Inner>\n    Check `https://example.com/` here.\n  </Inner>\n</Outer>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1274,7 +1510,7 @@ mod tests {
     /// flagged, and `fix` must not rewrite it (which would corrupt the command).
     #[test]
     fn test_url_in_fenced_code_block_inside_jsx_not_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n```bash\ncurl https://example.com/api\n```\n  </Step>\n</Steps>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1288,7 +1524,7 @@ mod tests {
     /// `<https://...>` rewrite that breaks a copy-pasteable command).
     #[test]
     fn test_fix_does_not_rewrite_url_in_fenced_code_block_inside_jsx() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n```bash\ncurl https://example.com/api\n```\n  </Step>\n</Steps>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let fixed = rule.fix(&ctx).unwrap();
@@ -1302,7 +1538,7 @@ mod tests {
     /// and must still be flagged, so the fence exemption is not over-broad.
     #[test]
     fn test_bare_url_in_jsx_body_outside_fence_still_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n  Visit https://example.com/api now.\n  </Step>\n</Steps>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1318,7 +1554,7 @@ mod tests {
     /// bare URL between them (the code-block counterpart to the code-span fix).
     #[test]
     fn test_bare_url_not_masked_by_comment_delimiter_in_code_block() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content =
             "# T\n\n```text\n<!-- literal opener, not a comment\n```\n\nhttps://example.com should be flagged\n\n-->\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -1336,7 +1572,7 @@ mod tests {
     /// comment, so its bare URL stays skipped.
     #[test]
     fn test_bare_url_in_indented_comment_in_admonition_still_skipped() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# T\n\n!!! note\n    Some text.\n\n    <!--\n    https://example.com\n    -->\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
@@ -1351,7 +1587,7 @@ mod tests {
     /// invalid JSX, so MD034 must not flag it under the MDX flavor.
     #[test]
     fn test_url_in_jsx_component_attribute_not_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Card title=\"Docs\" href=\"https://example.com/docs\" />\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1364,7 +1600,7 @@ mod tests {
     /// The same exemption must apply when the JSX opening tag spans multiple lines.
     #[test]
     fn test_url_in_multiline_jsx_component_attribute_not_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Card\n  title=\"Docs\"\n  href=\"https://example.com/docs\"\n/>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1378,7 +1614,7 @@ mod tests {
     /// but a bare URL in the component's *body* is genuine prose and still flagged.
     #[test]
     fn test_jsx_attribute_url_skipped_but_body_url_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Card href=\"https://attr.example.com\">\n  Visit https://body.example.com now.\n</Card>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1397,7 +1633,7 @@ mod tests {
     /// JSX component attribute value must not be flagged either.
     #[test]
     fn test_email_in_jsx_component_attribute_not_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Contact email=\"hello@example.com\" />\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1412,7 +1648,7 @@ mod tests {
     /// This locks in that the two flavors agree.
     #[test]
     fn test_jsx_attribute_url_not_flagged_in_standard_flavor() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Card href=\"https://example.com/docs\" />\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1427,7 +1663,7 @@ mod tests {
     fn test_pandoc_skips_urls_in_line_blocks() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "| See https://example.com\n| For details\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Pandoc, None);
         let result = rule.check(&ctx).unwrap();
@@ -1442,7 +1678,7 @@ mod tests {
     fn test_pandoc_skips_urls_in_metadata() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "---\nhomepage: https://example.com\n---\n\nBody.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Pandoc, None);
         let result = rule.check(&ctx).unwrap();
@@ -1458,7 +1694,7 @@ mod tests {
     fn test_standard_still_flags_urls_in_pipe_prefixed_lines() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "| See https://example.com\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1473,7 +1709,7 @@ mod tests {
         // A fenced code block inside a JSX component must not misalign the code-span
         // offset map. The URL in backticks that appears *after* the code block must
         // still be recognised as being inside a code span.
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 <Component>
 Some intro text.
@@ -1500,7 +1736,7 @@ Check `https://example.com/` here.
     fn test_myst_colon_directive_argument_url_not_flagged() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 :::{anywidget} https://cdn.jsdelivr.net/npm/repo-review-webapp@1.1.3/dist/repo-review-anywidget.mjs
 {
@@ -1521,7 +1757,7 @@ Check `https://example.com/` here.
     fn test_myst_nested_colon_directive_argument_url_not_flagged() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 ::::{grid}
 :::{card} https://example.com/card-target
@@ -1543,7 +1779,7 @@ Some caption.
     fn test_myst_directive_body_url_still_flagged() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 :::{note}
 See https://example.com/docs for more details.
@@ -1564,7 +1800,7 @@ See https://example.com/docs for more details.
     fn test_myst_unclosed_colon_directive_argument_url_not_flagged() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 :::{anywidget} https://example.com/widget.mjs
 Some trailing content with no closing fence.
@@ -1583,7 +1819,7 @@ Some trailing content with no closing fence.
     fn test_colon_directive_url_flagged_in_standard_flavor() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = ":::{anywidget} https://example.com/widget.mjs\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1596,7 +1832,7 @@ Some trailing content with no closing fence.
 
     #[test]
     fn test_md034_complex_link() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
 
         // Case 1: Balanced brackets in code span.
         // We should flag the bare URL at the end, but NOT the one inside the link.
@@ -1623,7 +1859,7 @@ Some trailing content with no closing fence.
     /// still reports bare URLs under MDG, but withholds that unsafe automatic fix.
     #[test]
     fn test_mdg_reports_bare_urls_without_fixing_them() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 # Feature: Visit https://feature.example.com
 
@@ -1674,7 +1910,7 @@ Prose about https://prose.example.com for background.
 
     #[test]
     fn test_mdg_reports_bare_email_without_fixing_it() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Feature: Contact\n\n* Given I email user@example.com\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
 
@@ -1690,7 +1926,7 @@ Prose about https://prose.example.com for background.
     /// document, at every position.
     #[test]
     fn test_mdg_exemption_does_not_affect_other_flavors() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 # Feature: Visit https://feature.example.com
 
@@ -1757,7 +1993,7 @@ Prose about <https://prose.example.com> for background.
     /// angle-bracket form everywhere would pass a one-sided test.
     #[test]
     fn test_mdx_fixes_bare_urls_to_links_instead_of_autolinks() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let cases = [
             (
                 "Bare link: http://localhost/\n",
@@ -1805,7 +2041,7 @@ Prose about <https://prose.example.com> for background.
     /// the same construct and were reported, which would have split the URI at the colon.
     #[test]
     fn test_an_address_behind_a_uri_scheme_is_not_a_bare_email() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         for content in [
             "Mail mailto:user@example.com now\n",
             "Chat xmpp:foo@bar.baz please\n",
@@ -1836,7 +2072,7 @@ Prose about <https://prose.example.com> for background.
     /// colon somewhere before it, which is ordinary prose and a real finding.
     #[test]
     fn test_a_colon_before_an_address_is_still_a_bare_email() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         for content in [
             "Contact: user@example.com\n",
             "Note (see 3:1): user@example.com\n",
@@ -1881,7 +2117,7 @@ Prose about <https://prose.example.com> for background.
     /// valid Markdown that MD034 does not report again.
     #[test]
     fn test_mdx_escapes_an_active_bang_before_the_link() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let cases = [
             (
                 "Download now!https://example.com/f today\n",
@@ -1919,7 +2155,7 @@ Prose about <https://prose.example.com> for background.
     /// an escape they never needed: `!<url>` is not image syntax.
     #[test]
     fn test_a_preceding_bang_is_untouched_outside_jsx_flavors() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let ctx = crate::lint_context::LintContext::new(
             "Download now!https://example.com/f today\n",
             crate::config::MarkdownFlavor::Standard,
@@ -1934,7 +2170,7 @@ Prose about <https://prose.example.com> for background.
     /// finding is reported with no fix rather than with a corrupting one.
     #[test]
     fn test_mdx_reports_but_does_not_fix_a_url_after_an_active_close_bracket() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content =
             "[See more]https://example.com/x here\n\n[https://example.com/x]: https://elsewhere.example.com/\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
@@ -1948,7 +2184,7 @@ Prose about <https://prose.example.com> for background.
     /// An escaped `]` closes no span, so the link is safe and keeps its fix.
     #[test]
     fn test_mdx_fixes_after_an_escaped_close_bracket() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let ctx = crate::lint_context::LintContext::new(
             "Text \\]https://example.com/x here\n",
             crate::config::MarkdownFlavor::MDX,
@@ -1989,7 +2225,7 @@ Prose about <https://prose.example.com> for background.
     /// in MDX projects, so they are escaped rather than left to the plugin set.
     #[test]
     fn test_mdx_link_text_escapes_characters_that_would_not_render_literally() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let cases = [
             ("https://ex.com/a*b*c", "https://ex.com/a\\*b\\*c"),
             ("https://ex.com/a&amp;b", "https://ex.com/a\\&amp;b"),
@@ -2023,7 +2259,7 @@ Prose about <https://prose.example.com> for background.
     /// would make the fix produce a document that no longer builds.
     #[test]
     fn test_mdx_braces_are_skipped_when_paired_and_escaped_when_not() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
 
         let paired = "See https://ex.com/a{b}c here\n";
         let paired_ctx = crate::lint_context::LintContext::new(paired, crate::config::MarkdownFlavor::MDX, None);
@@ -2059,7 +2295,7 @@ Prose about <https://prose.example.com> for background.
     /// angle-bracket destination is what covers the remaining case.
     #[test]
     fn test_mdx_unbalanced_open_paren_uses_an_angle_bracket_destination() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
 
         let unbalanced = "Go to https://ex.com/a(b now\n";
         let ctx = crate::lint_context::LintContext::new(unbalanced, crate::config::MarkdownFlavor::MDX, None);
@@ -2081,7 +2317,7 @@ Prose about <https://prose.example.com> for background.
     /// including the shapes whose escaping or angle brackets are unusual.
     #[test]
     fn test_mdx_fix_is_idempotent_and_stops_reporting() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 Plain http://localhost/ and www.example.com.
 
@@ -2106,7 +2342,7 @@ Parens https://ex.com/a(b and https://en.wikipedia.org/wiki/Foo_(bar).
     /// its own fix-stripping branch unchanged.
     #[test]
     fn test_link_form_is_confined_to_jsx_flavors() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "Visit https://example.com today\n";
 
         for flavor in [
@@ -2156,7 +2392,7 @@ Parens https://ex.com/a(b and https://en.wikipedia.org/wiki/Foo_(bar).
 
 #[cfg(test)]
 mod shared_url_scan_tests {
-    use super::{collect_urls, collect_urls_legacy};
+    use super::{cjk_marks, collect_urls, collect_urls_legacy};
     use proptest::prelude::*;
 
     #[test]
@@ -2167,12 +2403,16 @@ mod shared_url_scan_tests {
             "www.x.com/https://[::1]/https://foo",
             "<www.example.com/https://inner.com>",
             "xmpp:user@example.comhttps://host/https://host/",
+            "（https://a.example/x、www.b.example/y）。",
+            "xmpp:user@example.com/東京、xmpp:other@example.com/a）",
         ] {
-            let mut expected = Vec::new();
-            collect_urls_legacy(line, &mut expected);
-            let mut actual = Vec::new();
-            collect_urls(line, &mut actual);
-            assert_eq!(actual, expected, "{line}");
+            for cjk_punctuation in [false, true] {
+                let mut expected = Vec::new();
+                collect_urls_legacy(line, cjk_punctuation, &mut expected);
+                let mut actual = Vec::new();
+                collect_urls(line, cjk_punctuation.then(|| cjk_marks(line)).as_deref(), &mut actual);
+                assert_eq!(actual, expected, "{line} (cjk-punctuation = {cjk_punctuation})");
+            }
         }
     }
 
@@ -2189,14 +2429,17 @@ mod shared_url_scan_tests {
                 "https://", "www.", "xmpp:", "@", "://", "[", "]",
                 "(", ")", "<", ">", "\"", "'", "`", "\\", "/", "?", "#",
                 " ", "\n", "\t", "\r\n", "\u{a0}", "\u{2003}", "é", "中文", ":", ".", "_", "*",
-            ]), 0..40)
+                "、", "。", "：", "】", "（", "）", "」", "”", "（（", "））", "（https://", "）www.", "\u{3000}",
+            ]), 0..40),
+            // One setting per case rather than both, so the run time stays the same.
+            cjk_punctuation in any::<bool>(),
         ) {
             let line = parts.concat();
             let mut expected = Vec::new();
-            collect_urls_legacy(&line, &mut expected);
+            collect_urls_legacy(&line, cjk_punctuation, &mut expected);
             let mut actual = vec![(999, 999)];
-            collect_urls(&line, &mut actual);
-            prop_assert_eq!(actual, expected, "input: {:?}", line);
+            collect_urls(&line, cjk_punctuation.then(|| cjk_marks(&line)).as_deref(), &mut actual);
+            prop_assert_eq!(actual, expected, "input: {:?}, cjk-punctuation: {}", line, cjk_punctuation);
         }
     }
 }

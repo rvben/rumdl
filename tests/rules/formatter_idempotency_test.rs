@@ -343,7 +343,7 @@ fn test_md032_edge_case_code_fence_after_ordered_non1() {
 
 #[test]
 fn test_md034_fix_idempotent() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Visit https://example.com for more info.\n";
     assert_fix_idempotent(&rule, content, "MD034");
 }

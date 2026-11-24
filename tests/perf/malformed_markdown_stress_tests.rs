@@ -319,7 +319,7 @@ fn test_pathological_regex_patterns() {
     ];
 
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD034NoBareUrls),
+        Box::new(MD034NoBareUrls::default()),
         Box::new(MD039NoSpaceInLinks),
         Box::new(MD038NoSpaceInCode::default()),
         Box::new(MD040FencedCodeLanguage::default()),

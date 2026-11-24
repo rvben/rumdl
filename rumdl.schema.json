@@ -3023,6 +3023,16 @@
       "description": "No bare URLs - wrap URLs in angle brackets",
       "type": "object",
       "properties": {
+        "cjk-punctuation": {
+          "description": "End a bare URL or XMPP URI right before full-width or CJK punctuation\n(`、`, `。`, `）` and others) instead of running on through it. Off by\ndefault: the same punctuation can be part of an internationalized URL,\nand cutting it there would change where an existing bare link points.",
+          "type": "boolean",
+          "default": false
+        },
+        "cjk_punctuation": {
+          "description": "End a bare URL or XMPP URI right before full-width or CJK punctuation\n(`、`, `。`, `）` and others) instead of running on through it. Off by\ndefault: the same punctuation can be part of an internationalized URL,\nand cutting it there would change where an existing bare link points.",
+          "type": "boolean",
+          "default": false
+        },
         "severity": {
           "$ref": "#/$defs/Severity"
         },

@@ -17,7 +17,7 @@ Here is some `中文代码` in inline code
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::new()),
-        Box::new(MD034NoBareUrls),
+        Box::new(MD034NoBareUrls::default()),
         Box::new(MD047SingleTrailingNewline),
     ];
 

@@ -14,7 +14,7 @@ use rumdl_lib::rules::MD034NoBareUrls;
 #[test]
 fn test_gfm_autolink_https() {
     let content = "Visit https://example.com for more info.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -24,7 +24,7 @@ fn test_gfm_autolink_https() {
 #[test]
 fn test_gfm_autolink_http() {
     let content = "Visit http://example.com for more info.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -34,7 +34,7 @@ fn test_gfm_autolink_http() {
 #[test]
 fn test_gfm_autolink_www_prefix() {
     let content = "Check www.example.com for details.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -45,7 +45,7 @@ fn test_gfm_autolink_www_prefix() {
 #[test]
 fn test_gfm_autolink_ftp() {
     let content = "Download from ftp://files.example.com/file.zip here.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -55,7 +55,7 @@ fn test_gfm_autolink_ftp() {
 #[test]
 fn test_gfm_autolink_in_proper_link_no_warning() {
     let content = "Visit [example](https://example.com) for more info.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -65,7 +65,7 @@ fn test_gfm_autolink_in_proper_link_no_warning() {
 #[test]
 fn test_gfm_autolink_in_angle_brackets_no_warning() {
     let content = "Visit <https://example.com> for more info.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -75,7 +75,7 @@ fn test_gfm_autolink_in_angle_brackets_no_warning() {
 #[test]
 fn test_gfm_autolink_in_code_span_no_warning() {
     let content = "Use `https://example.com` in your config.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -88,7 +88,7 @@ fn test_gfm_autolink_in_code_block_no_warning() {
 https://example.com
 ```
 "#;
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -98,7 +98,7 @@ https://example.com
 #[test]
 fn test_gfm_autolink_multiple_on_same_line() {
     let content = "Visit https://example.com and https://other.com today.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -108,7 +108,7 @@ fn test_gfm_autolink_multiple_on_same_line() {
 #[test]
 fn test_gfm_autolink_with_path() {
     let content = "See https://example.com/docs/guide/intro.html for details.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -118,7 +118,7 @@ fn test_gfm_autolink_with_path() {
 #[test]
 fn test_gfm_autolink_with_query_params() {
     let content = "Visit https://example.com/search?q=test&page=1 for results.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -128,7 +128,7 @@ fn test_gfm_autolink_with_query_params() {
 #[test]
 fn test_gfm_autolink_with_fragment() {
     let content = "See https://example.com/page#section for the section.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -138,7 +138,7 @@ fn test_gfm_autolink_with_fragment() {
 #[test]
 fn test_gfm_autolink_with_port() {
     let content = "Server at https://localhost:8080/api for testing.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -148,7 +148,7 @@ fn test_gfm_autolink_with_port() {
 #[test]
 fn test_gfm_autolink_ip_address() {
     let content = "Connect to http://192.168.1.1/admin for settings.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -158,7 +158,7 @@ fn test_gfm_autolink_ip_address() {
 #[test]
 fn test_gfm_autolink_localhost() {
     let content = "Development at http://localhost/dev for testing.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -168,7 +168,7 @@ fn test_gfm_autolink_localhost() {
 #[test]
 fn test_gfm_autolink_in_parentheses() {
     let content = "More info (see https://example.com) available.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -178,7 +178,7 @@ fn test_gfm_autolink_in_parentheses() {
 #[test]
 fn test_gfm_autolink_at_line_start() {
     let content = "https://example.com is the site.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -188,7 +188,7 @@ fn test_gfm_autolink_at_line_start() {
 #[test]
 fn test_gfm_autolink_at_line_end() {
     let content = "Visit https://example.com\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -198,7 +198,7 @@ fn test_gfm_autolink_at_line_end() {
 #[test]
 fn test_gfm_email_autolink() {
     let content = "Contact user@example.com for help.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -210,7 +210,7 @@ fn test_gfm_email_autolink() {
 #[test]
 fn test_gfm_autolink_with_encoded_chars() {
     let content = "See https://example.com/path%20with%20spaces for info.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -220,7 +220,7 @@ fn test_gfm_autolink_with_encoded_chars() {
 #[test]
 fn test_gfm_autolink_with_unicode_domain() {
     let content = "Visit https://例え.jp for Japanese content.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -496,7 +496,7 @@ See documentation[^1] for details.
     assert!(ctx.lines.len() >= 15);
 
     // Check for bare URLs in table and footnote
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let warnings = rule.check(&ctx).unwrap();
 
     // Should detect bare URLs in table and footnote
@@ -518,7 +518,7 @@ fn test_gfm_all_features_in_one_line() {
 #[test]
 fn test_gfm_url_followed_by_punctuation() {
     let content = "Visit https://example.com.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -530,7 +530,7 @@ fn test_gfm_url_in_list() {
     let content = r#"- First item https://example.com
 - Second item
 "#;
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -540,7 +540,7 @@ fn test_gfm_url_in_list() {
 #[test]
 fn test_gfm_url_in_blockquote() {
     let content = "> Check https://example.com for info.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -551,7 +551,7 @@ fn test_gfm_url_in_blockquote() {
 fn test_gfm_not_a_url_looks_like_one() {
     // These should NOT trigger warnings
     let content = "The ratio is 1:1 and time is 10:30.\n";
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
@@ -600,7 +600,7 @@ fn test_gfm_many_urls() {
         content.push_str(&format!("Visit https://example{i}.com here.\n"));
     }
 
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 

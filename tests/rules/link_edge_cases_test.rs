@@ -28,7 +28,7 @@ fn empty_wikilink_labels_do_not_duplicate_following_link_diagnostics() {
 
 #[test]
 fn test_md034_ipv6_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Test 1: IPv6 URLs should be detected as bare URLs
     let content = "\
@@ -49,7 +49,7 @@ Connect to http://[fe80::1%eth0]:3000 for link-local";
 
 #[test]
 fn test_md034_urls_with_punctuation() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Test 2: URLs with trailing punctuation
     let content = "\
@@ -76,7 +76,7 @@ Go to https://example.com; it's great
 
 #[test]
 fn test_md034_urls_in_special_contexts() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Test 3: URLs that should be ignored in special contexts
     let content = "\
@@ -109,18 +109,18 @@ fn test_md034_definition_shaped_paragraph_text_is_checked() {
     // its URL is bare.
     let content = "Some text\n[ref]: https://example.com\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = MD034NoBareUrls.check(&ctx).unwrap();
+    let result = MD034NoBareUrls::default().check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "{result:?}");
     assert_eq!(result[0].line, 2);
 
     let content = "Some text\n\n[ref]: https://example.com\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    assert!(MD034NoBareUrls.check(&ctx).unwrap().is_empty());
+    assert!(MD034NoBareUrls::default().check(&ctx).unwrap().is_empty());
 }
 
 #[test]
 fn test_md034_email_addresses() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Test 4: Email address detection
     let content = "\
@@ -143,7 +143,7 @@ Complex: firstname.lastname+tag@really.long.domain.example.org";
 
 #[test]
 fn test_md034_various_url_schemes() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Test 5: Different URL schemes
     let content = "\
@@ -159,7 +159,7 @@ FTPS: ftps://secure.example.com";
 
 #[test]
 fn test_md034_complex_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Test 6: URLs with complex query strings and fragments
     let content = "\
@@ -175,7 +175,7 @@ Special chars: https://example.com/path?data=%7B%22test%22%3A%20true%7D";
 
 #[test]
 fn test_md034_multiple_urls_per_line() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Test 7: Multiple URLs on the same line
     let content = "\
@@ -196,7 +196,7 @@ Both email@example.com and https://example.com are available";
 
 #[test]
 fn test_md034_unicode_domains() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Test 8: Unicode/IDN domains
     let content = "\
@@ -615,7 +615,7 @@ fn test_md042_nested_links() {
 #[test]
 fn test_link_rules_interaction() {
     // Test all three rules together
-    let md034 = MD034NoBareUrls;
+    let md034 = MD034NoBareUrls::default();
     let md039 = MD039NoSpaceInLinks;
     let md042 = MD042NoEmptyLinks::new();
 
@@ -664,7 +664,7 @@ Another [ spaced link ](  )";
 #[test]
 fn test_link_rules_code_block_handling() {
     // Test that all link rules ignore code blocks
-    let md034 = MD034NoBareUrls;
+    let md034 = MD034NoBareUrls::default();
     let md039 = MD039NoSpaceInLinks;
     let md042 = MD042NoEmptyLinks::new();
 
@@ -689,7 +689,7 @@ contact@example.com
 #[test]
 fn test_link_rules_html_handling() {
     // Test HTML context handling
-    let md034 = MD034NoBareUrls;
+    let md034 = MD034NoBareUrls::default();
     let md039 = MD039NoSpaceInLinks;
     let md042 = MD042NoEmptyLinks::new();
 
