@@ -612,7 +612,7 @@ impl RootSelection {
     fn selects(&self, path: &Path) -> bool {
         self.overrides
             .as_ref()
-            .is_none_or(|overrides| overrides.matched(path, false).is_whitelist())
+            .is_none_or(|overrides| !overrides.matched(path, false).is_ignore())
             && self.is_lintable(path)
     }
 
@@ -1295,9 +1295,11 @@ pub fn expand_directory_pattern_for(pattern: &str, windows: bool) -> Vec<String>
 /// Takes a pattern already run through [`normalize_pattern_for_base`]. A negation
 /// and a comment (`#`) are returned as written: neither names files to select.
 pub fn expand_include_directory(pattern: &str) -> Vec<String> {
-    // A blank pattern is discarded by the glob builder; expanding it would turn
-    // that no-op into a whitelist rule that selects nothing.
-    if pattern.trim().is_empty() || pattern.starts_with(['!', '#']) {
+    // A blank include leaves the selection unrestricted.
+    if pattern.trim().is_empty() {
+        return Vec::new();
+    }
+    if pattern.starts_with(['!', '#']) {
         return vec![pattern.to_string()];
     }
     // `directory_entries` leaves `*`, `?` and `[` finals alone; a brace
@@ -2052,6 +2054,56 @@ mod tests {
     }
 
     #[test]
+    fn workspace_scan_and_file_events_ignore_blank_includes() {
+        let dir = tempdir().unwrap();
+        let roots = [dir.path().to_path_buf()];
+        let readme = roots[0].join("README.md");
+        fs::write(&readme, "# Readme\n").unwrap();
+
+        let options = MarkdownWalkOptions {
+            respect_gitignore: false,
+            skip_vendor_dirs: true,
+        };
+        let excludes = ExcludeMatchers::new(&[]);
+        for blank in ["", " ", "\t"] {
+            let includes = [blank.to_string()];
+            let scan = MarkdownWorkspaceScan::new(&options, &includes, &excludes);
+            assert_eq!(
+                scan.collect(&roots).as_slice(),
+                std::slice::from_ref(&readme),
+                "{blank:?}"
+            );
+            assert!(!scan.path_is_ignored(&roots, &readme), "{blank:?}");
+        }
+
+        let includes = ["\t".to_string(), "docs/**".to_string()];
+        let scan = MarkdownWorkspaceScan::new(&options, &includes, &excludes);
+        assert!(scan.collect(&roots).is_empty());
+        assert!(scan.path_is_ignored(&roots, &readme));
+    }
+
+    #[test]
+    fn workspace_scan_and_file_events_honor_negation_only_includes() {
+        let dir = tempdir().unwrap();
+        let roots = [dir.path().to_path_buf()];
+        let readme = roots[0].join("README.md");
+        let draft = roots[0].join("draft.md");
+        fs::write(&readme, "# Readme\n").unwrap();
+        fs::write(&draft, "# Draft\n").unwrap();
+
+        let options = MarkdownWalkOptions {
+            respect_gitignore: false,
+            skip_vendor_dirs: true,
+        };
+        let includes = ["!draft.md".to_string()];
+        let excludes = ExcludeMatchers::new(&[]);
+        let scan = MarkdownWorkspaceScan::new(&options, &includes, &excludes);
+        assert_eq!(scan.collect(&roots).as_slice(), std::slice::from_ref(&readme));
+        assert!(!scan.path_is_ignored(&roots, &readme));
+        assert!(scan.path_is_ignored(&roots, &draft));
+    }
+
+    #[test]
     fn workspace_scan_rejects_explicit_rust_includes() {
         let dir = tempdir().unwrap();
         let root = dir.path().to_path_buf();
@@ -2793,11 +2845,15 @@ mod tests {
             "!drafts",
             "#docs",
             "docs\\",
-            "",
-            " ",
-            "\t",
         ] {
             assert_eq!(expand_include_directory(pattern), [pattern], "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn expand_include_directory_discards_blank_patterns() {
+        for pattern in ["", " ", "\t"] {
+            assert!(expand_include_directory(pattern).is_empty(), "{pattern:?}");
         }
     }
 

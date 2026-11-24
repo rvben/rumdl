@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Respect blank and exclusion-only `include` patterns when updating the language server workspace index.
 - **MD034**: preserve protected URLs with CJK punctuation ([4559341](https://github.com/rvben/rumdl/commit/4559341cb516455e89226fc069fefbddd78188e4))
 - **MD061**: pick the longest term with valid boundaries ([b6c662e](https://github.com/rvben/rumdl/commit/b6c662e2565c54e00222501c548360d83c422a5d))
 - **MD061**: report a term that extends an earlier listed term ([ee42482](https://github.com/rvben/rumdl/commit/ee424821eb1b508e0d197fc5bab0656908908a39))
@@ -31,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **lsp**: convert the ranges of a quick fix in one pass ([5fbdd19](https://github.com/rvben/rumdl/commit/5fbdd190b77aa57767b74dbbf1ef87ec1000a8ce))
 - **tables**: scan a lazy line without walking every open list level ([cbeb9c0](https://github.com/rvben/rumdl/commit/cbeb9c06d31e58b579cbf84eaefa10c2ec620177))
+
+### Security
+
+- Update `url` to 2.5.9 to address [RUSTSEC-2026-0592](https://rustsec.org/advisories/RUSTSEC-2026-0592).
 
 ## [0.3.5](https://github.com/rvben/rumdl/compare/v0.3.4...v0.3.5) - 2026-11-18
 

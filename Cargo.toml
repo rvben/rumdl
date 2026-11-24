@@ -53,14 +53,14 @@ aho-corasick = "1.1"
 clap = { version = "4.6", features = ["derive"] }
 colored = { version = "3.1.1", optional = true }
 fancy-regex = "0.20.2"
-ignore = "0.4.34"
+ignore = "0.4.35"
 rayon = { version = "1.12.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-serde-saphyr = "2.1.1"
+serde-saphyr = "2.2.0"
 toml = "1.2"
 thiserror = "2.0.21"
-globset = "0.4.21"
+globset = "0.4.22"
 indexmap = { version = "2", features = ["serde"] }
 log = "0.4.35"
 memchr = "2.8"
@@ -70,11 +70,11 @@ pulldown-cmark = { version = "0.13.6", default-features = false, features = ["ht
 unicase = "2.10"
 # Identifier classification for the bundled markdown-rs parser.
 unicode-id = { version = "0.3", features = ["no_std"] }
-# MDX JavaScript boundaries. Oxc 0.159 needs Rust 1.98, which sets our minimum;
+# MDX JavaScript boundaries. Oxc 0.160 needs Rust 1.98, which sets our minimum;
 # regular-expression validation is unnecessary for boundaries.
-oxc_parser = { version = "0.159.0", default-features = false }
-oxc_allocator = "0.159.0"
-oxc_span = "0.159.0"
+oxc_parser = { version = "0.160.0", default-features = false }
+oxc_allocator = "0.160.0"
+oxc_span = "0.160.0"
 regex = "1.13"
 toml_edit = "0.25"
 dyn-clone = "1"
@@ -97,16 +97,16 @@ env_logger = { version = "0.11", default-features = false, features = [
     "regex",
 ], optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
-notify = { version = "8.2", optional = true }
+notify = { version = "9.0", optional = true }
 etcetera = { version = "0.11", optional = true }
 blake3 = { version = "1.8", optional = true }
-postcard = { version = "1.1", default-features = false, features = ["alloc"], optional = true }
+postcard = { version = "1.2", default-features = false, features = ["alloc"], optional = true }
 
 # WASM dependencies
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
-clap_complete = "4.6.11"
+clap_complete = "4.6.12"
 
 # `.editorconfig` reading, opt-in per project via `editorconfig = true`. Needs a
 # real filesystem to walk for `.editorconfig` files, so it is absent from the
@@ -156,17 +156,17 @@ proptest = "1.12"
 # CodSpeed's criterion compatibility layer, imported as `criterion`: plain
 # `cargo bench` runs ordinary criterion, and `cargo codspeed` builds the same
 # benches with CodSpeed instrumentation (see `make bench-codspeed`).
-criterion = { package = "codspeed-criterion-compat", version = "6.0.0", features = ["html_reports"] }
+criterion = { package = "codspeed-criterion-compat", version = "6.1.0", features = ["html_reports"] }
 pretty_assertions = "1.4"
 quick-xml = "0.42"
 unicode-segmentation = "1.13"
 serial_test = "4.0"
-jsonschema = "0.61"
+jsonschema = "0.63"
 ureq = "3.5"
-url = "2"
+url = "2.5.9"
 # The reflow semantics oracle's third renderer, a port of cmark-gfm, which
 # GitHub renders with. `default-features` would add its CLI and syntect.
-comrak = { version = "0.59.0", default-features = false }
+comrak = { version = "1.2.0", default-features = false }
 
 # The CLI's global allocators. Optional and enabled by `native`, so a library
 # consumer built with `default-features = false` does not link an allocator it
