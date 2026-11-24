@@ -1662,7 +1662,7 @@ find . -name "*.md" -o -name "*.markdown" | head -10
 
 ```yaml
 - repo: https://github.com/rvben/rumdl-pre-commit
-  rev: v0.3.5
+  rev: v0.3.6
   hooks:
     - id: rumdl
       args: [--config=.rumdl.toml]

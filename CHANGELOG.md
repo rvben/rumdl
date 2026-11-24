@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6](https://github.com/rvben/rumdl/compare/v0.3.5...v0.3.6) - 2026-11-24
+
+### Added
+
+- **MD034**: add opt-in CJK punctuation handling ([df36147](https://github.com/rvben/rumdl/commit/df361471876d8b68caae20caba57e1a7c376fb31))
+- **MD057**: check inline links inside HTML comments behind html-comments ([074bb03](https://github.com/rvben/rumdl/commit/074bb03cedbe7e37554bee3a4edc66813b198db5))
+
+### Fixed
+
+- **MD034**: preserve protected URLs with CJK punctuation ([4559341](https://github.com/rvben/rumdl/commit/4559341cb516455e89226fc069fefbddd78188e4))
+- **MD061**: pick the longest term with valid boundaries ([b6c662e](https://github.com/rvben/rumdl/commit/b6c662e2565c54e00222501c548360d83c422a5d))
+- **MD061**: report a term that extends an earlier listed term ([ee42482](https://github.com/rvben/rumdl/commit/ee424821eb1b508e0d197fc5bab0656908908a39))
+- **schema**: type MD072 custom key order ([9127bf1](https://github.com/rvben/rumdl/commit/9127bf11bcdb842355688b2433ef6517011bd268))
+- **schema**: support both kebab case and snake case for MD072 options ([8713325](https://github.com/rvben/rumdl/commit/8713325c5528980342b20d517fe2a6b08b6002f6))
+- **tables**: read a delimiter row inside a code span as code ([0c0a233](https://github.com/rvben/rumdl/commit/0c0a2339ce88d47f3bfece089104d5fe76126c5f))
+- **MD077**: keep the fix from turning paragraph text into a block ([d97c8e0](https://github.com/rvben/rumdl/commit/d97c8e0ae6df00dfede4e2dd73bcfab3d15ea1c6))
+- **tables**: detect a table whose header row opens with a code span ([6c441a5](https://github.com/rvben/rumdl/commit/6c441a525d2546e4fd4ac301b8556800915845b1))
+- **tables**: keep the list context across a lazy continuation line ([61c894e](https://github.com/rvben/rumdl/commit/61c894ed358b3790cf4d36261569a4177702e938))
+- **MD077**: align a continuation line that opens with a code span ([94766cc](https://github.com/rvben/rumdl/commit/94766cc81eeedd350335314a8eec459ca962d880))
+
+### Performance
+
+- **lsp**: convert the ranges of a quick fix in one pass ([5fbdd19](https://github.com/rvben/rumdl/commit/5fbdd190b77aa57767b74dbbf1ef87ec1000a8ce))
+- **tables**: scan a lazy line without walking every open list level ([cbeb9c0](https://github.com/rvben/rumdl/commit/cbeb9c06d31e58b579cbf84eaefa10c2ec620177))
+
 ## [0.3.5](https://github.com/rvben/rumdl/compare/v0.3.4...v0.3.5) - 2026-11-18
 
 ### Changed
