@@ -145,6 +145,9 @@ pub struct MD044ProperNames {
     combined_pattern: Option<String>,
     // Lowercase variants map to the first configured spelling that accepts them.
     name_variants: HashMap<String, usize>,
+    // Every configured spelling, verbatim. A match is correct as written when
+    // it equals any configured name, not only the canonical first one.
+    exact_names: HashSet<String>,
     /// Lowercased `ignore_frontmatter_fields`, for case-insensitive lookup.
     ignore_fields: HashSet<String>,
     // Memoizes name violations keyed by content hash. Deliberately behind an
@@ -182,6 +185,7 @@ impl MD044ProperNames {
     pub fn from_config_struct(config: MD044Config) -> Self {
         let combined_pattern = Self::create_combined_pattern(&config);
         let name_variants = Self::build_name_variants(&config);
+        let exact_names = config.names.iter().cloned().collect();
         let ignore_fields = config
             .ignore_frontmatter_fields
             .iter()
@@ -192,6 +196,7 @@ impl MD044ProperNames {
             config,
             combined_pattern,
             name_variants,
+            exact_names,
             ignore_fields,
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -523,8 +528,10 @@ impl MD044ProperNames {
 
                 // Find which proper name this matches
                 if let Some(&proper_name_index) = self.name_variants.get(&found_name.to_lowercase()) {
-                    // Only flag if it's not already correct
-                    if found_name != self.config.names[proper_name_index] {
+                    // Only flag if it's not already correct: the match is
+                    // valid as written when it equals any configured
+                    // spelling, not just the canonical first one.
+                    if found_name != self.config.names[proper_name_index] && !self.exact_names.contains(found_name) {
                         violations.push((line_num, cap.start() + 1, found_name.to_string(), proper_name_index));
                     }
                 }
@@ -1692,6 +1699,25 @@ javascript in code block
         assert_eq!(result.len(), 3, "Should flag all incorrect case variations");
         // JavaScript (correct) should not be flagged
         assert!(result.iter().all(|w| w.message.contains("should be 'JavaScript'")));
+    }
+
+    #[test]
+    fn test_multiple_configured_casings_of_same_name_accepted() {
+        // https://github.com/rvben/rumdl/issues/1021
+        let rule = MD044ProperNames::new(vec!["Github".to_string(), "GitHub".to_string()], true);
+
+        let content = "Both Github and GitHub are configured spellings.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Every configured spelling should be accepted, got: {result:?}"
+        );
+
+        let ctx = create_context("The github spelling is not configured.");
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "An unconfigured casing still flags");
+        assert_eq!(result[0].message, "Proper name 'github' should be 'Github'");
     }
 
     #[test]
