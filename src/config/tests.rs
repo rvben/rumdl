@@ -2266,6 +2266,24 @@ fn test_schema_accepts_every_rule_default() {
 }
 
 #[test]
+fn test_schema_types_md072_order_in_both_spellings() {
+    use serde_json::json;
+
+    let schema = super::schema_gen::config_schema_json();
+    let options = &schema["$defs"]["MD072"]["properties"];
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    assert!(validator.is_valid(&json!({ "MD072": {} })));
+    for key in ["key-order", "key_order"] {
+        assert_eq!(options[key]["type"], "array");
+        assert_eq!(options[key]["items"]["type"], "string");
+        assert!(options[key].get("default").is_none());
+        assert!(validator.is_valid(&json!({ "MD072": { (key): ["title"] } })));
+        assert!(!validator.is_valid(&json!({ "MD072": { (key): false } })));
+        assert!(!validator.is_valid(&json!({ "MD072": { (key): [42] } })));
+    }
+}
+
+#[test]
 fn test_schema_describes_the_options_it_derives() {
     let schema = super::schema_gen::config_schema_json();
     let options = &schema["$defs"]["MD013"]["properties"];

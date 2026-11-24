@@ -177,9 +177,8 @@ pub fn is_polymorphic_sentinel(value: &toml::Value) -> bool {
 
 /// Returns true if the TOML value is any sentinel placeholder.
 ///
-/// A sentinel means "no single TOML type describes this key", which is also the answer to
-/// "may the derived schema type this key": it may not, because a derived schema would
-/// describe one variant and reject the others.
+/// The loader skips type checking for these placeholders. A nullable key can
+/// still declare a concrete schema for its value when present.
 pub fn is_sentinel(value: &toml::Value) -> bool {
     is_nullable_sentinel(value) || is_polymorphic_sentinel(value)
 }

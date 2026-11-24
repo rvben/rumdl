@@ -26,6 +26,7 @@ pub struct MD072Config {
     ///
     /// Example: `key_order = ["title", "date", "author", "tags"]`
     #[serde(default, alias = "key_order")]
+    #[schemars(with = "Vec<String>")]
     pub key_order: Option<Vec<String>>,
 
     /// Keys that must be present in the frontmatter. Each missing key is

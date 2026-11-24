@@ -4292,10 +4292,18 @@
           "description": "Enables or disables this rule."
         },
         "key-order": {
-          "description": "Custom key order. Keys listed here will be sorted in this order.\nKeys not in this list will be sorted alphabetically after the specified keys.\nIf not set, all keys are sorted alphabetically (case-insensitive).\n\nExample: `key_order = [\"title\", \"date\", \"author\", \"tags\"]`"
+          "description": "Custom key order. Keys listed here will be sorted in this order.\nKeys not in this list will be sorted alphabetically after the specified keys.\nIf not set, all keys are sorted alphabetically (case-insensitive).\n\nExample: `key_order = [\"title\", \"date\", \"author\", \"tags\"]`",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "key_order": {
-          "description": "Custom key order. Keys listed here will be sorted in this order.\nKeys not in this list will be sorted alphabetically after the specified keys.\nIf not set, all keys are sorted alphabetically (case-insensitive).\n\nExample: `key_order = [\"title\", \"date\", \"author\", \"tags\"]`"
+          "description": "Custom key order. Keys listed here will be sorted in this order.\nKeys not in this list will be sorted alphabetically after the specified keys.\nIf not set, all keys are sorted alphabetically (case-insensitive).\n\nExample: `key_order = [\"title\", \"date\", \"author\", \"tags\"]`",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "required-keys": {
           "description": "Keys that must be present in the frontmatter. Each missing key is\nreported, matched case-insensitively against top-level keys (like\n`key_order`). Independent of `key_order`: you can order many keys while\nrequiring only a few. These warnings carry no fix because rumdl cannot\ninvent meaningful values for missing keys.\n\nOnly applies to files that have frontmatter; requiring frontmatter to\nexist at all is out of scope for this rule.\n\nExample: `required_keys = [\"title\", \"date\"]`",

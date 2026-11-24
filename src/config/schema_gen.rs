@@ -28,10 +28,9 @@
 //!   the loader accepts and `schemars` does not report aliases, so a published
 //!   list would reject input rumdl takes. The spellings move into the
 //!   description, where an editor still shows them.
-//! * Options the registry deliberately leaves untyped (its nullable and
-//!   polymorphic sentinels) keep an empty schema but keep their description: a
-//!   description constrains nothing, and these are the options — `preferred-style`,
-//!   `lines-above` — that need explaining most.
+//! * Polymorphic options and nullable options without a concrete TOML schema
+//!   keep their descriptions without a type constraint. A nullable field can
+//!   declare a concrete schema for its value when present.
 //! * MD073 is the one rule without a config struct: it builds its section by
 //!   hand, so its options stay typed from the rule's defaults and stay
 //!   undescribed. `test_schema_describes_the_options_it_derives` names it as the
@@ -78,7 +77,7 @@ use serde_json::{Map, Value, json};
 
 use super::registry::{RULE_ALIAS_MAP, default_registry};
 use super::types::Config;
-use crate::rule_config_serde::is_sentinel;
+use crate::rule_config_serde::{is_nullable_sentinel, is_sentinel};
 
 /// Build the JSON Schema document for `rumdl.toml` / `.rumdl.toml`.
 pub fn config_schema_json() -> Value {
@@ -187,8 +186,8 @@ fn rule_section_definitions() -> BTreeMap<String, Value> {
 /// `schemars` (see [`Rule::config_json_schema`](crate::rule::Rule::config_json_schema)).
 /// Where it has an entry for a key, that entry is used: it carries the doc comment
 /// of the field and the variants of any enum behind it, which a value read off a
-/// serialized default cannot express. It never overrides a sentinel key, so the
-/// loader's "recognized but untyped" keys stay untyped in the schema too.
+/// serialized default cannot express. Nullable fields can declare a concrete
+/// type for values present in TOML. Polymorphic fields remain untyped.
 fn rule_section_definition(
     options: &toml::map::Map<String, toml::Value>,
     derived: Option<&Value>,
@@ -205,12 +204,11 @@ fn rule_section_definition(
     let typed_option = |key: &str, value: &toml::Value| -> Value {
         let derived = derived_properties.and_then(|properties| properties.get(key));
 
-        if is_sentinel(value) {
-            // The registry skips its own type check for this key because no single
-            // TOML type describes it. A derived schema would describe the one variant
-            // the field's `Deserialize` happens to name first and then reject the
-            // other, so the key keeps an empty schema — but a description constrains
-            // nothing, and these are the options that most need explaining.
+        let has_concrete_type = derived
+            .and_then(|schema| schema.get("type"))
+            .is_some_and(Value::is_string);
+        let typed_nullable = is_nullable_sentinel(value) && has_concrete_type;
+        if is_sentinel(value) && !typed_nullable {
             return match derived.and_then(|derived| derived.get("description")) {
                 Some(description) => json!({ "description": description.clone() }),
                 None => json!({}),
@@ -220,6 +218,12 @@ fn rule_section_definition(
         match derived {
             Some(derived) => {
                 let mut schema = derived.clone();
+                if typed_nullable && schema.get("default").is_some_and(Value::is_null) {
+                    schema
+                        .as_object_mut()
+                        .expect("option schema is an object")
+                        .remove("default");
+                }
                 relax_value_enums(&mut schema);
                 schema
             }
