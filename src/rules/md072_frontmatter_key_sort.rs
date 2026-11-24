@@ -14,6 +14,7 @@ static JSON_KEY_PATTERN: LazyLock<Regex> =
 /// This rule is disabled by default (opt-in) because key sorting
 /// is an opinionated style choice. Many projects prefer semantic ordering.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
 pub struct MD072Config {
     /// Whether this rule is enabled (default: false - opt-in rule)
     #[serde(default)]
@@ -24,7 +25,7 @@ pub struct MD072Config {
     /// If not set, all keys are sorted alphabetically (case-insensitive).
     ///
     /// Example: `key_order = ["title", "date", "author", "tags"]`
-    #[serde(default, alias = "key-order")]
+    #[serde(default, alias = "key_order")]
     pub key_order: Option<Vec<String>>,
 
     /// Keys that must be present in the frontmatter. Each missing key is
@@ -37,7 +38,7 @@ pub struct MD072Config {
     /// exist at all is out of scope for this rule.
     ///
     /// Example: `required_keys = ["title", "date"]`
-    #[serde(default, alias = "required-keys")]
+    #[serde(default, alias = "required_keys")]
     pub required_keys: Vec<String>,
 }
 
