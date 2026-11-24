@@ -1,5 +1,5 @@
 use crate::filtered_lines::FilteredLinesExt;
-use regex::{Regex, RegexBuilder};
+use regex::{Match, Regex, RegexBuilder};
 
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::byte_to_char_count;
@@ -33,12 +33,10 @@ impl MD061ForbiddenTerms {
             return None;
         }
 
-        // Build alternation pattern from terms, escaping regex metacharacters
-        let mut escaped_terms: Vec<String> = config.terms.iter().map(|term| regex::escape(term)).collect();
-        // Longest first, so a term that is a prefix of a later one (FIX before FIXME)
-        // does not match first and hide the longer term
-        escaped_terms.sort_by_key(|term| std::cmp::Reverse(term.len()));
-        let pattern_str = escaped_terms.join("|");
+        // Simple case folding can change the UTF-8 width of a character.
+        let mut terms: Vec<&str> = config.terms.iter().map(String::as_str).collect();
+        terms.sort_by_cached_key(|term| std::cmp::Reverse(term.chars().count()));
+        let pattern_str = terms.into_iter().map(regex::escape).collect::<Vec<_>>().join("|");
 
         RegexBuilder::new(&pattern_str)
             .case_insensitive(!config.case_sensitive)
@@ -46,27 +44,25 @@ impl MD061ForbiddenTerms {
             .ok()
     }
 
-    /// Check if match is at a word boundary
-    fn is_word_boundary(content: &str, start: usize, end: usize) -> bool {
-        let before_ok = if start == 0 {
-            true
-        } else {
-            content[..start]
-                .chars()
-                .last()
-                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
-        };
+    fn is_word_char(c: char) -> bool {
+        c.is_alphanumeric() || c == '_'
+    }
 
-        let after_ok = if end >= content.len() {
-            true
-        } else {
-            content[end..]
-                .chars()
-                .next()
-                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
-        };
-
-        before_ok && after_ok
+    fn with_right_boundary<'a>(pattern: &Regex, content: &'a str, mut term: Match<'a>) -> Option<Match<'a>> {
+        while content[term.end()..].chars().next().is_some_and(Self::is_word_char) {
+            // A shorter term can end immediately before punctuation inside
+            // this one. Search the same start with that boundary as the limit.
+            let (offset, _) = term
+                .as_str()
+                .char_indices()
+                .rev()
+                .find(|&(_, c)| !Self::is_word_char(c))?;
+            let start = term.start();
+            term = pattern
+                .find_at(&content[..start + offset], start)
+                .filter(|m| m.start() == start)?;
+        }
+        Some(term)
     }
 }
 
@@ -103,15 +99,34 @@ impl Rule for MD061ForbiddenTerms {
         {
             let content = line.content;
 
-            // Find all matches in this line
-            for mat in pattern.find_iter(content) {
-                // Skip if inside inline code (col is a 1-indexed character column)
-                if ctx.is_in_code_span(line.line_num, byte_to_char_count(content, mat.start())) {
+            let mut pos = Some(0);
+            let mut previous_match_end = None;
+            while let Some(at) = pos
+                && let Some(candidate) = pattern.find_at(content, at)
+            {
+                let start = candidate.start();
+                if content[..start].chars().next_back().is_some_and(Self::is_word_char) {
+                    pos = content[start..]
+                        .char_indices()
+                        .find(|&(_, c)| !Self::is_word_char(c))
+                        .map(|(offset, c)| start + offset + c.len_utf8());
                     continue;
                 }
+                pos = content[start..].chars().next().map(|c| start + c.len_utf8());
+                let Some(term) = Self::with_right_boundary(pattern, content, candidate) else {
+                    continue;
+                };
+                let end = term.end();
+                if start < end {
+                    pos = Some(end);
+                } else if previous_match_end == Some(end) {
+                    continue;
+                }
+                previous_match_end = Some(end);
 
-                // Check word boundaries
-                if !Self::is_word_boundary(content, mat.start(), mat.end()) {
+                // Skip if inside inline code (col is a 1-indexed character column)
+                let column = byte_to_char_count(content, start);
+                if ctx.is_in_code_span(line.line_num, column) {
                     continue;
                 }
 
@@ -119,16 +134,16 @@ impl Rule for MD061ForbiddenTerms {
                 // exactly these bytes, and under case-insensitive matching the text can
                 // differ from the configured spelling, so any case-folded form would
                 // name something that appears in neither the document nor the config.
-                let matched_term = &content[mat.start()..mat.end()];
+                let matched_term = term.as_str();
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     severity: Severity::Warning,
                     message: format!("Found forbidden term '{matched_term}'"),
                     line: line.line_num,
-                    column: byte_to_char_count(content, mat.start()),
+                    column,
                     end_line: line.line_num,
-                    end_column: byte_to_char_count(content, mat.end()),
+                    end_column: byte_to_char_count(content, end),
                     fix: None, // No auto-fix for warning comments
                 });
             }
@@ -315,6 +330,41 @@ mod tests {
         assert_eq!(result[0].line, 1);
         assert!(result[1].message.contains("'blacklist'"));
         assert_eq!(result[1].line, 2);
+    }
+
+    #[test]
+    fn test_shorter_term_can_supply_the_right_boundary() {
+        for terms in [["foo", "foo-bar", "foo-barx-baz"], ["foo-barx-baz", "foo-bar", "foo"]] {
+            let rule = MD061ForbiddenTerms::new(terms.map(String::from).to_vec(), true);
+            let ctx = LintContext::new("foo-barx-bazx\n", MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].message, "Found forbidden term 'foo'");
+            assert_eq!((result[0].column, result[0].end_column), (1, 4));
+        }
+    }
+
+    #[test]
+    fn test_case_folded_prefix_uses_character_length() {
+        for terms in [["kg", "\u{212A}"], ["\u{212A}", "kg"]] {
+            let rule = MD061ForbiddenTerms::new(terms.map(String::from).to_vec(), false);
+            let ctx = LintContext::new("kg K kg\n", MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(result.len(), 3);
+            assert_eq!(result[0].message, "Found forbidden term 'kg'");
+            assert_eq!(result[1].message, "Found forbidden term 'K'");
+            assert_eq!(result[2].message, "Found forbidden term 'kg'");
+        }
+    }
+
+    #[test]
+    fn test_boundaries_preserve_adjacent_terms_and_later_starts() {
+        let rule = MD061ForbiddenTerms::new(["foo-bar", "bar", "next"].map(String::from).to_vec(), true);
+        let ctx = LintContext::new("xfoo-bar next\n", MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].message, "Found forbidden term 'bar'");
+        assert_eq!(result[1].message, "Found forbidden term 'next'");
     }
 
     #[test]
