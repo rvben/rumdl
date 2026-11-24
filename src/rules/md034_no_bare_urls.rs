@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::regex_cache::{EMAIL_PATTERN, URL_IPV6_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, XMPP_URI_REGEX};
+use crate::utils::regex_cache::{
+    EMAIL_PATTERN, URL_IPV6_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, URL_WWW_STR, XMPP_URI_REGEX,
+};
 
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
@@ -101,12 +103,13 @@ fn cjk_marks(line: &str) -> Vec<CjkMark> {
 ///
 /// The first search finds the start, cut off after the next `）` or terminator.
 /// If a `（` inside the URL keeps that `）` from cutting, a second search from the
-/// start is cut off after the URL's own cut. Both read no further than the cut
-/// plus one character, so a line is scanned in linear time.
+/// start is cut off after the URL's own cut. For an exempt scheme, the
+/// caller bounds the search at the next distinct URI or the line end.
 fn cut_url_matches<'a>(
     regex: &'a Regex,
     line: &'a str,
     marks: &'a [CjkMark],
+    mut uncut_limit: impl FnMut(usize) -> Option<usize> + 'a,
 ) -> impl Iterator<Item = (usize, usize)> + 'a {
     let mut mark = 0; // the first mark at or after the last position looked up
     let mut pos = 0;
@@ -130,6 +133,14 @@ fn cut_url_matches<'a>(
                 continue;
             };
             let start = mat.start();
+            if let Some(limit) = uncut_limit(start) {
+                let Some(whole) = regex.find_at(&line[..limit], start).filter(|m| m.start() == start) else {
+                    pos = limit;
+                    continue;
+                };
+                pos = whole.end();
+                return Some((start, pos));
+            }
             let cut = marks.get(first_mark_from(start)).map_or(marks.len(), |m| m.cut);
             let cut_end = end_of(cut);
             let match_end = if cut_end == search_end {
@@ -179,9 +190,18 @@ fn url_matches<'a>(
     line: &'a str,
     marks: Option<&'a [CjkMark]>,
 ) -> impl Iterator<Item = (usize, usize)> + 'a {
+    url_matches_with_cut_policy(regex, line, marks, |_| None)
+}
+
+fn url_matches_with_cut_policy<'a>(
+    regex: &'a Regex,
+    line: &'a str,
+    marks: Option<&'a [CjkMark]>,
+    uncut_limit: impl FnMut(usize) -> Option<usize> + 'a,
+) -> impl Iterator<Item = (usize, usize)> + 'a {
     match marks {
         None => UrlMatches::Whole(regex.find_iter(line).map(|mat| (mat.start(), mat.end()))),
-        Some(marks) => UrlMatches::Cut(cut_url_matches(regex, line, marks)),
+        Some(marks) => UrlMatches::Cut(cut_url_matches(regex, line, marks, uncut_limit)),
     }
 }
 
@@ -399,6 +419,7 @@ static ANGLE_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+static ANGLE_WWW_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!("<{URL_WWW_STR}>")).unwrap());
 static BADGE_LINK_LINE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#).unwrap());
 static MARKDOWN_IMAGE_REGEX: LazyLock<Regex> =
@@ -758,9 +779,34 @@ impl MD034NoBareUrls {
         let marks = marks.as_deref();
 
         if has_at && line.contains("://") {
-            // Cut like the URL patterns, so under `cjk-punctuation` an address
-            // after `、` is reported and one in a URI after the cut is still covered.
-            for (start, end) in url_matches(&SCHEMED_URI_REGEX, line, marks) {
+            // Keep protecting address-like components of schemes outside MD034.
+            // A hard separator followed by another scheme starts a new URI.
+            let mut scheme_breaks = marks
+                .into_iter()
+                .flatten()
+                .filter_map(|mark| {
+                    let next = &line[mark.pos + mark.c.len_utf8()..];
+                    if !is_cjk_url_terminator(mark.c) || !next.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) {
+                        return None;
+                    }
+                    let scheme_end = next.bytes().position(|b| !is_scheme_byte(b))?;
+                    next[scheme_end..].starts_with("://").then_some(mark.pos)
+                })
+                .peekable();
+            let uri_matches = url_matches_with_cut_policy(&SCHEMED_URI_REGEX, line, marks, |start| {
+                let uri = &line[start..];
+                if ["http://", "https://", "ftp://", "ftps://"]
+                    .iter()
+                    .any(|prefix| uri.starts_with(prefix))
+                {
+                    return None;
+                }
+                while scheme_breaks.peek().is_some_and(|&position| position < start) {
+                    scheme_breaks.next();
+                }
+                Some(scheme_breaks.peek().copied().unwrap_or(line.len()))
+            });
+            for (start, end) in uri_matches {
                 // Do not accept the alphabetic suffix of an invalid scheme
                 // starting with a digit, such as `3ssh://`.
                 if start > 0 && is_scheme_byte(line.as_bytes()[start - 1]) {
@@ -808,6 +854,11 @@ impl MD034NoBareUrls {
         if has_angle {
             for mat in ANGLE_LINK_REGEX.find_iter(line) {
                 buffers.markdown_link_ranges.push((mat.start(), mat.end()));
+            }
+            if marks.is_some_and(|marks| !marks.is_empty()) && has_www {
+                for mat in ANGLE_WWW_LINK_REGEX.find_iter(line) {
+                    buffers.markdown_link_ranges.push((mat.start(), mat.end()));
+                }
             }
         }
 
@@ -1264,12 +1315,13 @@ fn is_scheme_without_host(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MarkdownFlavor;
 
     /// The option reaches the rule through the config in both spellings and is
     /// off by default.
     #[test]
     fn test_cjk_punctuation_option_from_config() {
-        use crate::config::{Config, MarkdownFlavor, RuleConfig};
+        use crate::config::{Config, RuleConfig};
 
         let content = "https://example.com/a、b\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -1286,6 +1338,39 @@ mod tests {
             );
             assert_eq!(fixed_by(&config), "<https://example.com/a>、b\n", "{key}");
         }
+    }
+
+    #[test]
+    fn test_cjk_punctuation_preserves_bracketed_www_urls() {
+        let rule = MD034NoBareUrls::with_cjk_punctuation(true);
+        let content = "<www.example.com/path、rest> www.example.com/path、rest\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].column, 29);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "<www.example.com/path、rest> <https://www.example.com/path>、rest\n"
+        );
+    }
+
+    #[test]
+    fn test_cjk_punctuation_preserves_addresses_in_other_uri_schemes() {
+        let rule = MD034NoBareUrls::with_cjk_punctuation(true);
+        let content = "https://example.com/path、ssh://example.org/日本、private@example.org\n\
+                       https://example.com/path、public@example.org\n\
+                       ssh://example.org/日本、https://example.com/path、public@example.org\n\
+                       ssh://、https://example.com/path、public@example.org\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 7);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "<https://example.com/path>、ssh://example.org/日本、private@example.org\n\
+             <https://example.com/path>、<public@example.org>\n\
+             ssh://example.org/日本、<https://example.com/path>、<public@example.org>\n\
+             ssh://、<https://example.com/path>、<public@example.org>\n"
+        );
     }
 
     /// The format proof models the default scan only, so the option opts out of it.

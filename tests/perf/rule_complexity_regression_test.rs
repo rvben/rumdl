@@ -2949,6 +2949,12 @@ fn test_md034_long_line_linear_complexity() {
         // search must stop at the next cut instead of reading to the line end.
         ("full-width comma", "https://example.com/a、", 1, true),
         ("www and full-width comma", "www.example.com/a、", 1, true),
+        (
+            "separate URI schemes",
+            "ssh://example.org/日本、https://example.com/a、hello@example.com、",
+            2,
+            true,
+        ),
         // A `（` before a URL does not keep the `）` after it from cutting, so
         // the cut must be found from the URL, not from the search position.
         ("full-width paren pair", "（https://example.com/a）", 1, true),
