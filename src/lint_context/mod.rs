@@ -22,6 +22,7 @@ pub(crate) use line_facts::LineContextMask;
 mod comment_links;
 mod link_destinations;
 mod link_parser;
+pub(crate) use link_parser::fold_label as fold_reference_label;
 mod list_blocks;
 mod mdx;
 mod native_structure;
@@ -417,6 +418,7 @@ pub struct LintContext<'a> {
     reference_defs_map: OnceLock<HashMap<String, usize>>, // Lowercase ID -> index in reference_defs of the definition links resolve to
     definition_candidates: Vec<link_parser::DefinitionCandidate>, // Definitions links may resolve to, in source order
     body_definitions: OnceLock<Vec<usize>>, // Indices into definition_candidates of the body definitions, first per label
+    mkdocs_body_columns: Vec<usize>,
     inline_code_ranges: Vec<(usize, usize)>,
     code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>,
     source_code_spans: OnceLock<Vec<SourceCodeSpan>>, // Lazy-loaded inline code spans
@@ -1963,6 +1965,11 @@ impl<'a> LintContext<'a> {
                 reference_defs_map: OnceLock::new(),
                 definition_candidates,
                 body_definitions: OnceLock::new(),
+                mkdocs_body_columns: if flavor == MarkdownFlavor::MkDocs {
+                    containers.into_mkdocs_body_columns()
+                } else {
+                    Vec::new()
+                },
                 inline_code_ranges,
                 code_spans_cache: OnceLock::new(),
                 source_code_spans: OnceLock::new(),

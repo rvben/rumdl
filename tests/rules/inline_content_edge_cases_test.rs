@@ -583,10 +583,12 @@ Also ![image1][img1] and ![image2][img2]
 
 Undefined: [missing][undefined]
 
-Empty definition should work: [empty][empty-ref]
-[empty-ref]:
+An empty destination: [empty][empty-ref]
+
+[empty-ref]: <>
 
 Duplicate definitions:
+
 [dup]: first.com
 [dup]: second.com
 [dup]: third.com
@@ -595,10 +597,8 @@ Using [dup][dup] should work";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    // PRODUCTION REQUIREMENT: MD052 MUST detect ONLY truly undefined references
-    // Empty definitions are valid, duplicate definitions use the first one
-    assert_eq!(result.len(), 1, "Should detect exactly 1 undefined reference");
-    assert!(result[0].message.contains("undefined"));
+    let messages: Vec<_> = result.iter().map(|warning| warning.message.as_str()).collect();
+    assert_eq!(messages, ["Reference 'undefined' not found"]);
 }
 
 #[test]

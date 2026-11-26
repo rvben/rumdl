@@ -1,4 +1,4 @@
-use crate::lint_context::HeadingContainer;
+use crate::lint_context::{HeadingContainer, fold_reference_label};
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::calculate_match_range;
@@ -6,22 +6,21 @@ use crate::utils::regex_cache::SHORTCUT_REF_REGEX;
 use crate::utils::skip_context::is_in_math_context;
 use pulldown_cmark::LinkType;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 mod md052_config;
 use md052_config::MD052Config;
 
-// Pattern to match reference definitions [ref]: url
-// Note: \S* instead of \S+ to allow empty definitions like [ref]:
-// The capturing group handles nested brackets to support cases like [`union[t, none]`]:
-static REF_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[((?:[^\[\]\\]|\\.|\[[^\]]*\])*)\]:\s*.*").unwrap());
-
 // Only the checkbox itself is task-list syntax; references elsewhere in the item still count.
 static TASK_MARKER_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(?:(?:>\s*)|(?:[-*+]|[0-9]{1,9}[.)])\s+)*(?:[-*+]|[0-9]{1,9}[.)])\s+(\[[xX ]\])(?:\s|$)").unwrap()
 });
+
+// Repository-qualified issue references can look like paths in bare brackets.
+static REPOSITORY_ISSUE_LABEL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+#[0-9]+$").unwrap());
 
 // Heading titles that open an example section
 const OUTPUT_EXAMPLE_TITLES: [&str; 4] = ["Output", "Example", "Output Style", "Output Format"];
@@ -100,13 +99,12 @@ impl MD052ReferenceLinkImages {
 
     /// Check if text matches a known non-reference pattern that should be skipped.
     ///
-    /// These are deterministic patterns from markdown extensions or code examples,
-    /// not heuristics. Returns true for:
+    /// This accounts for Markdown extensions and common examples of literal brackets:
     /// - User-configured names via `ignore` config option
     /// - Markdown extensions: `[^footnote]`, `[@citation]`, `[!alert]`, `[TOC]`
     /// - Programming syntax: `[T]`, `[null]`, `[i32]`, `["string"]`
     /// - Descriptive text: `[default: value]`, `[0-9]`
-    fn is_known_non_reference_pattern(&self, text: &str) -> bool {
+    fn is_known_non_reference_pattern(&self, text: &str, shortcut: bool) -> bool {
         // Check user-configured ignore list first (case-insensitive match)
         // Reference IDs are normalized to lowercase during parsing,
         // so we use case-insensitive comparison for user convenience
@@ -123,17 +121,13 @@ impl MD052ReferenceLinkImages {
             return true;
         }
 
-        // Skip patterns that look like config sections [tool.something], [section.subsection]
-        // But not if they contain other non-alphanumeric chars like hyphens, underscores, or backticks
-        // Backticks indicate intentional code formatting in a reference name (e.g., [`module.Class`])
-        if text.contains('.')
-            && !text.contains(' ')
-            && !text.contains('-')
-            && !text.contains('_')
-            && !text.contains('`')
-        {
-            // Config sections typically have dots, no spaces, and only alphanumeric + dots
-            return true;
+        // Bare brackets can be literal config sections or paths.
+        if shortcut && !text.contains(' ') {
+            let dotted_name = text.contains('.') && !text.contains(['-', '_', '`']);
+            let path = text.contains('/') && !text.starts_with("http");
+            if (dotted_name || path) && !REPOSITORY_ISSUE_LABEL.is_match(text) {
+                return true;
+            }
         }
 
         // Skip glob/wildcard patterns like [*], [...], [**]
@@ -141,30 +135,10 @@ impl MD052ReferenceLinkImages {
             return true;
         }
 
-        // Skip patterns that look like file paths [dir/file], [src/utils]
-        if text.contains('/') && !text.contains(' ') && !text.starts_with("http") {
-            return true;
-        }
-
         // Skip programming type annotations like [int, str], [Dict[str, Any]]
         // These typically have commas and/or nested brackets
         if text.contains(',') || text.contains('[') || text.contains(']') {
             // Check if it looks like a type annotation pattern
-            return true;
-        }
-
-        // Note: We don't filter out patterns with backticks because backticks in reference names
-        // are valid markdown syntax, e.g., [`dataclasses.InitVar`] is a valid reference name
-
-        // Skip patterns that look like module/class paths ONLY if they don't have backticks
-        // Backticks indicate intentional code formatting in a reference name
-        // e.g., skip [dataclasses.initvar] but allow [`typing.ClassVar`]
-        if !text.contains('`')
-            && text.contains('.')
-            && !text.contains(' ')
-            && !text.contains('-')
-            && !text.contains('_')
-        {
             return true;
         }
 
@@ -269,48 +243,6 @@ impl MD052ReferenceLinkImages {
         idx > 0 && byte_pos < html_tags[idx - 1].byte_end
     }
 
-    fn extract_references(&self, ctx: &crate::lint_context::LintContext) -> HashSet<String> {
-        use crate::utils::skip_context::is_mkdocs_snippet_line;
-
-        let mut references = HashSet::new();
-
-        for (line_num, line) in ctx.content.lines().enumerate() {
-            // Use LintContext's pre-computed code block info (1-indexed)
-            if let Some(line_info) = ctx.line_info(line_num + 1)
-                && line_info.in_code_block
-            {
-                continue;
-            }
-
-            // Skip lines that look like MkDocs snippet markers (only in MkDocs mode)
-            if is_mkdocs_snippet_line(line, ctx.flavor) {
-                continue;
-            }
-
-            // Check for abbreviation syntax (*[ABBR]: Definition) and skip it
-            // Abbreviations are not reference links and should not be tracked
-            if line.trim_start().starts_with("*[") {
-                continue;
-            }
-
-            if let Some(cap) = REF_REGEX.captures(line) {
-                // Store references in lowercase for case-insensitive comparison
-                if let Some(reference) = cap.get(1) {
-                    references.insert(reference.as_str().to_lowercase());
-                }
-            }
-        }
-
-        // Include definitions found by rumdl's shared parser, which recognizes
-        // blockquote-prefixed definitions (`> [id]: url`) that the line scan above
-        // does not. IDs are already lowercased.
-        for def in ctx.reference_definitions() {
-            references.insert(def.id.clone());
-        }
-
-        references
-    }
-
     /// Lines (1-indexed) inside an example section.
     ///
     /// A section starts at a top-level heading titled `Output`, `Example`,
@@ -343,12 +275,12 @@ impl MD052ReferenceLinkImages {
 
     fn find_undefined_references(
         &self,
-        references: &HashSet<String>,
+        references: &HashSet<Cow<'_, str>>,
         ctx: &crate::lint_context::LintContext,
         mkdocs_mode: bool,
     ) -> Vec<(usize, usize, usize, String)> {
         let mut undefined = Vec::new();
-        let mut reported_refs = HashMap::new();
+        let mut reported_refs = HashSet::new();
 
         let example_sections = Self::compute_example_sections(ctx);
 
@@ -371,13 +303,13 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip shortcut links if shortcut_syntax is disabled
-            if !self.config.shortcut_syntax && matches!(link.link_type, LinkType::Shortcut | LinkType::ShortcutUnknown)
-            {
+            let shortcut = matches!(link.link_type, LinkType::Shortcut | LinkType::ShortcutUnknown);
+            if !self.config.shortcut_syntax && shortcut {
                 continue;
             }
 
             // A task checkbox is not a shortcut reference, but links in its item are.
-            if matches!(link.link_type, LinkType::Shortcut | LinkType::ShortcutUnknown)
+            if shortcut
                 && ctx.line_info(link.line).is_some_and(|info| {
                     Self::is_task_marker(info.content(ctx.content), link.byte_offset - info.byte_offset)
                 })
@@ -433,15 +365,13 @@ impl MD052ReferenceLinkImages {
             }
 
             if let Some(ref_id) = &link.reference_id {
-                let reference_lower = ref_id.to_lowercase();
-
                 // Skip Pandoc implicit header references
                 if ctx.flavor.is_pandoc_compatible() && ctx.matches_implicit_header_reference(ref_id) {
                     continue;
                 }
 
                 // Skip known non-reference patterns (markdown extensions, code examples)
-                if self.is_known_non_reference_pattern(ref_id) {
+                if self.is_known_non_reference_pattern(ref_id, shortcut) {
                     continue;
                 }
 
@@ -459,8 +389,8 @@ impl MD052ReferenceLinkImages {
                     continue;
                 }
 
-                // Check if reference is defined
-                if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
+                let reference_key = fold_reference_label(ref_id);
+                if !references.contains(reference_key.as_str()) && !reported_refs.contains(&reference_key) {
                     if example_sections.contains(&link.line) {
                         continue;
                     }
@@ -481,9 +411,9 @@ impl MD052ReferenceLinkImages {
                         link.line - 1,
                         link.byte_offset - line_start,
                         match_len,
-                        original_case_label(&link.text, &reference_lower),
+                        original_case_label(&link.text, &ref_id.to_lowercase()),
                     ));
-                    reported_refs.insert(reference_lower, true);
+                    reported_refs.insert(reference_key);
                 }
             }
         }
@@ -495,8 +425,8 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip shortcut images if shortcut_syntax is disabled
-            if !self.config.shortcut_syntax && matches!(image.link_type, LinkType::Shortcut | LinkType::ShortcutUnknown)
-            {
+            let shortcut = matches!(image.link_type, LinkType::Shortcut | LinkType::ShortcutUnknown);
+            if !self.config.shortcut_syntax && shortcut {
                 continue;
             }
 
@@ -531,10 +461,8 @@ impl MD052ReferenceLinkImages {
             }
 
             if let Some(ref_id) = &image.reference_id {
-                let reference_lower = ref_id.to_lowercase();
-
                 // Skip known non-reference patterns (markdown extensions, code examples)
-                if self.is_known_non_reference_pattern(ref_id) {
+                if self.is_known_non_reference_pattern(ref_id, shortcut) {
                     continue;
                 }
 
@@ -552,8 +480,8 @@ impl MD052ReferenceLinkImages {
                     continue;
                 }
 
-                // Check if reference is defined
-                if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
+                let reference_key = fold_reference_label(ref_id);
+                if !references.contains(reference_key.as_str()) && !reported_refs.contains(&reference_key) {
                     if example_sections.contains(&image.line) {
                         continue;
                     }
@@ -574,9 +502,9 @@ impl MD052ReferenceLinkImages {
                         image.line - 1,
                         image.byte_offset - line_start,
                         match_len,
-                        original_case_label(&image.alt_text, &reference_lower),
+                        original_case_label(&image.alt_text, &ref_id.to_lowercase()),
                     ));
-                    reported_refs.insert(reference_lower, true);
+                    reported_refs.insert(reference_key);
                 }
             }
         }
@@ -696,10 +624,9 @@ impl MD052ReferenceLinkImages {
                         }
 
                         let reference = ref_match.as_str();
-                        let reference_lower = reference.to_lowercase();
 
                         // Skip known non-reference patterns (markdown extensions, code examples)
-                        if self.is_known_non_reference_pattern(reference) {
+                        if self.is_known_non_reference_pattern(reference, true) {
                             continue;
                         }
 
@@ -751,7 +678,8 @@ impl MD052ReferenceLinkImages {
                             continue;
                         }
 
-                        if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
+                        let reference_key = fold_reference_label(reference);
+                        if !references.contains(reference_key.as_str()) && !reported_refs.contains(&reference_key) {
                             let full_match = cap.get(0).unwrap();
                             let col = full_match.start();
                             let line_start_byte = ctx.line_offsets[line_num];
@@ -864,7 +792,7 @@ impl MD052ReferenceLinkImages {
 
                             let match_len = full_match.end() - full_match.start();
                             undefined.push((line_num, col, match_len, reference.to_string()));
-                            reported_refs.insert(reference_lower, true);
+                            reported_refs.insert(reference_key);
                         }
                     }
                 }
@@ -919,7 +847,10 @@ impl Rule for MD052ReferenceLinkImages {
         // Check if we're in MkDocs mode from the context
         let mkdocs_mode = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        let references = self.extract_references(ctx);
+        let mut references: HashSet<_> = ctx.body_reference_labels().map(Cow::Borrowed).collect();
+        if mkdocs_mode {
+            references.extend(ctx.mkdocs_reference_labels().map(Cow::Owned));
+        }
 
         // Use optimized detection method with cached link/image data
         let lines = ctx.raw_lines();
@@ -1327,6 +1258,154 @@ Multiple `[one]` and `[two]` in code ignored, but [three] is not.
     }
 
     #[test]
+    fn dotted_and_slashed_labels_are_checked_in_explicit_references() {
+        let rule = MD052ReferenceLinkImages::new();
+        let content =
+            "Full [text][a.b].\n\nCollapsed [owner/repo#3][].\n\nImage ![alt][icons/logo.svg].\n\nControl [text][a-b].";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let messages: Vec<_> = warnings.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            [
+                "Reference 'a.b' not found",
+                "Reference 'owner/repo#3' not found",
+                "Reference 'icons/logo.svg' not found",
+                "Reference 'a-b' not found",
+            ]
+        );
+
+        let content = format!(
+            "{content}\n\n[a.b]: /docs\n[owner/repo#3]: /issues/3\n[icons/logo.svg]: /logo.svg\n[a-b]: /control"
+        );
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn repo_issue_shortcuts_are_checked_when_enabled() {
+        let content = "See [owner/repo#1], [org/my.repo#2], [org/ignored#3], [src/utils], and [tool.rumdl].";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(MD052ReferenceLinkImages::new().check(&ctx).unwrap().is_empty());
+
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ignore: vec!["org/ignored#3".to_string()],
+        });
+        let warnings = rule.check(&ctx).unwrap();
+        let messages: Vec<_> = warnings.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            [
+                "Reference 'owner/repo#1' not found",
+                "Reference 'org/my.repo#2' not found"
+            ]
+        );
+
+        let content = format!("{content}\n\n[owner/repo#1]: /issues/1\n[org/my.repo#2]: /issues/2");
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_parsed_definitions_satisfy_references() {
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
+        for malformed in [
+            "[#7]:",
+            "Running paragraph\n[#7]: /the",
+            "[#7]: the writer sends a request with no field",
+            "[#7]: /the \"title\" junk",
+            "- Intro\n\n  [#7]: the writer sends a request with no field",
+        ] {
+            let content = format!("# Title\n\nSee [#7] here.\n\n{malformed}\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            let findings: Vec<_> = warnings
+                .iter()
+                .map(|warning| (warning.line, warning.message.as_str()))
+                .collect();
+            assert_eq!(findings, [(3, "Reference '#7' not found")], "{content}");
+        }
+
+        for definition in [
+            "[#7]: /the \"title\"",
+            "> [#7]:\n>   /the \"title\"",
+            "- [#7]: /the",
+            "[#7]: <>",
+        ] {
+            let content = format!("# Title\n\nSee [#7] here.\n\n{definition}\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content}");
+        }
+    }
+
+    #[test]
+    fn mkdocs_definitions_satisfy_references_after_prose_and_inside_admonitions() {
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
+        let after_prose = "See [the docs][x].\nIntro line\n[x]: /docs\n";
+        let standard = LintContext::new(after_prose, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&standard).unwrap()[0].message, "Reference 'x' not found");
+
+        for content in [
+            after_prose,
+            "See [the docs][x].\n\nIntro\n[x]: /docs\n---\n",
+            "See [the docs][x].\n\nIntro\n[x]: /docs\n===\n",
+            "See [the docs][x].\n\nIntro\n[x]:\n===\n",
+            "See [the docs][x].\n\nIntro\n[x]:\n/docs\n---\n",
+            "See [the docs][x].\n\nIntro\n[x]:\n/docs\n===\n",
+            "See [the docs][x].\n\n- Item\n\n    Intro\n    [x]:\n    /docs\n    ---\n",
+            "See [the docs][x].\n\n- Item\n  [x]:\n  /docs\n  ---\n",
+            "See [the docs][x].\n\nIntro\n[x]: /docs 'Bob's page'\n",
+            "See [the docs][x].\n\nIntro\n[x]: <angle>trailing\n",
+            "See [the docs][x].\n\nIntro\n[x]: /docs (My (nested) title)\n",
+            "See [the docs][x].\n\nIntro\n[x]: /docs\n| a | b |\n|---|---|\n",
+            "See [the docs][x].\n\n1. Item\n\n    [x]: /docs\n",
+            "See [the docs][x].\nIntro line\n[x]:\n    #anchor\n",
+            "!!! note\n    See [x].\n\n    [x]: /docs\n\nBody uses [y][x].\n",
+            "!!! note\n    See [x].\n\n    [x]:\n        /docs\n\nBody uses [y][x].\n",
+            "!!! note\r\n    See [x].\r\n\r\n    [x]: /docs \"Title\"   \r\n",
+            "See [the docs][x].\n\n!!! note\n    - Item\n\n        [x]: /docs\n",
+            "See [the docs][x].\n\n- Item\n\n    Intro\n    [x]: /docs\n",
+            "See [the docs][x].\n\n!!! note\n    - Item\n\n        Intro\n        [x]: /docs\n",
+            "See [the docs][x].\r\nIntro\r\n[x]:\r\n    /docs\r\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content}");
+        }
+    }
+
+    #[test]
+    fn mkdocs_reference_definitions_ignore_prose_and_literal_regions() {
+        let rule = MD052ReferenceLinkImages::new();
+        for content in [
+            "See [the docs][x].\nIntro line\n[x]: /docs trailing prose\n",
+            "See [the docs][x].\n\nIntro\n[x]: /docs 'Bob's page' trailing prose\n",
+            "See [the docs][x].\n\nIntro\n[x]: /docs (My title) trailing prose\n",
+            "See [the docs][x].\n\n[x]:\n===\n",
+            "See [the docs][x].\n\n<!--\n[x]: /docs\n-->\n",
+            "See [the docs][x].\n\n!!! note\n\n    ~~~markdown\n    [x]: /docs\n    ~~~\n",
+            "See [the docs][x].\n\n!!! note\n    Note body.\n\n        [x]: /docs\n",
+            "See [the docs][x].\n\n!!! note\n    Note body.\n        [x]: /docs\n",
+            "See [the docs][x].\n\n!!! note\n    - Item\n        [x]: /docs\n",
+            "See [the docs][x].\n\n- Item\n    Intro\n    [x]: /docs\n",
+            "See [the docs][x].\n\n!!! note\n    Intro\n    [x]:\n    ***\n",
+            "See [the docs][x].\nIntro line\n[x]:\n***\n",
+            "See [the docs][x].\nIntro line\n[x]:\n#anchor\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{content}");
+            assert_eq!(warnings[0].message, "Reference 'x' not found", "{content}");
+        }
+    }
+
+    #[test]
     fn test_numeric_and_short_reference_labels() {
         for label in ["x", "ab", "missing", "#44", "#4", "4", "44", "x4", "#a"] {
             for shortcut_syntax in [false, true] {
@@ -1522,19 +1601,6 @@ Want to fill out this form?
             0,
             "HTML attributes with square brackets should not be flagged as undefined references"
         );
-    }
-
-    #[test]
-    fn test_extract_references() {
-        let rule = MD052ReferenceLinkImages::new();
-        let content = "[ref1]: url1\n[Ref2]: url2\n[REF3]: url3";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let refs = rule.extract_references(&ctx);
-
-        assert_eq!(refs.len(), 3);
-        assert!(refs.contains("ref1"));
-        assert!(refs.contains("ref2"));
-        assert!(refs.contains("ref3"));
     }
 
     #[test]
@@ -2032,8 +2098,6 @@ See [other docs][MissingRef] for more.
 
     #[test]
     fn test_nested_code_fences_reference_extraction() {
-        // Verify that extract_references uses LintContext's pre-computed in_code_block
-        // so nested fences are handled correctly.
         // A 4-backtick fence wrapping a 3-backtick fence should treat the inner
         // ``` as content, not a code block boundary.
         let rule = MD052ReferenceLinkImages::new();

@@ -123,6 +123,15 @@ static REF_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 static REF_DEF_LABEL_ONLY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[((?:[^\]\\]|\\.)+)\]:[ \t]*$").unwrap());
 
+// Python-Markdown accepts a non-whitespace destination and matches the closing
+// title delimiter at the end of the line, allowing that delimiter inside the title.
+static MKDOCS_REF_DEF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"^\[([^\[\]\r\n]+)\]:[ \t]*(?:\r?\n[ \t]*)?\S+(?:[ \t]*(?:"[^\r\n]*"|'[^\r\n]*'|\([^\r\n]*\)))?[ \t]*$"#,
+    )
+    .unwrap()
+});
+
 // CommonMark §4.7 allows a reference definition's title to appear on the line
 // immediately after the destination. This matches a line that is *only* such a
 // title (double-quoted, single-quoted, or parenthesised), with the same escape
@@ -627,8 +636,19 @@ pub(crate) fn reference_label_start(source: &str) -> Option<usize> {
     open
 }
 
-pub(super) fn fold_label(label: &str) -> String {
+pub(crate) fn fold_label(label: &str) -> String {
     unicase::UniCase::new(collapse_label(label)).to_folded_case()
+}
+
+/// A definition's label in a MkDocs paragraph or container body.
+pub(super) fn mkdocs_reference_label<'a>(line: &'a str, with_continuation: Option<&'a str>) -> Option<&'a str> {
+    let line = line.trim_end_matches([' ', '\t', '\r']);
+    let captures = MKDOCS_REF_DEF.captures(line).or_else(|| {
+        let text = with_continuation?.trim_end_matches([' ', '\t', '\r']);
+        MKDOCS_REF_DEF.captures(text)
+    })?;
+    let label = captures.get(1)?.as_str().trim();
+    (!label.is_empty() && !label.starts_with('^')).then_some(label)
 }
 
 /// Decides whether a reference label has a definition, the one test that

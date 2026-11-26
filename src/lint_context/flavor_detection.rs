@@ -484,6 +484,17 @@ impl ContainerLines {
         self.in_admonition[line_index] || self.in_content_tab[line_index]
     }
 
+    pub(super) fn into_mkdocs_body_columns(mut self) -> Vec<usize> {
+        for index in 0..self.body_indent.len() {
+            self.body_indent[index] = if self.has_body_indent(index) && !self.opens_container[index] {
+                self.body_indent[index] + 4
+            } else {
+                0
+            };
+        }
+        self.body_indent
+    }
+
     /// The parts of a parser-reported code block that really are code.
     ///
     /// A block laid over container content is the parser reading structure as

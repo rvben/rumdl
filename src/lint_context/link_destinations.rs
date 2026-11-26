@@ -263,17 +263,8 @@ impl<'a> LintContext<'a> {
         })
     }
 
-    /// The link reference definitions of the document body: those the
-    /// parser read, which excludes text that only resembles one (after a
-    /// paragraph line, indented as code), and those the flavor reads, outside
-    /// the regions `is_body_markdown` excludes. Only the first body
-    /// definition of a label is a link target, so a later duplicate is not
-    /// listed. Regions are excluded before the first is chosen, so text
-    /// shaped like a definition in front matter, say, never hides the body
-    /// definition of its label.
-    pub(crate) fn body_reference_definitions(&self) -> impl Iterator<Item = BodyDefinition<'_>> + '_ {
-        let content = self.content;
-        let indices = self.body_definitions.get_or_init(|| {
+    fn body_reference_definition_indices(&self) -> &[usize] {
+        self.body_definitions.get_or_init(|| {
             let mut labels = HashSet::new();
             self.definition_candidates
                 .iter()
@@ -286,8 +277,87 @@ impl<'a> LintContext<'a> {
                 .filter(|(_, candidate)| labels.insert(candidate.label.as_str()))
                 .map(|(index, _)| index)
                 .collect()
-        });
-        indices.iter().map(move |&index| {
+        })
+    }
+
+    /// Folded labels of the reference definitions recognized in the document body.
+    pub(crate) fn body_reference_labels(&self) -> impl Iterator<Item = &str> + '_ {
+        self.body_reference_definition_indices()
+            .iter()
+            .map(|&index| self.definition_candidates[index].label.as_str())
+    }
+
+    /// Labels Python-Markdown can read inside a paragraph or an indented container.
+    pub(crate) fn mkdocs_reference_labels(&self) -> impl Iterator<Item = String> + '_ {
+        let is_markdown = |info: &super::LineInfo, line, offset| {
+            !info.in_markdown_span && !info.in_table_block && self.is_body_markdown(line, offset)
+        };
+        self.lines
+            .iter()
+            .zip(&self.mkdocs_body_columns)
+            .enumerate()
+            .scan(None, |block_indent, (index, (info, &body_column))| {
+                if info.is_blank {
+                    *block_indent = None;
+                    return Some(None);
+                }
+                // A list continuation is detabbed from the start of its block.
+                // The body check below excludes blocks that are indented code.
+                let block_column = *block_indent.get_or_insert(info.visual_indent);
+                Some(Some((index, info, body_column, block_column)))
+            })
+            .flatten()
+            .filter_map(move |(index, info, body_column, block_column)| {
+                let raw = info.content(self.content);
+                let line = &raw[info.indent..];
+                let block_body_column = body_column.max(block_column / 4 * 4);
+                if !line.starts_with('[') || info.visual_indent.saturating_sub(block_body_column) > 3 {
+                    return None;
+                }
+
+                let start = info.byte_offset + info.indent;
+                // Python-Markdown recognizes only single-line Setext headings.
+                // A definition after prose can be part of a multiline CommonMark heading.
+                let starts_setext = info.is_setext_heading_text
+                    && !self.lines[..index]
+                        .last()
+                        .is_some_and(|prev| prev.is_setext_heading_text);
+                if starts_setext || !is_markdown(info, index + 1, start) {
+                    return None;
+                }
+                let with_continuation = self
+                    .lines
+                    .get(index + 1)
+                    .filter(|next| {
+                        let content = next.content(self.content);
+                        let relative_indent = next.visual_indent.saturating_sub(block_body_column);
+                        let text = content[next.indent..].trim_end_matches([' ', '\t', '\r']);
+                        next.in_mkdocs_container() == info.in_mkdocs_container()
+                            && self.mkdocs_body_columns.get(index + 1) == Some(&body_column)
+                            && !next.is_blank
+                            && !(relative_indent < 4 && super::is_horizontal_rule_content(text))
+                            && !next.is_container_marker
+                            && next.list_item.is_none()
+                            && next.blockquote.is_none()
+                            && !(relative_indent == 0 && text.starts_with('#'))
+                            && is_markdown(next, index + 2, next.byte_offset)
+                    })
+                    .map(|next| &self.content[start..next.byte_offset + next.byte_len]);
+                super::link_parser::mkdocs_reference_label(line, with_continuation).map(super::link_parser::fold_label)
+            })
+    }
+
+    /// The link reference definitions of the document body: those the
+    /// parser read, which excludes text that only resembles one (after a
+    /// paragraph line, indented as code), and those the flavor reads, outside
+    /// the regions `is_body_markdown` excludes. Only the first body
+    /// definition of a label is a link target, so a later duplicate is not
+    /// listed. Regions are excluded before the first is chosen, so text
+    /// shaped like a definition in front matter, say, never hides the body
+    /// definition of its label.
+    pub(crate) fn body_reference_definitions(&self) -> impl Iterator<Item = BodyDefinition<'_>> + '_ {
+        let content = self.content;
+        self.body_reference_definition_indices().iter().map(move |&index| {
             let definition = &self.definition_candidates[index].definition;
             let start = definition.span.start;
             let destination = definition_destination_range(content, &definition.span, &definition.dest);
