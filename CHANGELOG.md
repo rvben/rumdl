@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7](https://github.com/rvben/rumdl/compare/v0.3.6...v0.3.7) - 2026-11-26
+
+### Fixed
+
+- **format**: preserve Markdown containers and add opt-in checks ([3b9de26](https://github.com/rvben/rumdl/commit/3b9de26eda11acd7dc2a01913d68ff7408898ec2))
+- **MD052**: validate reference labels and definitions ([0ce09f7](https://github.com/rvben/rumdl/commit/0ce09f718dd8b27847f9e54405ecb13c9856a73b))
+- **MD007**: track separate lists after ordered items ([ec1c96d](https://github.com/rvben/rumdl/commit/ec1c96dd591ee66b4cf80bdb98cfb2f3192e9724))
+- **md044**: accept every configured casing of a proper name ([b44da24](https://github.com/rvben/rumdl/commit/b44da2411de74e94c00b95407313fee9e3ee7102))
+
 ## [0.3.6](https://github.com/rvben/rumdl/compare/v0.3.5...v0.3.6) - 2026-11-24
 
 ### Added
