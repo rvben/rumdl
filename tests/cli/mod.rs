@@ -16,6 +16,7 @@ mod cli_fail_on_test;
 mod cli_fix_atomicity_test;
 mod cli_flag_precedence_test;
 mod cli_flavor_test;
+mod cli_formatter_container_regressions_test;
 mod cli_heading_attribute_panic_test;
 mod cli_html_comment_links_test;
 mod cli_inline_compact_directives_test;

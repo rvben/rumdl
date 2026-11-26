@@ -295,6 +295,14 @@ impl Rule for MD031BlanksAroundFences {
                 continue;
             }
 
+            if !self.config.list_items {
+                let start = ctx.line_offsets[*opening_line];
+                let end = start + lines[*opening_line].len();
+                if ctx.parser_blocks().overlaps_list_item(start..end) {
+                    continue;
+                }
+            }
+
             // Check for blank line before opening fence
             // Skip if right after frontmatter
             // Skip if right after a Pandoc/Quarto div marker in Pandoc-compatible flavor
@@ -304,7 +312,6 @@ impl Rule for MD031BlanksAroundFences {
                 && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
                 && !prev_line_is_pandoc_marker
-                && should_require_blank_line(*opening_line)
                 && !Self::begins_bare_item(ctx, &bare_items, *opening_line)
             {
                 let (start_line, start_col, end_line, end_col) =
@@ -338,7 +345,6 @@ impl Rule for MD031BlanksAroundFences {
                 && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
                 && !is_block_attribute_line(lines[*closing_line + 1], ctx.flavor)
                 && !next_line_is_pandoc_marker
-                && should_require_blank_line(*closing_line)
             {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_line_range(*closing_line + 1, lines[*closing_line]);

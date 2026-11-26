@@ -110,6 +110,8 @@ pub struct LineInfo {
     pub is_kramdown_block_ial: bool,
     /// Whether this line is inside a JSX component block (MDX only, e.g. `<Tabs>...</Tabs>`)
     pub in_jsx_block: bool,
+    /// Whether a line holds JSX flow tags or a flow expression.
+    pub(crate) is_mdx_flow: bool,
     /// Whether this line is inside a footnote definition body (continuation lines)
     pub in_footnote_definition: bool,
     /// Whether this line is inside a MyST directive block (colon or backtick fence with `{name}`)

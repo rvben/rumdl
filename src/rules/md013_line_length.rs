@@ -3141,6 +3141,10 @@ impl MD013LineLength {
                         // item's indentation consumes, so an item holding a line
                         // indented with a tab is left as written.
                         leave_as_written |= line_info.content(ctx.content)[..indent].contains('\t');
+                        // A list rewrite can move only the part of a JSX element
+                        // above a nested item. Keep the enclosing segment as written
+                        // so neither its tags nor their children change ownership.
+                        leave_as_written |= line_info.is_mdx_flow;
                         let trimmed = line_info.content(ctx.content).trim();
 
                         // Check for MkDocs admonition lines inside list items BEFORE

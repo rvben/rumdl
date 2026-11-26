@@ -1353,6 +1353,12 @@ impl<'a> LintContext<'a> {
 
         // Now detect headings and blockquotes
         let mdx_flow_lines = mdx_context.as_ref().map(|mdx| mdx.flow_lines(&lines));
+        if let Some(flow_lines) = &mdx_flow_lines {
+            debug_assert_eq!(lines.len(), flow_lines.len());
+            for (line, &is_flow) in lines.iter_mut().zip(flow_lines) {
+                line.is_mdx_flow = is_flow;
+            }
+        }
         let heading_detection::HeadingAnalysis {
             mut blockquote_headings,
             lazy_table_text,
@@ -1654,6 +1660,7 @@ impl<'a> LintContext<'a> {
                         &code_blocks,
                         &inline_code_ranges,
                         &html_comment_ranges,
+                        &mdx_comment_ranges,
                         flavor,
                         &lazy_text,
                         &list_items,

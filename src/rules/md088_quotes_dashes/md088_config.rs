@@ -20,6 +20,15 @@ pub(super) struct MD088Config {
     #[serde(default = "default_normalize_spaces")]
     pub(super) normalize_spaces: bool,
 
+    /// Reports matching characters in front matter without applying fixes.
+    #[serde(default)]
+    pub(super) check_frontmatter: bool,
+
+    /// Reports matching characters in fenced and indented code blocks and
+    /// inline code spans without applying fixes.
+    #[serde(default)]
+    pub(super) code_blocks: bool,
+
     /// Unicode characters to allow as-is.
     ///
     /// Any look-alike character with a codepoint present in this list
@@ -47,6 +56,8 @@ impl Default for MD088Config {
             normalize_quotes: default_normalize_quotes(),
             normalize_dashes: default_normalize_dashes(),
             normalize_spaces: default_normalize_spaces(),
+            check_frontmatter: false,
+            code_blocks: false,
             allow: HashSet::new(),
         }
     }

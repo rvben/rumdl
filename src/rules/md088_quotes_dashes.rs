@@ -452,7 +452,15 @@ impl Rule for MD088QuotesDashes {
         // (warning index, absolute byte) of each space finding that carries a fix.
         let mut space_fixes: Vec<(usize, usize)> = Vec::new();
 
-        for line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
+        let mut lines = ctx.filtered_lines();
+        if !self.config.check_frontmatter {
+            lines = lines.skip_front_matter();
+        }
+        if !self.config.code_blocks {
+            lines = lines.skip_code_blocks();
+        }
+        for line in lines {
+            let literal_line = line.line_info.in_front_matter || line.line_info.in_code_block;
             // Computed for the first space finding of the line and shared by the rest.
             let mut safe_space_runs: Option<Vec<Range<usize>>> = None;
             for (char_idx, (byte_idx, c)) in line.content.char_indices().enumerate() {
@@ -461,26 +469,30 @@ impl Rule for MD088QuotesDashes {
                 };
 
                 let absolute_byte = line.line_info.byte_offset + byte_idx;
-                if ctx.is_byte_offset_in_code_span(absolute_byte) {
+                let code_span = !literal_line && ctx.is_byte_offset_in_code_span(absolute_byte);
+                if code_span && !self.config.code_blocks {
                     continue;
                 }
+                let report_only = literal_line || code_span;
 
                 // Math is notation, not prose: `′` and `″` are the prime and double
                 // prime of a derivative or a unit, and their ASCII look-alikes do not
                 // typeset as primes.
-                if is_in_math_context(ctx, absolute_byte) {
+                if !report_only && is_in_math_context(ctx, absolute_byte) {
                     continue;
                 }
 
                 let column = char_idx + 1;
                 let space_name = space_name(c);
-                let structural_risk = space_name.is_some()
+                let structural_risk = !report_only
+                    && space_name.is_some()
                     && (ctx.is_in_html_tag(absolute_byte)
                         || !in_runs(
                             safe_space_runs.get_or_insert_with(|| structure_keeping_space_runs(line.content)),
                             byte_idx,
                         ));
-                let fix = if ctx.is_in_link(absolute_byte)
+                let fix = if report_only
+                    || ctx.is_in_link(absolute_byte)
                     || ctx.is_in_bare_url(absolute_byte)
                     || ctx.is_in_unresolved_autoref_identifier(absolute_byte)
                     || structural_risk

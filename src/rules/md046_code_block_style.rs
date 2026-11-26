@@ -11,6 +11,7 @@ use md046_config::MD046Config;
 
 /// Reports the MDG style override once per process; see [`FlavorOverrideNotice`].
 static MDG_STYLE_OVERRIDE: FlavorOverrideNotice = FlavorOverrideNotice::new();
+static MDX_STYLE_OVERRIDE: FlavorOverrideNotice = FlavorOverrideNotice::new();
 
 /// Pre-computed context arrays for indented code block detection.
 struct IndentContext<'a> {
@@ -1128,6 +1129,18 @@ impl MD046CodeBlockStyle {
         );
     }
 
+    fn warn_about_mdx_indented_style(&self) {
+        if self.style_explicit && self.config.style == CodeBlockStyle::Indented {
+            MDX_STYLE_OVERRIDE.report(
+                "MD046",
+                "style",
+                "indented",
+                "fenced",
+                "MDX does not support indented code blocks",
+            );
+        }
+    }
+
     fn detect_style(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -1305,6 +1318,11 @@ impl MD046CodeBlockStyle {
             return Ok(Vec::new());
         }
 
+        let is_mdx = ctx.flavor == crate::config::MarkdownFlavor::MDX;
+        if is_mdx {
+            self.warn_about_mdx_indented_style();
+        }
+
         // First, always check for unclosed code blocks
         let mut unclosed_warnings = self.check_unclosed_code_blocks(ctx);
 
@@ -1324,6 +1342,11 @@ impl MD046CodeBlockStyle {
                 *prepared = Some(fixed);
             }
             return Ok(unclosed_warnings);
+        }
+
+        // MDX only recognizes fenced code blocks.
+        if is_mdx {
+            return Ok(Vec::new());
         }
 
         // Check for code block style consistency
@@ -1488,6 +1511,13 @@ impl MD046CodeBlockStyle {
     /// edit made to each block, which is the fix its style warning carries.
     fn convert_closed_blocks(&self, ctx: &crate::lint_context::LintContext) -> Result<Conversion, LintError> {
         let content = ctx.content;
+        if ctx.flavor == crate::config::MarkdownFlavor::MDX {
+            self.warn_about_mdx_indented_style();
+            return Ok(Conversion {
+                content: content.to_owned(),
+                edits: Vec::new(),
+            });
+        }
         let ambiguity_limit = crate::rules::code_fence_utils::fence_ambiguity_limit(ctx);
         let lines = ctx.raw_lines();
 
@@ -4343,11 +4373,12 @@ More text
         ] {
             let content = format!("{head}{inner}");
             for flavor in crate::format_proof::ALL_FLAVORS {
-                // MDG always converges on fenced; Azure DevOps skips every line
-                // the parser marks as code (a separate, unchanged behavior).
+                // These flavors do not resolve style by counting both forms.
                 if matches!(
                     flavor,
-                    crate::config::MarkdownFlavor::MDG | crate::config::MarkdownFlavor::AzureDevOps
+                    crate::config::MarkdownFlavor::MDG
+                        | crate::config::MarkdownFlavor::MDX
+                        | crate::config::MarkdownFlavor::AzureDevOps
                 ) {
                     continue;
                 }

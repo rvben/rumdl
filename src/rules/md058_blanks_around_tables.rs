@@ -19,6 +19,9 @@ pub struct MD058Config {
     /// Minimum number of blank lines after tables
     #[serde(default = "default_minimum_after")]
     pub minimum_after: usize,
+    /// Whether to require blank lines around tables inside list items.
+    #[serde(default = "default_list_items")]
+    pub list_items: bool,
 }
 
 impl Default for MD058Config {
@@ -26,6 +29,7 @@ impl Default for MD058Config {
         Self {
             minimum_before: default_minimum_before(),
             minimum_after: default_minimum_after(),
+            list_items: default_list_items(),
         }
     }
 }
@@ -36,6 +40,10 @@ fn default_minimum_before() -> usize {
 
 fn default_minimum_after() -> usize {
     1
+}
+
+fn default_list_items() -> bool {
+    true
 }
 
 impl RuleConfig for MD058Config {
@@ -186,6 +194,13 @@ impl Rule for MD058BlanksAroundTables {
         let table_blocks = &ctx.table_blocks;
 
         for table_block in table_blocks.iter().filter(|block| block.parser_confirmed) {
+            if !self.config.list_items {
+                let start = ctx.line_offsets[table_block.start_line];
+                let end = start + lines[table_block.start_line].len();
+                if ctx.parser_blocks().overlaps_list_item(start..end) {
+                    continue;
+                }
+            }
             // Check for sufficient blank lines before table
             // A table that is the content of a bare marker's item has no line to put
             // a blank before. Only a marker the parser reads as an item counts: an
@@ -765,6 +780,7 @@ After.";
         let config = MD058Config {
             minimum_before: 2,
             minimum_after: 1,
+            ..Default::default()
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
 
@@ -788,6 +804,7 @@ Text after.";
         let config = MD058Config {
             minimum_before: 1,
             minimum_after: 3,
+            ..Default::default()
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
 
@@ -811,6 +828,7 @@ More text.";
         let config = MD058Config {
             minimum_before: 2,
             minimum_after: 2,
+            ..Default::default()
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
 
@@ -833,6 +851,7 @@ More text.";
         let config = MD058Config {
             minimum_before: 0,
             minimum_after: 0,
+            ..Default::default()
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
 
@@ -853,6 +872,7 @@ More text.";
         let config = MD058Config {
             minimum_before: 2,
             minimum_after: 3,
+            ..Default::default()
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
 
@@ -1399,6 +1419,7 @@ Final paragraph.";
         let config = MD058Config {
             minimum_before: 2,
             minimum_after: 1,
+            ..Default::default()
         };
         let rule = MD058BlanksAroundTables::from_config_struct(config);
 

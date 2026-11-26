@@ -4,6 +4,7 @@
 
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use std::ops::Range;
+use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BlockKind {
@@ -70,6 +71,7 @@ pub(crate) struct BlockFacts {
     // Preserve a single separator for consecutive uninteresting events: MD065
     // asks whether a rule is the event immediately after an item opens.
     pub(crate) events: Vec<(BlockKind, Range<usize>)>,
+    outer_item_ranges: OnceLock<Vec<Range<usize>>>,
 }
 
 impl BlockFacts {
@@ -79,6 +81,21 @@ impl BlockFacts {
             self.events
                 .push((kind, if kind == BlockKind::Other { 0..0 } else { range.clone() }));
         }
+    }
+
+    pub(crate) fn overlaps_list_item(&self, source: Range<usize>) -> bool {
+        let ranges = self.outer_item_ranges.get_or_init(|| {
+            // Items are nested or disjoint. Keep the outermost ranges in source order.
+            let mut ranges: Vec<Range<usize>> = Vec::new();
+            for (kind, range) in &self.events {
+                if *kind == BlockKind::ItemStart && ranges.last().is_none_or(|outer| outer.end <= range.start) {
+                    ranges.push(range.clone());
+                }
+            }
+            ranges
+        });
+        let index = ranges.partition_point(|item| item.start < source.end);
+        index > 0 && ranges[index - 1].end > source.start
     }
 
     pub(crate) fn parse(content: &str) -> Self {

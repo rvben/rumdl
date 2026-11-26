@@ -201,6 +201,7 @@ pub(super) fn compute_basic_line_info(
             in_kramdown_extension_block: false,
             is_kramdown_block_ial: false,
             in_jsx_block: false,
+            is_mdx_flow: false,
             in_footnote_definition: false,
             in_myst_directive: false,
             is_myst_comment: false,

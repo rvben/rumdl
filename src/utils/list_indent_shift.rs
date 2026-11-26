@@ -358,6 +358,7 @@ pub(crate) fn is_lazy_continuation_source(
             || info.is_horizontal_rule
             || info.in_html_block
             || info.in_html_comment
+            || info.is_mdx_flow
             || info.is_div_marker
     };
     // The line above must be open paragraph text, which a list item's own marker
@@ -366,6 +367,7 @@ pub(crate) fn is_lazy_continuation_source(
     // HTML, also where the block opens on a marker line, and only a paragraph
     // continues lazily.
     let prev_is_paragraph = !ctx.line_holds_html_block(prev_idx)
+        && !prev.is_mdx_flow
         && match &prev.list_item {
             Some(item) => {
                 !prev.in_code_block

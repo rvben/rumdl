@@ -456,6 +456,10 @@ impl TableUtils {
         flavor: crate::config::MarkdownFlavor,
         lazy_text: &[bool],
     ) -> Vec<TableBlock> {
+        // MDX table candidates need native comment ranges from the same source.
+        if flavor == MarkdownFlavor::MDX {
+            return crate::lint_context::LintContext::new(content, flavor, None).table_blocks;
+        }
         let lines: Vec<&str> = content.lines().collect();
         // Pre-compute line positions for efficient code block checking.
         // `str::lines()` strips the trailing `\r` from CRLF lines, so advancing by
@@ -483,6 +487,7 @@ impl TableUtils {
             code_blocks,
             &crate::lint_context::code_span_byte_ranges(code_spans),
             html_comment_ranges,
+            &[],
             flavor,
             lazy_text,
             &[],
@@ -513,12 +518,20 @@ impl TableUtils {
         code_blocks: &[(usize, usize)],
         code_spans: &[(usize, usize)],
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+        mdx_comment_ranges: &[(usize, usize)],
         flavor: crate::config::MarkdownFlavor,
         lazy_text: &[bool],
         list_items: &[(usize, usize, usize)],
         flavor_row_lines: &[bool],
     ) -> Vec<TableBlock> {
         let is_lazy_text = |line: usize| lazy_text.get(line).copied().unwrap_or(false);
+        // A line starting in a JSX comment from an earlier line cannot be a row.
+        // A single-line comment in a cell can still appear in a real table.
+        let inside_mdx_comment = |line: usize| {
+            line_positions.get(line).is_some_and(|&start| {
+                crate::utils::code_block_utils::CodeBlockUtils::is_strictly_inside(mdx_comment_ranges, start)
+            })
+        };
         let mut tables = Vec::new();
         let mut i = 0;
 
@@ -554,7 +567,7 @@ impl TableUtils {
                 idx > 0 && line_start < html_comment_ranges[idx - 1].end
             };
 
-            if in_code || in_html_comment {
+            if in_code || in_html_comment || inside_mdx_comment(i) {
                 i += 1;
                 continue;
             }
@@ -652,7 +665,7 @@ impl TableUtils {
 
             // A row indented too far to start a block is text the paragraph above
             // it continues, so it is neither a header row nor a delimiter row.
-            if is_lazy_text(i) || is_lazy_text(i + 1) {
+            if is_lazy_text(i) || is_lazy_text(i + 1) || inside_mdx_comment(i + 1) {
                 i += 1;
                 continue;
             }
@@ -713,7 +726,7 @@ impl TableUtils {
                         .filter(|&byte| byte == b'>')
                         .count();
                     let mut j = i + 2;
-                    while j < lines.len() {
+                    while j < lines.len() && !inside_mdx_comment(j) {
                         let line = lines[j];
                         // Strip blockquote prefix for checking
                         let raw_content = strip_blockquote_prefix(line);
@@ -1781,6 +1794,7 @@ mod tests {
                 let tables = TableUtils::find_table_blocks_with_layout(
                     &lines,
                     &line_positions,
+                    &[],
                     &[],
                     &[],
                     &[],
