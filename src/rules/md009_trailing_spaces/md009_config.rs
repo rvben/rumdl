@@ -2,6 +2,17 @@ use crate::rule_config_serde::RuleConfig;
 use crate::types::BrSpaces;
 use serde::{Deserialize, Serialize};
 
+/// Source spelling of hard line breaks.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum HardBreakStyle {
+    /// Apply the usual `br-spaces` and `strict` rules.
+    #[default]
+    Preserve,
+    /// Use a backslash for hard line breaks in Standard Markdown.
+    Backslash,
+}
+
 /// Configuration for MD009 (Trailing spaces)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -10,6 +21,10 @@ pub struct MD009Config {
     /// A value below 2 turns the exception off and flags every trailing space.
     #[serde(default, alias = "br_spaces")]
     pub br_spaces: BrSpaces,
+
+    /// Source spelling of hard line breaks (default: preserve).
+    #[serde(default)]
+    pub hard_break_style: HardBreakStyle,
 
     /// Strict mode - also flag a line-break run where it renders no `<br>` (default: false)
     #[serde(default)]

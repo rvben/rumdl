@@ -673,7 +673,7 @@ impl<T: Ord + Copy> SkipRegions<T> {
         index > 0 && position < self.0[index - 1].1
     }
 
-    fn contains(&self, position: T) -> bool {
+    pub(crate) fn contains(&self, position: T) -> bool {
         let index = self.0.partition_point(|&(start, _)| start <= position);
         index > 0 && position < self.0[index - 1].1
     }

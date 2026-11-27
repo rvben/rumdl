@@ -2016,6 +2016,16 @@
           "default": 2,
           "minimum": 0
         },
+        "hard-break-style": {
+          "description": "Source spelling of hard line breaks (default: preserve). One of `preserve`, `backslash`.",
+          "default": "preserve",
+          "type": "string"
+        },
+        "hard_break_style": {
+          "description": "Source spelling of hard line breaks (default: preserve). One of `preserve`, `backslash`.",
+          "default": "preserve",
+          "type": "string"
+        },
         "list-item-empty-lines": {
           "description": "Allow trailing spaces in empty list item lines (default: false)",
           "type": "boolean",

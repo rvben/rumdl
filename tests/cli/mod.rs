@@ -31,6 +31,7 @@ mod cli_md003_quoted_headings_test;
 mod cli_md003_setext_test;
 mod cli_md007_sibling_after_ordered_test;
 mod cli_md009_code_span_test;
+mod cli_md009_hard_break_test;
 mod cli_md010_code_span_test;
 mod cli_md010_footnote_test;
 mod cli_md010_tab_structure_test;

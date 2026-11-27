@@ -1,11 +1,92 @@
+use crate::config::MarkdownFlavor;
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::hard_break::br_produces_useful_break;
+use crate::utils::header_id_utils::is_backslash_escaped;
 use crate::utils::range_utils::calculate_trailing_range;
 use crate::utils::regex_cache::{ORDERED_LIST_MARKER_REGEX, UNORDERED_LIST_MARKER_REGEX};
+use crate::utils::skip_context::SkipRegions;
+use pulldown_cmark::{Event, LinkType, Parser, Tag};
+use std::collections::HashSet;
 
 mod md009_config;
-use md009_config::MD009Config;
+use md009_config::{HardBreakStyle, MD009Config};
+
+struct BackslashBreaks {
+    hard_starts: HashSet<usize>,
+    soft_starts: HashSet<usize>,
+    literal_regions: SkipRegions,
+    reference_labels: SkipRegions,
+}
+
+impl BackslashBreaks {
+    fn parse(ctx: &crate::lint_context::LintContext) -> Self {
+        let content = ctx.content;
+        let mut hard_starts = HashSet::new();
+        let mut soft_starts = HashSet::new();
+        let mut literal_regions = Vec::new();
+        let mut reference_labels = Vec::new();
+        let options = crate::utils::parser_options::rumdl_parser_options_for(content);
+        let parser = Parser::new_ext(content, options);
+        let definitions = parser.reference_definitions();
+        let has_references = definitions.iter().next().is_some();
+        for (_, definition) in definitions.iter() {
+            if definition.title.as_ref().is_some_and(|title| title.contains('\n')) {
+                // The parser's definition span ends at the closing title
+                // delimiter. Only whitespace inside that title is data.
+                let close = definition.span.end - 1;
+                let bytes = content.as_bytes();
+                let open = if bytes[close] == b')' { b'(' } else { bytes[close] };
+                let start = (definition.span.start..close)
+                    .rev()
+                    .find(|&offset| bytes[offset] == open && !is_backslash_escaped(content, offset))
+                    .unwrap_or(definition.span.start);
+                literal_regions.push((start, definition.span.end));
+            }
+        }
+        for (event, span) in parser.into_offset_iter() {
+            match event {
+                Event::HardBreak => {
+                    hard_starts.insert(span.start);
+                }
+                Event::SoftBreak => {
+                    soft_starts.insert(span.start);
+                }
+                Event::Html(_) | Event::InlineHtml(_) | Event::InlineMath(_) | Event::DisplayMath(_) => {
+                    literal_regions.push((span.start, span.end))
+                }
+                Event::Start(Tag::Link { link_type, .. } | Tag::Image { link_type, .. }) => {
+                    literal_regions.push((span.start, span.end));
+                    if matches!(link_type, LinkType::Shortcut | LinkType::Collapsed) {
+                        reference_labels.push((span.start, span.end));
+                    }
+                }
+                _ => {}
+            }
+        }
+        // A backslash can make an unresolved reference label match an
+        // existing definition, even when its label is separate.
+        if has_references {
+            reference_labels.extend(
+                ctx.broken_links()
+                    .iter()
+                    .filter(|link| {
+                        matches!(
+                            link.link_type,
+                            LinkType::Reference | LinkType::Shortcut | LinkType::Collapsed
+                        )
+                    })
+                    .map(|link| (link.span.start, link.span.end)),
+            );
+        }
+        Self {
+            hard_starts,
+            soft_starts,
+            literal_regions: SkipRegions::new(literal_regions),
+            reference_labels: SkipRegions::new(reference_labels),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct MD009TrailingSpaces {
@@ -17,6 +98,7 @@ impl MD009TrailingSpaces {
         Self {
             config: MD009Config {
                 br_spaces: crate::types::BrSpaces::new(br_spaces),
+                hard_break_style: HardBreakStyle::Preserve,
                 strict,
                 list_item_empty_lines: false,
             },
@@ -99,6 +181,28 @@ impl Rule for MD009TrailingSpaces {
         let content = ctx.content;
 
         let mut warnings = Vec::new();
+        let backslash_breaks = if self.config.hard_break_style == HardBreakStyle::Backslash {
+            if ctx.flavor == MarkdownFlavor::Standard {
+                Some(BackslashBreaks::parse(ctx))
+            } else {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 1,
+                    message: format!(
+                        "hard-break-style = \"backslash\" is unavailable for the {} flavor",
+                        ctx.flavor
+                    ),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
+                None
+            }
+        } else {
+            None
+        };
 
         // Use pre-computed lines (needed for looking back at prev_line)
         let lines = ctx.raw_lines();
@@ -169,6 +273,20 @@ impl Rule for MD009TrailingSpaces {
                 continue;
             }
 
+            let use_backslash = backslash_breaks
+                .as_ref()
+                .is_some_and(|breaks| trailing_ascii_spaces >= 2 && breaks.hard_starts.contains(&whitespace_start));
+            // Whitespace in raw markup, math, and titles can be content.
+            // A parsed hard or soft break in a label is separate from its title.
+            if !use_backslash
+                && backslash_breaks.as_ref().is_some_and(|breaks| {
+                    (breaks.literal_regions.contains(whitespace_start) && !breaks.soft_starts.contains(&whitespace_end))
+                        || ctx.is_in_link_title(whitespace_start)
+                })
+            {
+                continue;
+            }
+
             if trimmed_len == 0 {
                 if trailing_all_whitespace > 0 {
                     // Check if this is an empty list item line and config allows it
@@ -216,7 +334,7 @@ impl Rule for MD009TrailingSpaces {
             let is_truly_last_line = line_num == lines.len() - 1 && !content.ends_with('\n');
             let has_only_ascii_trailing = trailing_ascii_spaces == trailing_all_whitespace;
             let matches_br_spaces = self.config.br_spaces.line_break() == Some(trailing_ascii_spaces);
-            if !is_truly_last_line && has_only_ascii_trailing && matches_br_spaces {
+            if backslash_breaks.is_none() && !is_truly_last_line && has_only_ascii_trailing && matches_br_spaces {
                 let allow = if self.config.strict {
                     br_produces_useful_break(ctx, line_num)
                 } else {
@@ -249,7 +367,9 @@ impl Rule for MD009TrailingSpaces {
                 calculate_trailing_range(line_num + 1, line, trimmed.len())
             };
             let line_start = *ctx.line_offsets.get(line_num).unwrap_or(&0);
-            let fix_range = if line_is_ascii {
+            let fix_range = if backslash_breaks.is_some() {
+                whitespace_start..whitespace_end
+            } else if line_is_ascii {
                 let start = line_start + trimmed.len();
                 let end = start + trailing_all_whitespace;
                 start..end
@@ -261,19 +381,43 @@ impl Rule for MD009TrailingSpaces {
                 )
             };
 
+            let odd_backslashes = backslash_breaks.is_some() && is_backslash_escaped(line, trimmed_len);
+            let changes_reference = use_backslash
+                && backslash_breaks
+                    .as_ref()
+                    .is_some_and(|breaks| breaks.reference_labels.contains(whitespace_start));
+            let (message, fix) = if changes_reference {
+                (
+                    "A backslash hard break would change the reference label".to_string(),
+                    None,
+                )
+            } else if use_backslash {
+                // Pair a trailing literal backslash before adding the break.
+                let replacement = if odd_backslashes { "\\\\" } else { "\\" };
+                (
+                    "Use a backslash for this hard line break".to_string(),
+                    Some(Fix::new(fix_range, replacement.to_string())),
+                )
+            } else {
+                let message = if trailing_all_whitespace == 1 {
+                    "Trailing space found".to_string()
+                } else {
+                    format!("{trailing_all_whitespace} trailing spaces found")
+                };
+                // Trimming after an odd run can introduce a hard break.
+                let fix = (!odd_backslashes).then(|| Fix::new(fix_range, String::new()));
+                (message, fix)
+            };
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line: start_line,
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: if trailing_all_whitespace == 1 {
-                    "Trailing space found".to_string()
-                } else {
-                    format!("{trailing_all_whitespace} trailing spaces found")
-                },
+                message,
                 severity: Severity::Warning,
-                fix: Some(Fix::new(fix_range, String::new())),
+                fix,
             });
         }
 
