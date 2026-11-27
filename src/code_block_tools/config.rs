@@ -75,7 +75,7 @@ pub struct CodeBlockToolsConfig {
     pub languages: BTreeMap<String, LanguageToolConfig>,
 
     /// User-defined language aliases (override built-in resolution)
-    /// Example: { "py": "python", "bash": "shell" }
+    /// For example, `language-aliases = { py = "python", bash = "shell" }`.
     #[serde(default)]
     pub language_aliases: BTreeMap<String, String>,
 

@@ -1608,7 +1608,7 @@
           "default": {}
         },
         "language-aliases": {
-          "description": "User-defined language aliases (override built-in resolution)\nExample: { \"py\": \"python\", \"bash\": \"shell\" }",
+          "description": "User-defined language aliases (override built-in resolution)\nFor example, `language-aliases = { py = \"python\", bash = \"shell\" }`.",
           "type": "object",
           "additionalProperties": {
             "type": "string"
