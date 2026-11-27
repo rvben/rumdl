@@ -545,9 +545,18 @@ benchmark-chart:
 
 LYCHEE := $(shell command -v lychee 2>/dev/null || echo "mise exec -- lychee")
 
+.PHONY: setup-link-check check-links-external test-link-check
+setup-link-check:
+	./scripts/mise-install.sh rust python cargo:lychee
+
 check-links:
-	@echo "Checking links in markdown files..."
-	$(LYCHEE) --no-progress --config .lychee.toml --remap 'https://rumdl.dev/(.+?)/?(?:#.*)?$$ file://$(CURDIR)/docs/$$1.md' --remap 'https://raw.githubusercontent.com/rvben/rumdl/main/(.+) file://$(CURDIR)/$$1' 'README.md' 'docs/**/*.md'
+	python3 scripts/check_links.py push $(LYCHEE)
+
+check-links-external:
+	python3 scripts/check_links.py external $(LYCHEE)
+
+test-link-check:
+	python3 scripts/test_check_links.py
 
 # Documentation validation. The integration tests build as a single `lib`
 # harness, so the module is selected by name filter rather than by --test.

@@ -1,0 +1,39 @@
+name: External links
+
+on:
+  schedule:
+    - cron: '35 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  external-links:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: 2026.8.14 # upd: github-releases jdx/mise
+          experimental: true
+          install: false
+
+      - name: Install link-check tools
+        run: make setup-link-check
+
+      - name: Test the link-check gate
+        run: mise exec -- make test-link-check
+
+      - name: Check external documentation links
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: mise exec -- make check-links-external
