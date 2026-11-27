@@ -10,13 +10,13 @@ pub(crate) struct MD041Config {
     #[serde(default)]
     pub level: HeadingLevel,
 
-    /// Front matter title field to check (default: "title")
-    /// Set to empty string to disable front matter title checking
+    /// Field name or regular expression for the front matter title (default: "title").
+    /// An empty string disables front matter title detection.
     #[serde(default = "default_front_matter_title", alias = "front_matter_title")]
     pub front_matter_title: String,
 
-    /// Optional regex pattern for front matter title field (default: None)
-    /// If provided, checks for this pattern in front matter instead of "title:"
+    /// Regular expression matched against each front matter line.
+    /// Takes precedence over a non-empty front-matter-title setting.
     #[serde(default, alias = "front_matter_title_pattern")]
     pub front_matter_title_pattern: Option<String>,
 

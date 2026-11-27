@@ -27,6 +27,18 @@ pub enum FrontMatterType {
 pub struct FrontMatterUtils;
 
 impl FrontMatterUtils {
+    /// Whether a title selector is a plain field name.
+    pub(crate) fn is_plain_title_key(value: &str) -> bool {
+        !value.is_empty() && value.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    }
+
+    /// Match a title pattern against individual front matter lines, preserving indentation.
+    pub(crate) fn matches_title_pattern(content: &str, pattern: &Regex) -> bool {
+        Self::extract_front_matter(content)
+            .into_iter()
+            .any(|line| pattern.is_match(line))
+    }
+
     /// Check if a content contains front matter with a specific field
     pub fn has_front_matter_field(content: &str, field_prefix: &str) -> bool {
         let field_name = field_prefix.trim_end_matches(':');

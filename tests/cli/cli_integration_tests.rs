@@ -2963,6 +2963,106 @@ mod md041_opt_in_fix_reporting {
     }
 }
 
+#[test]
+fn md041_configured_front_matter_key_controls_check_and_fmt() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("page.md");
+    for (metadata, supplies_title) in [
+        ("---\npage-title: Metadata title\n---", true),
+        ("+++\npage-title = \"Metadata title\"\n+++", true),
+        ("{\n\"page-title\": \"Metadata title\"\n}", true),
+        ("---\ntitle: Metadata title\nsummary: page-title\n---", false),
+        ("---\npage-title-extra: Metadata title\n---", false),
+    ] {
+        let source = format!("{metadata}\n\n## Body heading\n");
+        std::fs::write(&file, &source).unwrap();
+        let run = |command| {
+            std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+                .args([
+                    command,
+                    "--isolated",
+                    "--no-cache",
+                    "--enable",
+                    "MD041",
+                    "--config",
+                    "MD041.front-matter-title = 'page-title'",
+                    "--config",
+                    "MD041.fix = true",
+                ])
+                .arg(&file)
+                .output()
+                .unwrap()
+        };
+
+        let check = run("check");
+        assert_eq!(
+            check.status.code(),
+            Some(i32::from(!supplies_title)),
+            "{metadata}: {check:?}"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&check.stdout).contains("[MD041]"),
+            !supplies_title
+        );
+
+        let fmt = run("fmt");
+        assert!(fmt.status.success(), "{metadata}: {fmt:?}");
+        let formatted = std::fs::read_to_string(&file).unwrap();
+        if supplies_title {
+            assert_eq!(formatted, source);
+        } else {
+            assert!(formatted.starts_with(metadata), "{formatted}");
+            assert!(formatted.lines().any(|line| line == "# Body heading"), "{formatted}");
+        }
+        assert!(run("check").status.success(), "{formatted}");
+    }
+}
+
+#[test]
+fn md041_configured_front_matter_regex_precedence() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    for (selector, pattern, metadata, supplies_title) in [
+        ("^page-title:", None, "page-title: Metadata title", true),
+        ("title|heading", None, "summary: heading", true),
+        ("page-title", Some("^alternate:"), "alternate: Metadata title", true),
+        ("page-title", Some("^alternate:"), "page-title: Metadata title", false),
+        ("page-title", Some("["), "page-title: Metadata title", true),
+        ("[", None, "title: Metadata title", true),
+        ("", Some("^page-title:"), "page-title: Metadata title", false),
+        ("page-title", Some(""), "summary: Metadata title", true),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rumdl"));
+        command.args([
+            "check",
+            "--isolated",
+            "--no-cache",
+            "--enable",
+            "MD041",
+            "--config",
+            &format!("MD041.front-matter-title = '{selector}'"),
+        ]);
+        if let Some(pattern) = pattern {
+            command.args(["--config", &format!("MD041.front-matter-title-pattern = '{pattern}'")]);
+        }
+        let mut process = command
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        write!(process.stdin.take().unwrap(), "---\n{metadata}\n---\n\nBody text.\n").unwrap();
+        let output = process.wait_with_output().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(i32::from(!supplies_title)),
+            "{selector:?}, {pattern:?}, {metadata}: {output:?}"
+        );
+    }
+}
+
 /// A rule whose fix a document turns on for itself must be reported as fixable.
 ///
 /// An inline `rumdl-configure-file` comment reconfigures a rule for one file, and

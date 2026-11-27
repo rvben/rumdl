@@ -178,15 +178,8 @@ impl MD001HeadingIncrement {
             return false;
         }
 
-        // If we have a custom pattern, use it to search front matter content
         if let Some(ref pattern) = self.front_matter_title_pattern {
-            let front_matter_lines = FrontMatterUtils::extract_front_matter(content);
-            for line in front_matter_lines {
-                if pattern.is_match(line) {
-                    return true;
-                }
-            }
-            return false;
+            return FrontMatterUtils::matches_title_pattern(content, pattern);
         }
 
         // Default behavior: check for "title:" field

@@ -2,6 +2,7 @@
 ///
 /// See [docs/md025.md](../../docs/md025.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::types::HeadingLevel;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::thematic_break;
@@ -57,7 +58,7 @@ impl MD025SingleTitle {
             Some(DEFAULT_FRONT_MATTER_TITLE.clone())
         } else {
             // Retain field-name shorthand, without matching unrelated keys or values.
-            let pattern = if pattern.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            let pattern = if FrontMatterUtils::is_plain_title_key(pattern) {
                 format!(r"^\s*{}:", regex::escape(pattern))
             } else {
                 pattern.clone()

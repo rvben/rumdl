@@ -88,28 +88,26 @@ impl MD041FirstLineHeading {
     }
 
     pub fn with_pattern(level: usize, front_matter_title: bool, pattern: Option<String>, fix_enabled: bool) -> Self {
-        Self::with_pattern_from(level, front_matter_title, pattern, fix_enabled, false)
+        Self {
+            front_matter_title_pattern: pattern.and_then(|pattern| {
+                crate::rule_config_serde::compile_config_regex(&pattern, "MD041", "front-matter-title-pattern", false)
+            }),
+            fix_enabled,
+            ..Self::new(level, front_matter_title)
+        }
     }
 
-    /// [`Self::with_pattern`], told whether a message about the pattern may quote it.
-    /// See [`crate::rule_config_serde::compile_config_regex`].
-    fn with_pattern_from(
-        level: usize,
-        front_matter_title: bool,
-        pattern: Option<String>,
-        fix_enabled: bool,
-        values_withheld: bool,
-    ) -> Self {
-        let front_matter_title_pattern = pattern.and_then(|p| {
-            crate::rule_config_serde::compile_config_regex(&p, "MD041", "front-matter-title-pattern", values_withheld)
-        });
-
-        Self {
-            level,
-            front_matter_title,
-            front_matter_title_pattern,
-            allow_preamble: false,
-            fix_enabled,
+    fn compile_title_selector(selector: &str, values_withheld: bool) -> Option<Regex> {
+        match selector {
+            "" | "title" => None,
+            key if FrontMatterUtils::is_plain_title_key(key) => {
+                let key = regex::escape(key);
+                let pattern = format!(r#"^\s*(?:{key}|"{key}"|'{key}')\s*[:=]"#);
+                crate::rule_config_serde::compile_config_regex(&pattern, "MD041", "front-matter-title", values_withheld)
+            }
+            pattern => {
+                crate::rule_config_serde::compile_config_regex(pattern, "MD041", "front-matter-title", values_withheld)
+            }
         }
     }
 
@@ -124,15 +122,8 @@ impl MD041FirstLineHeading {
             return false;
         }
 
-        // If we have a custom pattern, use it to search front matter content
         if let Some(ref pattern) = self.front_matter_title_pattern {
-            let front_matter_lines = FrontMatterUtils::extract_front_matter(content);
-            for line in front_matter_lines {
-                if pattern.is_match(line) {
-                    return true;
-                }
-            }
-            return false;
+            return FrontMatterUtils::matches_title_pattern(content, pattern);
         }
 
         // Default behavior: check for "title:" field
@@ -1086,18 +1077,23 @@ impl Rule for MD041FirstLineHeading {
         // Load config using serde with kebab-case support
         let md041_config = crate::rule_config_serde::load_rule_config::<MD041Config>(config);
 
-        let use_front_matter = !md041_config.front_matter_title.is_empty();
-
-        Box::new(
-            MD041FirstLineHeading::with_pattern_from(
-                md041_config.level.as_usize(),
-                use_front_matter,
-                md041_config.front_matter_title_pattern,
-                md041_config.fix,
-                config.withheld_rule_values.contains("MD041"),
+        let selector = &md041_config.front_matter_title;
+        let values_withheld = config.withheld_rule_values.contains("MD041");
+        let pattern = md041_config.front_matter_title_pattern.as_deref().and_then(|pattern| {
+            crate::rule_config_serde::compile_config_regex(
+                pattern,
+                "MD041",
+                "front-matter-title-pattern",
+                values_withheld,
             )
-            .with_allow_preamble(md041_config.allow_preamble),
-        )
+        });
+
+        Box::new(Self {
+            front_matter_title_pattern: pattern.or_else(|| Self::compile_title_selector(selector, values_withheld)),
+            allow_preamble: md041_config.allow_preamble,
+            fix_enabled: md041_config.fix,
+            ..Self::new(md041_config.level.as_usize(), !selector.is_empty())
+        })
     }
 
     crate::impl_rule_config_sections!(MD041Config);

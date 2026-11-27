@@ -3258,20 +3258,20 @@
           "default": false
         },
         "front-matter-title": {
-          "description": "Front matter title field to check (default: \"title\")\nSet to empty string to disable front matter title checking",
+          "description": "Field name or regular expression for the front matter title (default: \"title\").\nAn empty string disables front matter title detection.",
           "type": "string",
           "default": "title"
         },
         "front_matter_title": {
-          "description": "Front matter title field to check (default: \"title\")\nSet to empty string to disable front matter title checking",
+          "description": "Field name or regular expression for the front matter title (default: \"title\").\nAn empty string disables front matter title detection.",
           "type": "string",
           "default": "title"
         },
         "front-matter-title-pattern": {
-          "description": "Optional regex pattern for front matter title field (default: None)\nIf provided, checks for this pattern in front matter instead of \"title:\""
+          "description": "Regular expression matched against each front matter line.\nTakes precedence over a non-empty front-matter-title setting."
         },
         "front_matter_title_pattern": {
-          "description": "Optional regex pattern for front matter title field (default: None)\nIf provided, checks for this pattern in front matter instead of \"title:\""
+          "description": "Regular expression matched against each front matter line.\nTakes precedence over a non-empty front-matter-title setting."
         },
         "level": {
           "description": "The required heading level (default: 1)",
