@@ -8,12 +8,14 @@ static ATX_PATTERN: LazyLock<Regex> =
 static SETEXT_HEADING_1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(=+)(\s*)$").unwrap());
 static SETEXT_HEADING_2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(-+)(\s*)$").unwrap());
 static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
+const SETEXT_ALIAS: &str = "setext";
 
 /// Represents different styles of Markdown headings
 ///
 /// `FromStr` accepts these spellings with `-` or `_`, in any case, so the schema
-/// publishes the spelling `Display` writes and `deserialize_style` reads back.
+/// publishes the spellings `Display` writes and the documented `setext` alias.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, schemars::JsonSchema)]
+#[schemars(transform = add_setext_schema_alias)]
 pub enum HeadingStyle {
     #[schemars(rename = "atx")]
     Atx, // # Heading
@@ -31,6 +33,12 @@ pub enum HeadingStyle {
     SetextWithAtx, // Setext for h1/h2, ATX for h3-h6
     #[schemars(rename = "setext-with-atx-closed")]
     SetextWithAtxClosed, // Setext for h1/h2, ATX closed for h3-h6
+}
+
+fn add_setext_schema_alias(schema: &mut schemars::Schema) {
+    if let Some(styles) = schema.get_mut("enum").and_then(serde_json::Value::as_array_mut) {
+        styles.push(SETEXT_ALIAS.into());
+    }
 }
 
 impl fmt::Display for HeadingStyle {
@@ -55,7 +63,7 @@ impl FromStr for HeadingStyle {
         match normalized.as_str() {
             "atx" => Ok(HeadingStyle::Atx),
             "atx_closed" => Ok(HeadingStyle::AtxClosed),
-            "setext1" | "setext" => Ok(HeadingStyle::Setext1),
+            "setext1" | SETEXT_ALIAS => Ok(HeadingStyle::Setext1),
             "setext2" => Ok(HeadingStyle::Setext2),
             "consistent" => Ok(HeadingStyle::Consistent),
             "setext_with_atx" => Ok(HeadingStyle::SetextWithAtx),

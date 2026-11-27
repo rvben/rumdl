@@ -1073,7 +1073,15 @@ mod rule_option_spelling_tests {
     /// so a load-based check would pass no matter what the schema said.
     #[test]
     fn schema_publishes_spellings_that_parse() {
-        for spelling in crate::config::schema_gen::published_spellings("MD003", "style") {
+        let md003_styles = crate::config::schema_gen::published_spellings("MD003", "style");
+        for style in ["setext", "setext1", "setext2"] {
+            assert!(
+                md003_styles.iter().any(|spelling| spelling == style),
+                "missing MD003 style {style}"
+            );
+        }
+
+        for spelling in md003_styles {
             assert!(
                 spelling.parse::<heading_utils::HeadingStyle>().is_ok(),
                 "the schema offers MD003/style = \"{spelling}\", which does not parse"

@@ -1907,7 +1907,7 @@
       "type": "object",
       "properties": {
         "style": {
-          "description": "The heading style to enforce (default: \"consistent\") One of `atx`, `atx-closed`, `setext1`, `setext2`, `consistent`, `setext-with-atx`, `setext-with-atx-closed`.",
+          "description": "The heading style to enforce (default: \"consistent\") One of `atx`, `atx-closed`, `setext1`, `setext2`, `consistent`, `setext-with-atx`, `setext-with-atx-closed`, `setext`.",
           "type": "string",
           "default": "consistent"
         },
