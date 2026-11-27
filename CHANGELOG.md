@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8](https://github.com/rvben/rumdl/compare/v0.3.7...v0.3.8) - 2026-11-27
+
+### Added
+
+- **MD009**: add opt-in backslash hard line breaks with `hard-break-style = "backslash"` ([8feb205](https://github.com/rvben/rumdl/commit/8feb2054f26f3130101da43c44e6304523c09938))
+
+### Fixed
+
+- **MD041**: honor configured front matter titles ([4a05b06](https://github.com/rvben/rumdl/commit/4a05b06c78c22719731b989ff6495d414dbcebb0))
+- **MD003**: list the `setext` alias in the configuration schema ([3c258b4](https://github.com/rvben/rumdl/commit/3c258b4dfdc4aa16a509a9ccc60dc88eba26072e))
+
 ## [0.3.7](https://github.com/rvben/rumdl/compare/v0.3.6...v0.3.7) - 2026-11-26
 
 ### Fixed
