@@ -1249,7 +1249,20 @@ the `[from ...]` annotation is globally aligned for easy scanning.
 
 ### Defaults Only (`rumdl config --defaults`)
 
-The `rumdl config --defaults` command shows only the default configuration values, useful for understanding what the built-in defaults are.
+The `rumdl config --defaults` command shows built-in defaults. Use `rumdl config --defaults --output toml` for a configuration you can copy. This output omits `enable` so rumdl uses the default
+rule set. An explicit `enable = []` starts with an empty rule set. This excerpt shows some global and MD013 defaults.
+
+```toml
+[global]
+disable = []
+exclude = []
+include = []
+respect-gitignore = true
+
+[MD013]
+line-length = 80
+code-blocks = true
+```
 
 ### Non-Defaults Only (`rumdl config --no-defaults`)
 
@@ -1269,23 +1282,6 @@ style = "asterisk"                     [from project config]
 ```
 
 This helps you quickly identify what customizations you've made to the default configuration.
-
-The `--defaults` flag prints only the default configuration as TOML, suitable for copy-paste or reference:
-
-```toml
-[global]
-enable = []
-disable = []
-exclude = []
-include = []
-respect_gitignore = true
-force_exclude = false  # Set to true to exclude files even when explicitly specified
-
-[MD013]
-line_length = 80
-code_blocks = true
-...
-```
 
 ## Output Style
 

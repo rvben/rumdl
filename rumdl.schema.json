@@ -15,7 +15,6 @@
       "description": "Global configuration options",
       "$ref": "#/$defs/GlobalConfig",
       "default": {
-        "enable": [],
         "disable": [],
         "exclude": [],
         "include": [],
@@ -32,7 +31,7 @@
       }
     },
     "per-file-ignores": {
-      "description": "Per-file rule ignores: maps file patterns to lists of rules to ignore.\nPatterns are relative to the project root; a leading `~/` expands to the\nhome directory and absolute paths are matched as written.\nExample: { \"README.md\": [\"MD033\"], \"docs/**/*.md\": [\"MD013\"] }",
+      "description": "Per-file rule ignores: maps file patterns to lists of rules to ignore.\nPatterns are relative to the project root; a leading `~/` expands to the\nhome directory and absolute paths are matched as written.\n\n```toml\n[per-file-ignores]\n\"README.md\" = [\"MD033\"]\n\"docs/**/*.md\" = [\"MD013\"]\n```",
       "type": "object",
       "additionalProperties": {
         "type": "array",
@@ -43,7 +42,7 @@
       "default": {}
     },
     "per-file-flavor": {
-      "description": "Per-file flavor overrides: maps file patterns to Markdown flavors.\nPatterns are relative to the project root; a leading `~/` expands to the\nhome directory and absolute paths are matched as written.\nExample: { \"docs/**/*.md\": MkDocs, \"**/*.mdx\": MDX }\nUses IndexMap to preserve config file order for \"first match wins\" semantics",
+      "description": "Per-file flavor overrides: maps file patterns to Markdown flavors.\nPatterns are relative to the project root; a leading `~/` expands to the\nhome directory and absolute paths are matched as written.\nThe first matching pattern wins.\n\n```toml\n[per-file-flavor]\n\"docs/**/*.md\" = \"mkdocs\"\n\"**/*.mdx\" = \"mdx\"\n```",
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/MarkdownFlavor"
@@ -71,12 +70,11 @@
       }
     },
     "enable": {
-      "description": "Enabled rules",
+      "description": "Rules to enable exclusively. Omit this setting to use the default rules.\nAn explicitly empty list selects an empty base rule set.",
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "default": []
+      }
     },
     "disable": {
       "description": "Disabled rules",
@@ -1365,12 +1363,11 @@
       "type": "object",
       "properties": {
         "enable": {
-          "description": "Enabled rules",
+          "description": "Rules to enable exclusively. Omit this setting to use the default rules.\nAn explicitly empty list selects an empty base rule set.",
           "type": "array",
           "items": {
             "type": "string"
-          },
-          "default": []
+          }
         },
         "disable": {
           "description": "Disabled rules",

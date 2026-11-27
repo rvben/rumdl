@@ -1775,16 +1775,8 @@ exclude = ["docs/temp"]
     );
     // Should not mention .rumdl.toml
     assert!(!stdout.contains(".rumdl.toml"), "Output should not mention .rumdl.toml");
-    // Should contain a known default (e.g., enable = [])
-    assert!(
-        stdout.contains("enable = ["),
-        "Output should contain default enable = []"
-    );
-    // Should NOT contain the custom value from .rumdl.toml
-    assert!(
-        !stdout.contains("enable = [\"MD013\"]"),
-        "Output should not contain custom config values from .rumdl.toml"
-    );
+    assert!(stdout.lines().any(|line| line.starts_with("disable = []")));
+    assert!(!stdout.lines().any(|line| line.starts_with("enable =")));
     // Output is NOT valid TOML (annotated), so do not parse as TOML
 }
 
@@ -1828,29 +1820,9 @@ exclude = ["docs/temp"]
     );
     // Should not mention .rumdl.toml
     assert!(!stdout.contains(".rumdl.toml"), "Output should not mention .rumdl.toml");
-    // Should contain a known default (e.g., enable = [])
-    assert!(
-        stdout.contains("enable = ["),
-        "Output should contain default enable = []"
-    );
-    // Should NOT contain the custom value from .rumdl.toml
-    assert!(
-        !stdout.contains("enable = [\"MD013\"]"),
-        "Output should not contain custom config values from .rumdl.toml"
-    );
-    // Output should be valid TOML (parse all [section] blocks)
-    let mut current = String::new();
-    for line in stdout.lines() {
-        if line.starts_with('[') && !current.is_empty() {
-            toml::from_str::<Value>(&current).expect("Section is not valid TOML");
-            current.clear();
-        }
-        current.push_str(line);
-        current.push('\n');
-    }
-    if !current.trim().is_empty() {
-        toml::from_str::<Value>(&current).expect("Section is not valid TOML");
-    }
+    let config: Value = toml::from_str(&stdout).expect("defaults must be valid TOML");
+    assert!(config["global"]["disable"].as_array().is_some_and(Vec::is_empty));
+    assert!(config["global"].get("enable").is_none());
 }
 
 #[test]

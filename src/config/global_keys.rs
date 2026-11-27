@@ -90,6 +90,7 @@ pub fn read_global_key(
     };
 
     Some(match norm_key {
+        "enable" if !effective.has_enable_list() => GlobalKeyValue::Unset,
         "enable" => strings(&effective.enable, &sourced.enable),
         "disable" => strings(&effective.disable, &sourced.disable),
         "include" => strings(&effective.include, &sourced.include),

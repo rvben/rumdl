@@ -405,12 +405,9 @@ fn handle_config_display(
 
     // Handle output format (toml, json, or smart output)
     match output.as_deref() {
-        Some("toml") => {
-            if defaults {
-                // For defaults with TOML output, generate a complete default config
+        Some(format @ ("toml" | "json")) => {
+            let config_to_print = if defaults {
                 let mut default_config = rumdl_config::Config::default();
-
-                // Add all rule default configurations
                 for rule in &all_rules_reg {
                     if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section() {
                         let rule_config = rumdl_config::RuleConfig {
@@ -420,78 +417,21 @@ fn handle_config_display(
                         default_config.rules.insert(rule_name.to_uppercase(), rule_config);
                     }
                 }
-
-                match toml::to_string_pretty(&default_config) {
-                    Ok(s) => println!("{s}"),
-                    Err(e) => {
-                        eprintln!("Failed to serialize config to TOML: {e}");
-                        exit::tool_error();
-                    }
-                }
-            } else if no_defaults {
-                // For --no-defaults with TOML output, filter to non-defaults
-                let filtered_sourced = filter_sourced_config_to_non_defaults(&final_sourced_to_print);
-                let config_to_print: rumdl_config::Config = filtered_sourced.into_validated_unchecked().into();
-                match toml::to_string_pretty(&config_to_print) {
-                    Ok(s) => println!("{s}"),
-                    Err(e) => {
-                        eprintln!("Failed to serialize config to TOML: {e}");
-                        exit::tool_error();
-                    }
-                }
+                default_config
             } else {
-                let config_to_print: rumdl_config::Config = final_sourced_to_print.into_validated_unchecked().into();
-                match toml::to_string_pretty(&config_to_print) {
-                    Ok(s) => println!("{s}"),
-                    Err(e) => {
-                        eprintln!("Failed to serialize config to TOML: {e}");
-                        exit::tool_error();
-                    }
-                }
-            }
-        }
-        Some("json") => {
-            if defaults {
-                // For defaults with JSON output, generate a complete default config
-                let mut default_config = rumdl_config::Config::default();
+                let sourced = if no_defaults {
+                    filter_sourced_config_to_non_defaults(&final_sourced_to_print)
+                } else {
+                    final_sourced_to_print
+                };
+                sourced.into_validated_unchecked().into()
+            };
 
-                // Add all rule default configurations
-                for rule in &all_rules_reg {
-                    if let Some((rule_name, toml::Value::Table(table))) = rule.default_config_section() {
-                        let rule_config = rumdl_config::RuleConfig {
-                            severity: None,
-                            values: table.into_iter().collect(),
-                        };
-                        default_config.rules.insert(rule_name.to_uppercase(), rule_config);
-                    }
-                }
-
-                match serde_json::to_string_pretty(&default_config) {
-                    Ok(s) => println!("{s}"),
-                    Err(e) => {
-                        eprintln!("Failed to serialize config to JSON: {e}");
-                        exit::tool_error();
-                    }
-                }
-            } else if no_defaults {
-                // For --no-defaults with JSON output, filter to non-defaults
-                let filtered_sourced = filter_sourced_config_to_non_defaults(&final_sourced_to_print);
-                let config_to_print: rumdl_config::Config = filtered_sourced.into_validated_unchecked().into();
-                match serde_json::to_string_pretty(&config_to_print) {
-                    Ok(s) => println!("{s}"),
-                    Err(e) => {
-                        eprintln!("Failed to serialize config to JSON: {e}");
-                        exit::tool_error();
-                    }
-                }
-            } else {
-                let config_to_print: rumdl_config::Config = final_sourced_to_print.into_validated_unchecked().into();
-                match serde_json::to_string_pretty(&config_to_print) {
-                    Ok(s) => println!("{s}"),
-                    Err(e) => {
-                        eprintln!("Failed to serialize config to JSON: {e}");
-                        exit::tool_error();
-                    }
+            match serialize_config(&config_to_print, format) {
+                Ok(text) => println!("{text}"),
+                Err(error) => {
+                    eprintln!("Failed to serialize config to {format}: {error}");
+                    exit::tool_error();
                 }
             }
         }
@@ -515,6 +455,35 @@ fn handle_config_display(
                 );
             }
         }
+    }
+}
+
+/// Serialize a config without turning an unset enable list into an explicit one.
+fn serialize_config(config: &rumdl_config::Config, format: &str) -> Result<String, String> {
+    if format == "json" {
+        let mut document = serde_json::to_value(config).map_err(|error| error.to_string())?;
+        if !config.global.has_enable_list() {
+            document["global"]
+                .as_object_mut()
+                .expect("global config is an object")
+                .shift_remove("enable");
+        }
+        serde_json::to_string_pretty(&document).map_err(|error| error.to_string())
+    } else {
+        let text = toml::to_string_pretty(config).map_err(|error| error.to_string())?;
+        if config.global.has_enable_list() {
+            return Ok(text);
+        }
+
+        // Keep table order: per-file flavor selects the first matching pattern.
+        let mut document = text
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|error| error.to_string())?;
+        document["global"]
+            .as_table_mut()
+            .expect("global config is a table")
+            .remove("enable");
+        Ok(document.to_string())
     }
 }
 

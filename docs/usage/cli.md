@@ -326,6 +326,11 @@ rumdl config --defaults          # Show default values only
 rumdl config --no-defaults       # Show non-default values only
 ```
 
+To copy the defaults into a configuration file, use `rumdl config --defaults
+--output toml`. The output omits `enable` so rumdl uses its default rule set.
+An explicit `enable = []` starts with an empty rule set. Use `extend-enable` to add rules
+to the default set.
+
 ### `server`
 
 Start the LSP server.

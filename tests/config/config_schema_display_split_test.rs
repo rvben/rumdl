@@ -186,7 +186,7 @@ fn the_published_defaults_load_back_without_warnings() {
 
     let dir = tempdir().unwrap();
     fs::write(dir.path().join(".rumdl.toml"), &defaults).unwrap();
-    fs::write(dir.path().join("test.md"), "# Title\n\nBody text.\n").unwrap();
+    fs::write(dir.path().join("test.md"), "# Title\n\nTrailing spaces.   \n").unwrap();
 
     let output = Command::new(rumdl_bin())
         .current_dir(dir.path())
@@ -198,6 +198,129 @@ fn the_published_defaults_load_back_without_warnings() {
         assert!(
             !stderr.contains(complaint),
             "rumdl rejects its own published defaults with a `{complaint}` warning:\n{stderr}"
+        );
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}\n{stderr}");
+    assert!(
+        stdout.contains("MD009"),
+        "the published defaults disabled MD009: {stdout}"
+    );
+
+    fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = []\n").unwrap();
+    let output = Command::new(rumdl_bin())
+        .current_dir(dir.path())
+        .args(["check", "--no-cache", "test.md"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "an explicit empty enable list must disable MD009"
+    );
+}
+
+#[test]
+fn config_display_distinguishes_unset_enable_from_an_empty_list() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(".rumdl.toml");
+    for (input, explicit) in [("[global]\n", false), ("[global]\nenable = []\n", true)] {
+        fs::write(&path, input).unwrap();
+        let run = |args: &[&str]| -> String {
+            let output = Command::new(rumdl_bin())
+                .current_dir(dir.path())
+                .arg("config")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+
+        let text = run(&[]);
+        assert_eq!(text.lines().any(|line| line.starts_with("enable = []")), explicit);
+        let json: serde_json::Value = serde_json::from_str(&run(&["--output", "json"])).unwrap();
+        let expected_json = explicit.then(|| serde_json::json!([]));
+        assert_eq!(json["global"].get("enable"), expected_json.as_ref());
+        let toml: toml::Value = toml::from_str(&run(&["--no-defaults", "--output", "toml"])).unwrap();
+        assert_eq!(toml["global"].get("enable").is_some(), explicit);
+        let queried = run(&["get", "global.enable"]);
+        assert!(queried.starts_with(if explicit {
+            "global.enable = []"
+        } else {
+            "global.enable = <unset> [no default]"
+        }));
+    }
+    let json = Command::new(rumdl_bin())
+        .args(["config", "--defaults", "--output", "json"])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert!(json["global"].get("enable").is_none());
+}
+
+#[test]
+fn enable_has_no_schema_default() {
+    let schema = rumdl_lib::config::config_schema_json();
+    for properties in [&schema["properties"], &schema["$defs"]["GlobalConfig"]["properties"]] {
+        assert_eq!(properties["enable"]["type"], "array");
+        assert!(properties["enable"].get("default").is_none());
+    }
+    let global_default = &schema["properties"]["global"]["default"];
+    assert_eq!(global_default["disable"], serde_json::json!([]));
+    assert!(global_default.get("enable").is_none());
+}
+
+#[test]
+fn per_file_examples_from_the_schema_load_as_toml() {
+    let schema = rumdl_lib::config::config_schema_json();
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(".rumdl.toml");
+    let mut examples = String::new();
+    for key in ["per-file-ignores", "per-file-flavor"] {
+        let description = schema["properties"][key]["description"].as_str().unwrap();
+        let example = description
+            .split_once("```toml\n")
+            .and_then(|(_, fenced)| fenced.split_once("\n```"))
+            .unwrap_or_else(|| panic!("{key} should have a fenced TOML example"));
+        examples.push_str(example.0);
+        examples.push_str("\n\n");
+    }
+    fs::write(&path, examples).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(path.to_str(), None, false).unwrap();
+    assert_eq!(sourced.per_file_ignores.value["README.md"], ["MD033"]);
+    assert_eq!(sourced.per_file_ignores.value["docs/**/*.md"], ["MD013"]);
+    assert_eq!(sourced.per_file_flavor.value["docs/**/*.md"].to_string(), "mkdocs");
+    assert_eq!(sourced.per_file_flavor.value["**/*.mdx"].to_string(), "mdx");
+}
+
+#[test]
+fn config_export_preserves_first_match_flavor_order() {
+    let dir = tempdir().unwrap();
+    let config = "[per-file-flavor]\n\"docs/legacy/**\" = \"standard\"\n\"docs/**\" = \"mkdocs\"\n";
+    fs::write(dir.path().join(".rumdl.toml"), config).unwrap();
+    for format in ["json", "toml"] {
+        let output = Command::new(rumdl_bin())
+            .current_dir(dir.path())
+            .args(["config", "--output", format])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let specific = stdout.find("\"docs/legacy/**\"").unwrap();
+        let broad = stdout.find("\"docs/**\"").unwrap();
+        assert!(
+            specific < broad,
+            "{format} reordered the overlapping patterns:\n{stdout}"
         );
     }
 }

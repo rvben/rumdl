@@ -83,6 +83,12 @@ use crate::rule_config_serde::{is_nullable_sentinel, is_sentinel};
 pub fn config_schema_json() -> Value {
     let mut schema = serde_json::to_value(schemars::schema_for!(Config)).expect("the Config schema serializes");
 
+    // The serialized GlobalConfig default uses an empty backing vector for
+    // enable. A config with that key present selects an empty base rule set.
+    if let Some(Value::Object(global_default)) = schema.pointer_mut("/properties/global/default") {
+        global_default.shift_remove("enable");
+    }
+
     let root = schema.as_object_mut().expect("schemars emits an object for Config");
 
     // Rule sections arrive through the flatten map, so any root key that is not

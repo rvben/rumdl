@@ -587,12 +587,14 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_r
     let root = sourced.project_root.as_deref();
     let mut all_lines = Vec::new();
     // [global] section
-    let global_lines = vec![
-        ("[global]".to_string(), String::new()),
-        (
+    let mut global_lines = vec![("[global]".to_string(), String::new())];
+    if g.enable.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
             format!("enable = {:?}", g.enable.value),
             provenance_label(&g.enable, root),
-        ),
+        ));
+    }
+    global_lines.extend([
         (
             format!("disable = {:?}", g.disable.value),
             provenance_label(&g.disable, root),
@@ -613,10 +615,9 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_r
             format!("editorconfig = {}", g.editorconfig.value),
             provenance_label(&g.editorconfig, root),
         ),
-    ];
+    ]);
 
     // Add flavor if it's set
-    let mut global_lines = global_lines;
     global_lines.push((
         format!("flavor = \"{}\"", g.flavor.value),
         format!("[from {}]", format_provenance(g.flavor.source)),

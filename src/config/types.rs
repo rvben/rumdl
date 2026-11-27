@@ -71,15 +71,25 @@ pub struct Config {
     /// Per-file rule ignores: maps file patterns to lists of rules to ignore.
     /// Patterns are relative to the project root; a leading `~/` expands to the
     /// home directory and absolute paths are matched as written.
-    /// Example: { "README.md": ["MD033"], "docs/**/*.md": ["MD013"] }
+    ///
+    /// ```toml
+    /// [per-file-ignores]
+    /// "README.md" = ["MD033"]
+    /// "docs/**/*.md" = ["MD013"]
+    /// ```
     #[serde(default, rename = "per-file-ignores")]
     pub per_file_ignores: BTreeMap<String, Vec<String>>,
 
     /// Per-file flavor overrides: maps file patterns to Markdown flavors.
     /// Patterns are relative to the project root; a leading `~/` expands to the
     /// home directory and absolute paths are matched as written.
-    /// Example: { "docs/**/*.md": MkDocs, "**/*.mdx": MDX }
-    /// Uses IndexMap to preserve config file order for "first match wins" semantics
+    /// The first matching pattern wins.
+    ///
+    /// ```toml
+    /// [per-file-flavor]
+    /// "docs/**/*.md" = "mkdocs"
+    /// "**/*.mdx" = "mdx"
+    /// ```
     #[serde(default, rename = "per-file-flavor")]
     #[schemars(with = "BTreeMap<String, MarkdownFlavor>")]
     pub per_file_flavor: IndexMap<String, MarkdownFlavor>,
@@ -649,8 +659,10 @@ impl PerFileFlavorCache {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct GlobalConfig {
-    /// Enabled rules
+    /// Rules to enable exclusively. Omit this setting to use the default rules.
+    /// An explicitly empty list selects an empty base rule set.
     #[serde(default)]
+    #[schemars(skip_serializing_if = "Vec::is_empty")]
     pub enable: Vec<String>,
 
     /// Disabled rules
@@ -784,6 +796,11 @@ impl Default for GlobalConfig {
 }
 
 impl GlobalConfig {
+    /// Whether the configuration selects an explicit base rule set.
+    pub fn has_enable_list(&self) -> bool {
+        self.enable_is_explicit || !self.enable.is_empty()
+    }
+
     /// Canonicalize every rule-name list in this `GlobalConfig`.
     ///
     /// Rewrites `enable`, `disable`, `extend_enable`, `extend_disable`, `fixable`,

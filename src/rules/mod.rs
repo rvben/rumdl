@@ -902,7 +902,7 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
     }
 
     // If 'enable' is specified, only use those rules
-    if !global_config.enable.is_empty() || global_config.enable_is_explicit {
+    if global_config.has_enable_list() {
         if contains_all_keyword(&global_config.enable) || extend_enable_all {
             // enable: ["ALL"] or extend-enable: ["ALL"] → all rules including opt-in
             for rule in rules {
